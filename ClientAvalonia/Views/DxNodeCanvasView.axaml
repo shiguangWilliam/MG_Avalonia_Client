@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             xmlns:views="using:ClientAvalonia.Views"
+             x:Class="ClientAvalonia.Views.DxNodeCanvasView"
+             x:DataType="vm:UiNodeViewModel"
+             Width="{Binding Width}"
+             Height="{Binding LayoutCanvasHeight}"
+             ClipToBounds="False">
+  <!-- ItemsControl must fill the node bounds; as a bare Canvas child it measures to 0 and clips all children. -->
+  <ItemsControl ItemsSource="{Binding Children}"
+                Width="{Binding Width}"
+                Height="{Binding LayoutCanvasHeight}"
+                Background="Transparent">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <Canvas />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.Styles>
+      <Style Selector="ItemsControl > ContentPresenter">
+        <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}" />
+        <Setter Property="Canvas.Top" Value="{Binding CanvasTop}" />
+        <Setter Property="ZIndex" Value="{Binding ZIndex}" />
+        <Setter Property="IsVisible" Value="{Binding IsVisible}" />
+      </Style>
+    </ItemsControl.Styles>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate DataType="vm:UiNodeViewModel">
+        <ContentControl Content="{Binding}">
+          <ContentControl.ContentTemplate>
+            <views:DxNodeTemplateSelector />
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

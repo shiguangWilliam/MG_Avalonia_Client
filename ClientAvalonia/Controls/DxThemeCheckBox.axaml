@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Controls.DxThemeCheckBox"
+             x:DataType="vm:UiNodeViewModel"
+             Background="Transparent"
+             MinWidth="{Binding Width}"
+             MinHeight="{Binding Height}"
+             IsVisible="{Binding IsVisible}"
+             IsEnabled="{Binding IsEnabled}"
+             ToolTip.Tip="{Binding ToolTip}"
+             Cursor="Hand"
+             Tapped="OnTapped">
+  <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+    <Panel Width="22" Height="22" VerticalAlignment="Top" Margin="0,1,0,0">
+      <Panel IsVisible="{Binding IsChecked, Converter={x:Static BoolConverters.Not}}">
+        <Image Source="{Binding CheckBoxClearImage}"
+               Stretch="Uniform"
+               IsHitTestVisible="False"
+               IsVisible="{Binding CheckBoxClearImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <Border BorderBrush="#FFA648"
+                BorderThickness="1"
+                Background="#14100C"
+                CornerRadius="2"
+                IsVisible="{Binding CheckBoxClearImage, Converter={x:Static ObjectConverters.IsNull}}" />
+      </Panel>
+      <Panel IsVisible="{Binding IsChecked}">
+        <Image Source="{Binding CheckBoxCheckedImage}"
+               Stretch="Uniform"
+               IsHitTestVisible="False"
+               IsVisible="{Binding CheckBoxCheckedImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <Border BorderBrush="#FFA648"
+                BorderThickness="1"
+                Background="#14100C"
+                CornerRadius="2"
+                IsVisible="{Binding CheckBoxCheckedImage, Converter={x:Static ObjectConverters.IsNull}}">
+          <TextBlock Text="✓"
+                     Foreground="#FFA648"
+                     FontSize="14"
+                     FontWeight="Bold"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+        </Border>
+      </Panel>
+    </Panel>
+    <TextBlock Text="{Binding Text}"
+               Foreground="{Binding ForegroundBrush}"
+               FontFamily="{Binding LabelFontFamily}"
+               FontSize="{Binding FontSize}"
+               MaxWidth="{Binding ContentMaxWidth}"
+               TextWrapping="Wrap"
+               VerticalAlignment="Center"
+               LineHeight="18" />
+  </StackPanel>
+</UserControl>

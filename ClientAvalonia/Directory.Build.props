@@ -1,0 +1,25 @@
+<Project>
+  <!-- 
+    Override the root Directory.Build.props engine-specific settings.
+    The Avalonia client uses standard Debug/Release configurations,
+    not the engine-variant configurations used by the XNA/DX/GL client.
+  -->
+  <PropertyGroup>
+    <!-- Reset configurations to standard Debug/Release -->
+    <Configurations>Debug;Release</Configurations>
+    <!-- Clear engine selection (no XNA/DX/GL rendering engine) -->
+    <Engine />
+    <!-- Clear engine-specific constants -->
+    <DefineConstants />
+    <!-- Reset output path: bin/(Debug|Release)/net8.0 -->
+    <OutputPath />
+    <IntermediateOutputPath />
+    <ArtifactsPivots />
+    <!-- Disable WinForms (Avalonia uses its own windowing) -->
+    <UseWindowsForms>false</UseWindowsForms>
+    <!-- Avoid GitVersion failure when building ClientAvalonia in isolation -->
+    <GitVersion_MsBuildTask_Disabled>true</GitVersion_MsBuildTask_Disabled>
+    <DisableGitVersionTask>true</DisableGitVersionTask>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

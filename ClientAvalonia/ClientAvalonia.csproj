@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DisableGitVersionTask>true</DisableGitVersionTask>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <Nullable>enable</Nullable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <Description>CnCNet Avalonia UI Client</Description>
+    <AssemblyTitle>CnCNet Client (Avalonia)</AssemblyTitle>
+    <RootNamespace>ClientAvalonia</RootNamespace>
+    <ApplicationIcon>..\DXMainClient\clienticon.ico</ApplicationIcon>
+    <AssemblyName>ClientAvalonia</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <!-- Ensures ClientUpdater HTTP deps are copied on publish -->
+    <PackageReference Include="Microsoft.AspNet.WebApi.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClientCore\ClientCore.csproj" />
+    <ProjectReference Include="..\ClientUpdater\ClientUpdater.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\DXMainClient\Resources\DTA\MainMenu.ini" Link="Resources\DTA\MainMenu.ini" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

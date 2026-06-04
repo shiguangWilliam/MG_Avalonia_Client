@@ -1,0 +1,4 @@
+<Project>
+  <!-- Override GitVersion GetVersion for standalone Avalonia builds -->
+  <Target Name="GetVersion" Condition="'$(MSBuildProjectName)' == 'ClientAvalonia'" />
+</Project>

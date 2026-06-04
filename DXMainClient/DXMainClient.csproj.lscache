@@ -1,0 +1,278 @@
+version=1
+
+# This file caches language service data to improve the performance of C# Dev Kit.
+# It is not intended for manual editing. It can safely be deleted and will be
+# regenerated automatically. For more information, see https://aka.ms/lscache
+#
+# To control where cache files are stored, use the following VS Code setting:
+#   "dotnet.projectsystem.cacheInProjectFolder": true
+
+[project]
+language=C#
+primary
+lastDtbSucceeded
+
+[sliceDimensions]
+TargetFramework=net8.0
+
+[properties]
+AssemblyName=clientogl
+CommandLineArgsForDesignTimeEvaluation=-langversion:14.0 -define:;DEBUG;GL;TRACE
+CompilerGeneratedFilesOutputPath=
+MaxSupportedLangVersion=12.0
+ProjectAssetsFile=<PATH>obj/project.assets.json
+RootNamespace=DTAClient
+RunAnalyzers=
+RunAnalyzersDuringLiveAnalysis=
+SolutionPath=<PATH>../DXClient.slnx
+TargetFrameworkIdentifier=.NETCoreApp
+TargetPath=<PATH>bin/Debug/UniversalGL/net8.0/clientogl.dll
+TargetRefPath=<PATH>obj/Debug/UniversalGL/net8.0/ref/clientogl.dll
+TemporaryDependencyNodeTargetIdentifier=net8.0
+
+[commandLineArguments]
+/noconfig
+/unsafe+
+/checked-
+/nowarn:1701,1702,WFAC010,WFO0003,1701,1702
+/fullpaths
+/nostdlib+
+/platform:AnyCPU
+/errorreport:prompt
+/warn:8
+/define:DEBUG;GL;TRACE;UNIVERSALGLDEBUG;NET;NET8_0;NETCOREAPP;NET5_0_OR_GREATER;NET6_0_OR_GREATER;NET7_0_OR_GREATER;NET8_0_OR_GREATER;NETCOREAPP1_0_OR_GREATER;NETCOREAPP1_1_OR_GREATER;NETCOREAPP2_0_OR_GREATER;NETCOREAPP2_1_OR_GREATER;NETCOREAPP2_2_OR_GREATER;NETCOREAPP3_0_OR_GREATER;NETCOREAPP3_1_OR_GREATER;DEVELOPMENT_BUILD
+/highentropyva+
+/debug-
+/debug:portable
+/filealign:512
+/out:obj\Debug\UniversalGL\net8.0\clientogl.dll
+/refout:obj\Debug\UniversalGL\net8.0\refint\clientogl.dll
+/target:exe
+/warnaserror-
+/utf8output
+/win32icon:clienticon.ico
+/win32manifest:app.SystemAware.manifest
+/deterministic+
+/langversion:14.0
+/warnaserror+:NU1605,SYSLIB0011
+
+[sourceFiles]
+AdminRestarter.cs
+Domain/
+ DirectDrawCompatibilityChecker.cs
+ DirectDrawWrapper.cs
+ DirectDrawWrapperManager.cs
+ DiscordHandler.cs
+ FinalSunSettings.cs
+ MainClientConstants.cs
+ Mission.cs
+ Multiplayer/
+  AllianceHolder.cs
+  CnCNet/
+   CnCNetGame.cs
+   CnCNetPlayerCountTask.cs
+   CnCNetTunnel.cs
+   ExtendedWebClient.cs
+   GameCollection.cs
+   HostedCnCNetGame.cs
+   MapEventArgs.cs
+   MapSharer.cs
+   NameValidator.cs
+   SHA1EventArgs.cs
+   TunnelHandler.cs
+  CoopHouseInfo.cs
+  CoopMapInfo.cs
+  CustomMapCache.cs
+  GameMode.cs
+  GameModeMap.cs
+  GameModeMapCollection.cs
+  GameOptionPresets.cs
+  GenericHostedGame.cs
+  LAN/
+   ClientIntCommandHandler.cs
+   ClientNoParamCommandHandler.cs
+   ClientStringCommandHandler.cs
+   HostedLANGame.cs
+   LANClientCommandHandler.cs
+   LANColor.cs
+   LANLobbyUser.cs
+   LANPlayerInfo.cs
+   LANServerCommandHandler.cs
+   NetworkMessageEventArgs.cs
+   ServerNoParamCommandHandler.cs
+   ServerStringCommandHandler.cs
+  Map.cs
+  MapChangeEventArgs.cs
+  MapFileEventArgs.cs
+  MapFileWatcher.cs
+  MapLoader.cs
+  MapPreviewExtractor.cs
+  MultiplayerColor.cs
+  PlayerExtraOptions.cs
+  PlayerHouseInfo.cs
+  PlayerInfo.cs
+  SavedGamePlayer.cs
+  TeamStartMapping.cs
+  TeamStartMappingPreset.cs
+ SavedGame.cs
+DXGUI/Campaign/
+ CampaignCheckBox.cs
+ CampaignDropDown.cs
+ CampaignSelector.cs
+ CheaterWindow.cs
+DXGUI/
+ GameClass.cs
+ Generic/
+  DropDownDataWriteMode.cs
+  ExtrasWindow.cs
+  GameInProgressWindow.cs
+  GameLoadingWindow.cs
+  GameSessionCheckBox.cs
+  GameSessionDropDown.cs
+  LoadingScreen.cs
+  MainMenu.cs
+  ManualUpdateQueryWindow.cs
+  OptionPanels/
+   AudioOptionsPanel.cs
+   CnCNetOptionsPanel.cs
+   ComponentsPanel.cs
+   DisplayOptionsPanel.cs
+   GameOptionsPanel.cs
+   UpdaterOptionsPanel.cs
+  OptionsWindow.cs
+  PrivacyNotification.cs
+  StatisticsWindow.cs
+  TopBar.cs
+  UpdateQueryWindow.cs
+  UpdateWindow.cs
+  URLHandler.cs
+ IGameSessionSetting.cs
+ IMessageView.cs
+ ISwitchable.cs
+ Multiplayer/
+  ChatListBox.cs
+  CnCNet/
+   ChoiceNotificationBox.cs
+   CnCNetGameLoadingLobby.cs
+   CnCNetLobby.cs
+   CnCNetLoginWindow.cs
+   GameCreationEventArgs.cs
+   GameCreationWindow.cs
+   GlobalContextMenu.cs
+   GlobalContextMenuData.cs
+   LoadOrSaveGameOptionPresetWindow.cs
+   MapSharingConfirmationPanel.cs
+   PasswordRequestWindow.cs
+   PrivateMessageNotificationBox.cs
+   PrivateMessagingPanel.cs
+   PrivateMessagingWindow.cs
+   RecentPlayerTable.cs
+   RecentPlayerTableRightClickEventArgs.cs
+   TunnelListBox.cs
+   TunnelSelectionWindow.cs
+  GameFiltersPanel.cs
+  GameInformationPanel.cs
+  GameListBox.cs
+  GameLoadingLobbyBase.cs
+  GameLobby/
+   ChatBoxCommand.cs
+   CnCNetGameLobby.cs
+   CommandHandlers/
+    CommandHandlerBase.cs
+    IntCommandHandler.cs
+    IntNotificationHandler.cs
+    NoParamCommandHandler.cs
+    NotificationHandler.cs
+    StringCommandHandler.cs
+   CoopBriefingBox.cs
+   GameHostInactiveChecker.cs
+   GameLaunchButton.cs
+   GameLeftEventArgs.cs
+   GameLobbyBase.cs
+   GameLobbyCheckBox.cs
+   GameLobbyDropDown.cs
+   GameLobbySettingsEventArgs.cs
+   GameLobbySettingsWindow.cs
+   GameModeMapFilter.cs
+   GameType.cs
+   LANGameLobby.cs
+   MapCodeHelper.cs
+   MapPreviewBox.cs
+   MultiplayerGameLobby.cs
+   PlayerLocationIndicator.cs
+   SkirmishLobby.cs
+  LANGameCreationWindow.cs
+  LANGameLoadingLobby.cs
+  LANLobby.cs
+  LANLobbyBroadcastManager.cs
+  LANLobbyBroadcastMessageReceivedEventArgs.cs
+  LANMessageDeduplicator.cs
+  LANPlayerManager.cs
+  PlayerExtraOptionsPanel.cs
+  PlayerListBox.cs
+  TeamStartMappingPanel.cs
+  TeamStartMappingsPanel.cs
+obj/Debug/UniversalGL/net8.0/
+ .NETCoreApp,Version=v8.0.AssemblyAttributes.cs
+ DXMainClient.AssemblyInfo.cs
+Online/
+ Channel.cs
+ ChannelUser.cs
+ ChatMessage.cs
+ CnCNetGameCheck.cs
+ CnCNetManager.cs
+ CnCNetUserData.cs
+ Connection.cs
+ EventArguments/
+  AttemptedServerEventArgs.cs
+  ChannelCTCPEventArgs.cs
+  ChannelEventArgs.cs
+  ChannelModeEventArgs.cs
+  ChannelTopicEventArgs.cs
+  CnCNetPrivateMessageEventArgs.cs
+  ConnectionLostEventArgs.cs
+  CTCPEventArgs.cs
+  FavoriteMapEventArgs.cs
+  GameOptionPresetEventArgs.cs
+  JoinUserEventArgs.cs
+  KickEventArgs.cs
+  MultiplayerNameRightClickedEventArgs.cs
+  PrivateCTCPEventArgs.cs
+  PrivateMessageEventArgs.cs
+  ServerMessageEventArgs.cs
+  UnreadMessageCountEventArgs.cs
+  UserAwayEventArgs.cs
+  UserListEventArgs.cs
+  WhoEventArgs.cs
+ FileHashCalculator.cs
+ IConnectionManager.cs
+ IRCColor.cs
+ IRCUser.cs
+ IUserCollection.cs
+ PrivateMessageHandler.cs
+ PrivateMessageUser.cs
+ QueuedMessage.cs
+ QueuedMessageType.cs
+ RecentPlayer.cs
+ Server.cs
+ SortedUserCollection.cs
+ UnsortedUserCollection.cs
+PreStartup.cs
+Program.cs
+Startup.cs
+
+[metadataReferences]
+../
+ ClientGUI/obj/Debug/UniversalGL/net8.0/ref/ClientGUI.dll
+ ClientUpdater/obj/Debug/UniversalGL/net8.0/ref/ClientUpdater.dll
+
+[analyzerReferences]
+../TranslationNotifierGenerator/bin/Debug/UniversalGL/netstandard2.0/TranslationNotifierGenerator.dll
+<DOTNET>/sdk/10.0.103/Sdks/Microsoft.NET.Sdk/analyzers/
+ Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll
+ Microsoft.CodeAnalysis.NetAnalyzers.dll
+
+[analyzerConfigFiles]
+../.editorconfig
+<DOTNET>/sdk/10.0.103/Sdks/Microsoft.NET.Sdk/analyzers/build/config/analysislevel_8_default.globalconfig
+obj/Debug/UniversalGL/net8.0/DXMainClient.GeneratedMSBuildEditorConfig.editorconfig

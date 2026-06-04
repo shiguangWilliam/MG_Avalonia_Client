@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Controls.DxTabButton"
+             x:DataType="vm:UiNodeViewModel"
+             Width="{Binding Width}"
+             Height="{Binding Height}"
+             IsVisible="{Binding IsVisible}"
+             Cursor="Hand">
+  <Button Background="Transparent"
+          BorderThickness="0"
+          Padding="0"
+          Command="{Binding ClickCommand}"
+          HorizontalAlignment="Stretch"
+          VerticalAlignment="Stretch">
+    <Border Background="#1E1812"
+            BorderBrush="#5A4632"
+            BorderThickness="1"
+            CornerRadius="4,4,0,0"
+            Padding="10,4"
+            Classes.selected="{Binding IsTabSelected}">
+      <Border.Styles>
+        <Style Selector="Border.selected">
+          <Setter Property="Background" Value="#3D2A18" />
+          <Setter Property="BorderBrush" Value="#FFA648" />
+        </Style>
+      </Border.Styles>
+      <TextBlock Text="{Binding Text}"
+                 Foreground="{Binding ForegroundBrush}"
+                 FontFamily="{Binding LabelFontFamily}"
+                 FontSize="12.5"
+                 FontWeight="SemiBold"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center" />
+    </Border>
+  </Button>
+</UserControl>

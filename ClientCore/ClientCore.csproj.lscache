@@ -1,0 +1,235 @@
+version=1
+
+# This file caches language service data to improve the performance of C# Dev Kit.
+# It is not intended for manual editing. It can safely be deleted and will be
+# regenerated automatically. For more information, see https://aka.ms/lscache
+#
+# To control where cache files are stored, use the following VS Code setting:
+#   "dotnet.projectsystem.cacheInProjectFolder": true
+
+[project]
+language=C#
+lastDtbSucceeded
+
+[sliceDimensions]
+TargetFramework=net48
+
+[properties]
+AssemblyName=ClientCore
+CommandLineArgsForDesignTimeEvaluation=-langversion:14.0 -define:;DEBUG;GL;TRACE
+CompilerGeneratedFilesOutputPath=
+MaxSupportedLangVersion=7.3
+ProjectAssetsFile=<PATH>obj/project.assets.json
+RootNamespace=ClientCore
+RunAnalyzers=
+RunAnalyzersDuringLiveAnalysis=
+SolutionPath=<PATH>../DXClient.slnx
+TargetFrameworkIdentifier=.NETFramework
+TargetPath=<PATH>bin/Debug/UniversalGL/net48/ClientCore.dll
+TargetRefPath=
+TemporaryDependencyNodeTargetIdentifier=net48
+
+[commandLineArguments]
+/noconfig
+/unsafe-
+/checked-
+/nowarn:1701,1702,1701,1702
+/fullpaths
+/nostdlib+
+/errorreport:prompt
+/warn:4
+/define:DEBUG;GL;TRACE;UNIVERSALGLDEBUG;NETFRAMEWORK;NET48;NET20_OR_GREATER;NET30_OR_GREATER;NET35_OR_GREATER;NET40_OR_GREATER;NET45_OR_GREATER;NET451_OR_GREATER;NET452_OR_GREATER;NET46_OR_GREATER;NET461_OR_GREATER;NET462_OR_GREATER;NET47_OR_GREATER;NET471_OR_GREATER;NET472_OR_GREATER;NET48_OR_GREATER
+/highentropyva+
+/debug-
+/debug:portable
+/filealign:512
+/out:obj\Debug\UniversalGL\net48\ClientCore.dll
+/subsystemversion:6.00
+/target:library
+/warnaserror-
+/utf8output
+/deterministic+
+/langversion:14.0
+/warnaserror+:NU1605
+
+[sourceFiles]
+CCIniFile.cs
+ClientConfiguration.cs
+Enums/
+ AllowPrivateMessagesFromEnum.cs
+ ClientType.cs
+ ClientTypeHelper.cs
+ SortDirection.cs
+Extensions/
+ ArrayExtensions.cs
+ EnumerableExtensions.cs
+ EnumExtensions.cs
+ FileExtensions.cs
+ IniFileExtensions.cs
+ StringExtensions.cs
+I18N/
+ Translation.cs
+ TranslationGameFile.cs
+INIProcessing/
+ IniPreprocessInfoStore.cs
+ IniPreprocessor.cs
+ PreprocessorBackgroundTask.cs
+LoadingScreenController.cs
+obj/Debug/UniversalGL/net48/
+ .NETFramework,Version=v4.8.AssemblyAttributes.cs
+ ClientCore.AssemblyInfo.cs
+OSVersion.cs
+PlatformShim/EncodingExt.cs
+ProcessLauncher.cs
+ProfanityFilter.cs
+ProgramConstants.cs
+SavedGameManager.cs
+Settings/
+ BoolSetting.cs
+ DoubleSetting.cs
+ IIniSetting.cs
+ INISetting.cs
+ IntRangeSetting.cs
+ IntSetting.cs
+ StringListSetting.cs
+ StringSetting.cs
+ UserINISettings.cs
+Statistics/
+ DataWriter.cs
+ GameParsers/LogFileStatisticsParser.cs
+ GenericMatchParser.cs
+ GenericStatisticsManager.cs
+ MatchStatistics.cs
+ PlayerStatistics.cs
+ StatisticsManager.cs
+
+[metadataReferences]
+<NETFXREF>/v4.8/
+ mscorlib.dll
+ System.Core.dll
+ System.Data.dll
+ System.dll
+ System.Drawing.dll
+ System.IO.Compression.dll
+ System.IO.Compression.FileSystem.dll
+ System.Numerics.dll
+ System.Runtime.Serialization.dll
+ System.Xml.dll
+ System.Xml.Linq.dll
+
+[analyzerReferences]
+../TranslationNotifierGenerator/bin/Debug/UniversalGL/netstandard2.0/TranslationNotifierGenerator.dll
+
+[analyzerConfigFiles]
+../.editorconfig
+obj/Debug/UniversalGL/net48/ClientCore.GeneratedMSBuildEditorConfig.editorconfig
+
+---
+
+[project]
+language=C#
+primary
+lastDtbSucceeded
+
+[sliceDimensions]
+TargetFramework=net8.0
+
+[properties]
+AssemblyName=ClientCore
+CommandLineArgsForDesignTimeEvaluation=-langversion:14.0 -define:;DEBUG;GL;TRACE
+CompilerGeneratedFilesOutputPath=
+MaxSupportedLangVersion=12.0
+ProjectAssetsFile=<PATH>obj/project.assets.json
+RootNamespace=ClientCore
+RunAnalyzers=
+RunAnalyzersDuringLiveAnalysis=
+SolutionPath=<PATH>../DXClient.slnx
+TargetFrameworkIdentifier=.NETCoreApp
+TargetPath=<PATH>bin/Debug/UniversalGL/net8.0/ClientCore.dll
+TargetRefPath=<PATH>obj/Debug/UniversalGL/net8.0/ref/ClientCore.dll
+TemporaryDependencyNodeTargetIdentifier=net8.0
+
+[commandLineArguments]
+/noconfig
+/unsafe-
+/checked-
+/nowarn:1701,1702,1701,1702
+/fullpaths
+/nostdlib+
+/errorreport:prompt
+/warn:8
+/define:DEBUG;GL;TRACE;UNIVERSALGLDEBUG;NET;NET8_0;NETCOREAPP;NET5_0_OR_GREATER;NET6_0_OR_GREATER;NET7_0_OR_GREATER;NET8_0_OR_GREATER;NETCOREAPP1_0_OR_GREATER;NETCOREAPP1_1_OR_GREATER;NETCOREAPP2_0_OR_GREATER;NETCOREAPP2_1_OR_GREATER;NETCOREAPP2_2_OR_GREATER;NETCOREAPP3_0_OR_GREATER;NETCOREAPP3_1_OR_GREATER
+/highentropyva+
+/debug-
+/debug:portable
+/filealign:512
+/out:obj\Debug\UniversalGL\net8.0\ClientCore.dll
+/refout:obj\Debug\UniversalGL\net8.0\refint\ClientCore.dll
+/target:library
+/warnaserror-
+/utf8output
+/deterministic+
+/langversion:14.0
+/warnaserror+:NU1605,SYSLIB0011
+
+[sourceFiles]
+CCIniFile.cs
+ClientConfiguration.cs
+Enums/
+ AllowPrivateMessagesFromEnum.cs
+ ClientType.cs
+ ClientTypeHelper.cs
+ SortDirection.cs
+Extensions/
+ ArrayExtensions.cs
+ EnumerableExtensions.cs
+ EnumExtensions.cs
+ FileExtensions.cs
+ IniFileExtensions.cs
+ StringExtensions.cs
+I18N/
+ Translation.cs
+ TranslationGameFile.cs
+INIProcessing/
+ IniPreprocessInfoStore.cs
+ IniPreprocessor.cs
+ PreprocessorBackgroundTask.cs
+LoadingScreenController.cs
+obj/Debug/UniversalGL/net8.0/
+ .NETCoreApp,Version=v8.0.AssemblyAttributes.cs
+ ClientCore.AssemblyInfo.cs
+OSVersion.cs
+PlatformShim/EncodingExt.cs
+ProcessLauncher.cs
+ProfanityFilter.cs
+ProgramConstants.cs
+SavedGameManager.cs
+Settings/
+ BoolSetting.cs
+ DoubleSetting.cs
+ IIniSetting.cs
+ INISetting.cs
+ IntRangeSetting.cs
+ IntSetting.cs
+ StringListSetting.cs
+ StringSetting.cs
+ UserINISettings.cs
+Statistics/
+ DataWriter.cs
+ GameParsers/LogFileStatisticsParser.cs
+ GenericMatchParser.cs
+ GenericStatisticsManager.cs
+ MatchStatistics.cs
+ PlayerStatistics.cs
+ StatisticsManager.cs
+
+[analyzerReferences]
+../TranslationNotifierGenerator/bin/Debug/UniversalGL/netstandard2.0/TranslationNotifierGenerator.dll
+<DOTNET>/sdk/10.0.103/Sdks/Microsoft.NET.Sdk/analyzers/
+ Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll
+ Microsoft.CodeAnalysis.NetAnalyzers.dll
+
+[analyzerConfigFiles]
+../.editorconfig
+<DOTNET>/sdk/10.0.103/Sdks/Microsoft.NET.Sdk/analyzers/build/config/analysislevel_8_default.globalconfig
+obj/Debug/UniversalGL/net8.0/ClientCore.GeneratedMSBuildEditorConfig.editorconfig

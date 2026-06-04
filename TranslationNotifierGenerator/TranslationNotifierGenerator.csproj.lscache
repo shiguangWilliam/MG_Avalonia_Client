@@ -1,0 +1,63 @@
+version=1
+
+# This file caches language service data to improve the performance of C# Dev Kit.
+# It is not intended for manual editing. It can safely be deleted and will be
+# regenerated automatically. For more information, see https://aka.ms/lscache
+#
+# To control where cache files are stored, use the following VS Code setting:
+#   "dotnet.projectsystem.cacheInProjectFolder": true
+
+[project]
+language=C#
+primary
+lastDtbSucceeded
+
+[sliceDimensions]
+TargetFramework=netstandard2.0
+
+[properties]
+AssemblyName=TranslationNotifierGenerator
+CommandLineArgsForDesignTimeEvaluation=-langversion:14.0 -define:;DEBUG;GL;TRACE
+CompilerGeneratedFilesOutputPath=
+MaxSupportedLangVersion=7.3
+ProjectAssetsFile=<PATH>obj/project.assets.json
+RootNamespace=TranslationNotifierGenerator
+RunAnalyzers=
+RunAnalyzersDuringLiveAnalysis=
+SolutionPath=<PATH>../DXClient.slnx
+TargetFrameworkIdentifier=.NETStandard
+TargetPath=<PATH>bin/Debug/UniversalGL/netstandard2.0/TranslationNotifierGenerator.dll
+TargetRefPath=
+TemporaryDependencyNodeTargetIdentifier=netstandard2.0
+
+[commandLineArguments]
+/noconfig
+/unsafe-
+/checked-
+/nowarn:1701,1702,1701,1702
+/fullpaths
+/nostdlib+
+/errorreport:prompt
+/define:DEBUG;GL;TRACE;UNIVERSALGLDEBUG;NETSTANDARD;NETSTANDARD2_0;NETSTANDARD1_0_OR_GREATER;NETSTANDARD1_1_OR_GREATER;NETSTANDARD1_2_OR_GREATER;NETSTANDARD1_3_OR_GREATER;NETSTANDARD1_4_OR_GREATER;NETSTANDARD1_5_OR_GREATER;NETSTANDARD1_6_OR_GREATER;NETSTANDARD2_0_OR_GREATER
+/highentropyva+
+/debug-
+/debug:portable
+/filealign:512
+/out:obj\Debug\UniversalGL\netstandard2.0\TranslationNotifierGenerator.dll
+/target:library
+/warnaserror-
+/utf8output
+/deterministic+
+/langversion:14.0
+/warnaserror+:NU1605
+
+[sourceFiles]
+obj/Debug/UniversalGL/netstandard2.0/
+ .NETStandard,Version=v2.0.AssemblyAttributes.cs
+ TranslationNotifierGenerator.AssemblyInfo.cs
+StringExtensions.cs
+TranslationNotifierGenerator.cs
+
+[analyzerConfigFiles]
+../.editorconfig
+obj/Debug/UniversalGL/netstandard2.0/TranslationNotifierGenerator.GeneratedMSBuildEditorConfig.editorconfig

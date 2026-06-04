@@ -1,0 +1,47 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- Core HUD palette -->
+  <SolidColorBrush x:Key="DxAccentBrush" Color="#FF8C32" />
+  <SolidColorBrush x:Key="DxAccentSoftBrush" Color="#FFB366" />
+  <SolidColorBrush x:Key="DxPanelOverlayBrush" Color="#80000000" />
+  <SolidColorBrush x:Key="DxTextPrimaryBrush" Color="#F2E6D8" />
+  <SolidColorBrush x:Key="DxTextMutedBrush" Color="#B8AA9A" />
+
+  <!-- Campaign chrome -->
+  <SolidColorBrush x:Key="DxCampaignSurfaceBrush" Color="#CC12100E" />
+  <SolidColorBrush x:Key="DxCampaignSurfaceElevatedBrush" Color="#E0181614" />
+  <SolidColorBrush x:Key="DxCampaignBorderBrush" Color="#6B4E2E" />
+  <SolidColorBrush x:Key="DxCampaignBorderGlowBrush" Color="#55FF8C32" />
+  <SolidColorBrush x:Key="DxCampaignHeaderBrush" Color="#FFD4A8" />
+  <SolidColorBrush x:Key="DxCampaignListHoverBrush" Color="#332A1E" />
+  <SolidColorBrush x:Key="DxCampaignListSelectedBrush" Color="#453018" />
+  <SolidColorBrush x:Key="DxCampaignListSelectedBorderBrush" Color="#FF8C32" />
+
+  <LinearGradientBrush x:Key="DxCampaignAccentGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#00FF8C32" Offset="0" />
+    <GradientStop Color="#CCFF8C32" Offset="0.35" />
+    <GradientStop Color="#FFFFA648" Offset="0.5" />
+    <GradientStop Color="#CCFF8C32" Offset="0.65" />
+    <GradientStop Color="#00FF8C32" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignSurfaceGradient" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Color="#F0181614" Offset="0" />
+    <GradientStop Color="#F00E0C0A" Offset="0.55" />
+    <GradientStop Color="#E8080706" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignPrimaryButtonGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#E8A040" Offset="0" />
+    <GradientStop Color="#FF8C32" Offset="0.5" />
+    <GradientStop Color="#D07028" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignPrimaryButtonHoverGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#FFB050" Offset="0" />
+    <GradientStop Color="#FFA040" Offset="0.5" />
+    <GradientStop Color="#E08030" Offset="1" />
+  </LinearGradientBrush>
+
+</ResourceDictionary>

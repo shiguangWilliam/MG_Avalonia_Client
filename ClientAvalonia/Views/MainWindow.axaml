@@ -1,0 +1,54 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:ClientAvalonia.Views"
+        x:Class="ClientAvalonia.Views.MainWindow"
+        Title="ClientAvalonia"
+        CanResize="False">
+  <DockPanel>
+    <TextBlock x:Name="PART_Status"
+               DockPanel.Dock="Bottom"
+               Height="24"
+               Margin="8,0"
+               FontSize="11"
+               VerticalAlignment="Center"
+               Opacity="0.85" />
+    <Border Background="#111" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Grid HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch">
+        <ContentControl x:Name="PART_RootView">
+          <ContentControl.ContentTemplate>
+            <views:DxNodeTemplateSelector />
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+
+        <!-- Floating INI panels (Options, Campaign, …) over MainMenu at their own Size= -->
+        <Grid x:Name="PART_FloatingOverlay"
+              IsVisible="False"
+              IsHitTestVisible="False"
+              ZIndex="100">
+          <Border x:Name="PART_OverlayBackdrop"
+                  Background="#B0000000"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  PointerPressed="OnOverlayBackdropPressed" />
+          <Border x:Name="PART_OverlayPanel"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  CornerRadius="12"
+                  BorderBrush="#55FF8C32"
+                  BorderThickness="1"
+                  BoxShadow="0 12 40 0 #90000000"
+                  ClipToBounds="True"
+                  Background="#01000000">
+            <ContentControl x:Name="PART_OverlayView"
+                            IsHitTestVisible="True">
+              <ContentControl.ContentTemplate>
+                <views:DxNodeTemplateSelector />
+              </ContentControl.ContentTemplate>
+            </ContentControl>
+          </Border>
+        </Grid>
+      </Grid>
+    </Border>
+  </DockPanel>
+</Window>

@@ -1,0 +1,49 @@
+using ClientCore;
+
+namespace ClientAvalonia.Services;
+
+/// <summary>Multiplayer nickname persistence (UserINI [MultiPlayer] Handle), aligned with XNA GameOptionsPanel.</summary>
+public static class PlayerNameSettings
+{
+    public static void ApplyFromUserSettings()
+    {
+        string name = Sanitize(UserINISettings.Instance.PlayerName.Value);
+        if (!string.IsNullOrEmpty(name))
+            ProgramConstants.PLAYERNAME = name;
+    }
+
+    public static void SaveFromInput(string rawName)
+    {
+        string name = Sanitize(rawName);
+        if (string.IsNullOrEmpty(name))
+            return;
+
+        UserINISettings.Instance.PlayerName.Value = name;
+        ProgramConstants.PLAYERNAME = name;
+    }
+
+    public static string LoadForDisplay()
+    {
+        string saved = Sanitize(UserINISettings.Instance.PlayerName.Value);
+        if (!string.IsNullOrEmpty(saved))
+            return saved;
+
+        string current = Sanitize(ProgramConstants.PLAYERNAME);
+        return string.IsNullOrEmpty(current) || current.Equals("No name", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : current;
+    }
+
+    private static string Sanitize(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        string trimmed = name.Trim();
+        int max = ClientConfiguration.Instance.MaxNameLength;
+        if (max > 0 && trimmed.Length > max)
+            trimmed = trimmed[..max];
+
+        return trimmed;
+    }
+}

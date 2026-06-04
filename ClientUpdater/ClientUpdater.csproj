@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>CnCNet.ClientUpdater</Title>
+    <Description>CnCNet Client Updater Library</Description>
+    <Product>CnCNet.ClientUpdater</Product>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GitVersion_MsBuildTask_Disabled)' == 'true' Or '$(DisableGitVersionTask)' == 'true'">
+    <GitVersion_MsBuildTask_Disabled>true</GitVersion_MsBuildTask_Disabled>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(GitVersion_MsBuildTask_Disabled)' == 'true' Or '$(DisableGitVersionTask)' == 'true'">
+    <Compile Include="..\ClientAvalonia\Stubs\GitVersionInformation.cs" Link="GitVersionInformation.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNet.WebApi.Client" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ClientCore\ClientCore.csproj" />
+  </ItemGroup>
+</Project>
