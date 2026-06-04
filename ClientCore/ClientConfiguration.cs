@@ -65,6 +65,9 @@ namespace ClientCore
             }
 
             RefreshTranslationGameFiles();
+
+            ProgramConstants.ApplyCnCNetProtocolRevision(CnCNetProtocolRevision);
+            Logger.Log($"CnCNet protocol revision: {ProgramConstants.CNCNET_PROTOCOL_REVISION}");
         }
 
         /// <summary>
@@ -214,6 +217,10 @@ namespace ClientCore
         public int ThemeCount => clientDefinitionsIni.GetSectionKeys("Themes").Count;
 
         public string LocalGame => clientDefinitionsIni.GetStringValue(SETTINGS, "LocalGame", "DTA");
+
+        /// <summary>CnCNet GAME CTCP revision (R10 legacy / R13 current). MG mod uses R10.</summary>
+        public string CnCNetProtocolRevision =>
+            clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetProtocolRevision", "R13");
 
         public bool SidebarHack => clientDefinitionsIni.GetBooleanValue(SETTINGS, "SidebarHack", false);
 

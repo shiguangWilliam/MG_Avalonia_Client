@@ -57,16 +57,17 @@ public static class CnCNetGameMessageParser
             return null;
 
         string[] parts = ctcpMessage[5..].Split(';');
-        if (parts.Length != 13)
+        if (parts.Length != 11 && parts.Length != 13)
         {
-            rejectReason = $"invalid field count ({parts.Length}/13)";
+            rejectReason = $"invalid field count ({parts.Length}/11|13)";
             Logger.Log($"CnCNetGameMessageParser: ignoring GAME from {hostName}: {rejectReason}.");
             return null;
         }
 
-        if (parts[0] != ProgramConstants.CNCNET_PROTOCOL_REVISION)
+        string revision = parts[0];
+        if (!IsSupportedRevision(revision))
         {
-            rejectReason = $"protocol {parts[0]} != {ProgramConstants.CNCNET_PROTOCOL_REVISION}";
+            rejectReason = $"unsupported protocol {revision}";
             return null;
         }
 
@@ -77,7 +78,7 @@ public static class CnCNetGameMessageParser
             return null;
         }
 
-        bool locked = flags.Length > 0 && flags[0] == '1';
+        bool locked = flags[0] == '1';
         bool customPassword = flags.Length > 1 && flags[1] == '1';
         bool isClosed = flags.Length > 2 && flags[2] == '1';
         bool isLoadedGame = flags.Length > 3 && flags[3] == '1';
@@ -103,6 +104,9 @@ public static class CnCNetGameMessageParser
         }
 
         string[] players = parts[6].Split(',', StringSplitOptions.RemoveEmptyEntries);
+        int skillLevel = 0;
+        if (parts.Length == 13 && int.TryParse(parts[11], out int parsedSkill))
+            skillLevel = parsedSkill;
 
         return new CnCNetHostedGameSummary
         {
@@ -120,7 +124,7 @@ public static class CnCNetGameMessageParser
             TunnelPort = tunnelPort,
             MapName = parts[7],
             GameMode = parts[8],
-            SkillLevel = int.TryParse(parts[11], out int skill) ? skill : 0,
+            SkillLevel = skillLevel,
         };
     }
 
@@ -129,4 +133,9 @@ public static class CnCNetGameMessageParser
         string ctcpMessage,
         IReadOnlyList<CnCNetTunnelEntry>? tunnels = null)
         => TryParse(hostName, ctcpMessage, tunnels, out _);
+
+    private static bool IsSupportedRevision(string revision)
+        => revision.Equals("R10", StringComparison.OrdinalIgnoreCase)
+           || revision.Equals("R13", StringComparison.OrdinalIgnoreCase)
+           || revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase);
 }

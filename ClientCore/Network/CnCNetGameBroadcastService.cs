@@ -126,6 +126,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         string flags = (_locked ? "1" : "0")
                        + (room.CustomPassword ? "1" : "0")
                        + (closed ? "1" : "0")
+                       + "0"
                        + "0";
 
         var sb = new StringBuilder("GAME ");
@@ -152,10 +153,14 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         sb.Append(room.Tunnel.Port);
         sb.Append(';');
         sb.Append('0');
-        sb.Append(';');
-        sb.Append(room.SkillLevel);
-        sb.Append(';');
-        sb.Append(_mapSha1);
+
+        if (!ProgramConstants.UsesLegacyCnCNetGameBroadcast)
+        {
+            sb.Append(';');
+            sb.Append(room.SkillLevel);
+            sb.Append(';');
+            sb.Append(_mapSha1);
+        }
 
         return sb.ToString();
     }

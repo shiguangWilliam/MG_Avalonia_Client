@@ -103,6 +103,20 @@ public sealed class CnCNetIrcConnection : IDisposable
         EmitActivity(string.IsNullOrWhiteSpace(key) ? $"→ JOIN {normalized}" : $"→ JOIN {normalized} (key)");
     }
 
+    /// <summary>Immediate JOIN (welcome / create game). Bypasses SendSleep queue delay.</summary>
+    public void JoinChannelInstant(string channel, string? key = null)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+            return;
+
+        string normalized = channel.StartsWith('#') ? channel : "#" + channel;
+        normalized = normalized.ToLowerInvariant();
+        string command = string.IsNullOrWhiteSpace(key)
+            ? $"JOIN {normalized}"
+            : $"JOIN {normalized} {key}";
+        SendInstant(command);
+    }
+
     /// <summary>Immediate send for JOIN during create/join (XNA QueuedMessageType.INSTANT_MESSAGE).</summary>
     public void SendInstant(string message)
     {

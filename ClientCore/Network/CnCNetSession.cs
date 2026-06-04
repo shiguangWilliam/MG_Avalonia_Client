@@ -219,14 +219,16 @@ public sealed class CnCNetSession : IDisposable
         if (_connection == null || _channels == null)
             return;
 
-        _connection.JoinChannel(_channels.ChatChannel);
-        _connection.JoinChannel(_channels.GameBroadcastChannel);
+        string chatChannel = NormalizeIrcChannel(_channels.ChatChannel);
+        string gameBroadcastChannel = NormalizeIrcChannel(_channels.GameBroadcastChannel);
+        _connection.JoinChannelInstant(chatChannel);
+        _connection.JoinChannelInstant(gameBroadcastChannel);
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_channels.ChatChannel);
 
         LobbyState.SetConnectionStatus("Connected");
         _reconnectAttempts = 0;
-        LogActivity($"JOIN {_channels.ChatChannel}, {_channels.GameBroadcastChannel}; NAMES requested.");
+        LogActivity($"JOIN {chatChannel}, {gameBroadcastChannel}; NAMES requested.");
         StateChanged?.Invoke();
     }
 
@@ -314,7 +316,7 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         if (_activeGameRoom != null
-            && channel.Equals(_activeGameRoom.ChannelName, StringComparison.OrdinalIgnoreCase)
+            && channel.Equals(NormalizeIrcChannel(_activeGameRoom.ChannelName), StringComparison.OrdinalIgnoreCase)
             && name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
         {
             if (_activeGameRoom.IsHost && _connection != null && _channels != null)
@@ -322,6 +324,13 @@ public sealed class CnCNetSession : IDisposable
 
             LogActivity($"Joined game room {_activeGameRoom.RoomName}.");
             GameRoomJoined?.Invoke(_activeGameRoom);
+        }
+
+        if (_channels != null
+            && channel.Equals(NormalizeIrcChannel(_channels.GameBroadcastChannel), StringComparison.OrdinalIgnoreCase)
+            && name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
+        {
+            LogActivity($"Joined game broadcast channel {channel}.");
         }
 
         if (_channels == null || !IsChatChannel(channel))
@@ -352,7 +361,9 @@ public sealed class CnCNetSession : IDisposable
     private void OnGameBroadcast(string channel, string sender, string ctcp)
     {
         if (_channels != null
-            && !channel.Equals(_channels.GameBroadcastChannel, StringComparison.OrdinalIgnoreCase))
+            && !NormalizeIrcChannel(channel).Equals(
+                NormalizeIrcChannel(_channels.GameBroadcastChannel),
+                StringComparison.OrdinalIgnoreCase))
             return;
 
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(sender, ctcp, Tunnels, out string? rejectReason);
@@ -394,7 +405,22 @@ public sealed class CnCNetSession : IDisposable
     }
 
     private bool IsChatChannel(string channel)
-        => _channels != null && channel.Equals(_channels.ChatChannel, StringComparison.OrdinalIgnoreCase);
+        => _channels != null
+           && NormalizeIrcChannel(channel).Equals(
+               NormalizeIrcChannel(_channels.ChatChannel),
+               StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeIrcChannel(string channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+            return string.Empty;
+
+        string normalized = channel.Trim();
+        if (!normalized.StartsWith('#'))
+            normalized = "#" + normalized;
+
+        return normalized.ToLowerInvariant();
+    }
 
     private void LogActivity(string message)
     {

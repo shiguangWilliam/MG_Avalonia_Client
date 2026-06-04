@@ -35,7 +35,18 @@ namespace ClientCore
 
         public const string QRES_EXECUTABLE = "qres.dat";
 
-        public const string CNCNET_PROTOCOL_REVISION = "R13";
+        private static string _cncnetProtocolRevision = "R13";
+
+        public static string CNCNET_PROTOCOL_REVISION => _cncnetProtocolRevision;
+
+        public static void ApplyCnCNetProtocolRevision(string revision)
+        {
+            if (!string.IsNullOrWhiteSpace(revision))
+                _cncnetProtocolRevision = revision.Trim();
+        }
+
+        public static bool UsesLegacyCnCNetGameBroadcast =>
+            _cncnetProtocolRevision.Equals("R10", StringComparison.OrdinalIgnoreCase);
         public const string LAN_PROTOCOL_REVISION = "RL8";
         public const int LAN_PORT = 1234;
         public const int LAN_INGAME_PORT = 1234;
