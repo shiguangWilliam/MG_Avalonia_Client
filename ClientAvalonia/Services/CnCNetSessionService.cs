@@ -206,6 +206,7 @@ public sealed class CnCNetSessionService : IDisposable
 
     private void OnWelcomeReceived(string welcomeLine)
     {
+        PlayerNameSettings.ApplyFromUserSettings();
         LobbyState.SetConnectionStatus("Connected — joining channels...");
         LogActivity($"IRC welcome: {welcomeLine}");
         StateChanged?.Invoke();
@@ -321,6 +322,12 @@ public sealed class CnCNetSessionService : IDisposable
             return;
 
         _channelUsers.Add(name);
+        if (name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase)
+            && _channelUsers.Count == 1)
+        {
+            LogActivity($"Joined chat channel {channel} as {name}.");
+        }
+
         RefreshLobbyPlayers();
     }
 

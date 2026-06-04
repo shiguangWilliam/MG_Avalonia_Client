@@ -416,6 +416,22 @@ public partial class MainWindow : Window, IUiNavigationHost
         ShowStatus($"Campaign filter: {label} ({_lobbySession.VisibleMissions.Count} missions)");
     }
 
+    public void TogglePlayerExtraOptionsPanel()
+    {
+        if (_activeRoot == null)
+            return;
+
+        UiNodeViewModel? panel = FindVm(_activeRoot, "PlayerExtraOptionsPanel");
+        if (panel == null)
+        {
+            ShowStatus("Player extra options panel not found.");
+            return;
+        }
+
+        panel.IsVisible = !panel.IsVisible;
+        ShowStatus(panel.IsVisible ? "Player extra options opened." : "Player extra options closed.");
+    }
+
     private void ApplyLobbyData(UiNodeViewModel root, string windowName)
     {
         _gameResources.EnsureLoaded();

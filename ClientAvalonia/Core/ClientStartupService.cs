@@ -14,6 +14,10 @@ public static class ClientStartupService
 {
     private static bool _ran;
 
+    public static bool BootstrapSucceeded { get; private set; }
+
+    public static string? BootstrapError { get; private set; }
+
     public static bool IsUpdaterInitialized { get; private set; }
 
     public static event Action? LocalVersionsChecked;
@@ -28,16 +32,20 @@ public static class ClientStartupService
         gameRoot ??= ClientEnvironment.FindGameRoot(Directory.GetCurrentDirectory());
         Environment.CurrentDirectory = gameRoot;
 
+        if (!ClientCoreBootstrap.TryEnsureInitialized(gameRoot, out string? bootstrapError))
+        {
+            BootstrapError = bootstrapError ?? "unknown error";
+            BootstrapSucceeded = false;
+            Console.Error.WriteLine($"ClientCore bootstrap failed: {BootstrapError}");
+            return;
+        }
+
+        BootstrapSucceeded = true;
+        BootstrapError = null;
+
         ClientLogService.EnsureInitialized();
 
-        if (!ClientCoreBootstrap.TryEnsureInitialized(gameRoot, out _))
-            return;
-
         CnCNetIdentity.EnsurePersisted();
-
-        ProgramConstants.RESOURCES_DIR = SafePath.CombineDirectoryPath(
-            ProgramConstants.BASE_RESOURCE_PATH,
-            UserINISettings.Instance.ThemeFolderPath);
 
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "version_u");
 
@@ -47,17 +55,14 @@ public static class ClientStartupService
         ClientConfiguration.Instance.RefreshSettings();
         PreprocessorBackgroundTask.Instance.Run();
 
-        ThreadPool.QueueUserWorkItem(_ =>
+        try
         {
-            try
-            {
-                GameResourceCatalog.Instance.EnsureLoaded();
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"Game resource catalog load failed: {ex.Message}");
-            }
-        });
+            GameResourceCatalog.Instance.EnsureLoaded();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"Game resource catalog load failed: {ex.Message}");
+        }
 
         if (IsUpdaterInitialized)
         {

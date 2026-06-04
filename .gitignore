@@ -422,3 +422,6 @@ Icon?
 
 # Game specific build prop files
 Directory.Build.Game.*.props
+
+# Local notes (restored from history, not tracked)
+note/

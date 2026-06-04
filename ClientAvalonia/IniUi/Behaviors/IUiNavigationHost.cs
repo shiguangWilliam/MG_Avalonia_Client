@@ -57,4 +57,6 @@ public interface IUiNavigationHost
     void ToggleFavoriteLobbyMap();
 
     void FilterCampaignBySide(CampaignSideFilter sideFilter);
+
+    void TogglePlayerExtraOptionsPanel();
 }

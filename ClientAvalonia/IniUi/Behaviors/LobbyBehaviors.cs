@@ -12,6 +12,11 @@ public static class LobbyBehaviors
         registry.Register("btnPickRandomMap", _ => host.PickRandomLobbyMap());
         registry.Register("ddGameMode", _ => host.RefreshLobbyMapList());
         registry.Register("MapPreviewBox", _ => host.ToggleFavoriteLobbyMap());
+        registry.Register("btnPlayerExtraOptionsOpen", _ => host.TogglePlayerExtraOptionsPanel());
+        registry.Register("btnSaveLoadGameOptions", _ =>
+            host.ShowStatus("Load/save game options menu is not implemented in ClientAvalonia yet."));
+        registry.Register("BtnSaveLoadGameOptions", _ =>
+            host.ShowStatus("Load/save game options menu is not implemented in ClientAvalonia yet."));
     }
 
     private static void RegisterLaunch(BehaviorRegistry registry, IUiNavigationHost host, string windowName)

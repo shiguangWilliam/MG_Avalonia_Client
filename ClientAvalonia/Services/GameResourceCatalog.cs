@@ -1,3 +1,4 @@
+using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientCore;
 using ClientCore.Extensions;
@@ -27,12 +28,18 @@ public sealed class GameResourceCatalog
 
     public void EnsureLoaded()
     {
-        if (IsLoaded)
+        if (!ClientCoreBootstrap.IsInitialized)
+            return;
+
+        if (IsLoaded && Maps.Count > 0)
             return;
 
         lock (_lock)
         {
-            if (IsLoaded)
+            if (!ClientCoreBootstrap.IsInitialized)
+                return;
+
+            if (IsLoaded && Maps.Count > 0)
                 return;
 
             GameModes = MapCatalogLoader.LoadGameModes()
@@ -41,8 +48,9 @@ public sealed class GameResourceCatalog
             Maps = MapCatalogLoader.LoadMaps();
             Missions = MissionCatalogLoader.LoadMissions();
             FavoriteMapsLabel = "Favorite Maps".L10N("Client:Main:FavoriteMaps");
-            IsLoaded = true;
-            Loaded?.Invoke();
+            IsLoaded = Maps.Count > 0 || GameModes.Count > 0 || Missions.Count > 0;
+            if (IsLoaded)
+                Loaded?.Invoke();
         }
     }
 

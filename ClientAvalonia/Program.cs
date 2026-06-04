@@ -108,11 +108,22 @@ internal static class Program
     private static void ValidateGameResources()
     {
         ClientStartupService.Run();
+        if (!ClientStartupService.BootstrapSucceeded)
+        {
+            Console.Error.WriteLine($"FAIL: bootstrap — {ClientStartupService.BootstrapError}");
+            Environment.Exit(1);
+        }
+
         var catalog = Services.GameResourceCatalog.Instance;
         catalog.EnsureLoaded();
         Console.WriteLine(
             $"OK: maps={catalog.Maps.Count}, gameModes={catalog.GameModes.Count}, missions={catalog.Missions.Count}, " +
             $"gameRoot={ClientEnvironment.Discover().GameRoot}");
+        if (catalog.Maps.Count == 0)
+        {
+            Console.Error.WriteLine("FAIL: map catalog is empty — check MPMapsPath, MapFileExtension, and map files.");
+            Environment.Exit(1);
+        }
         if (catalog.GameModes.Count > 0)
         {
             var sample = catalog.GetMapsForFilterIndex(LobbySessionState.FavoriteFilterIndex + 1);

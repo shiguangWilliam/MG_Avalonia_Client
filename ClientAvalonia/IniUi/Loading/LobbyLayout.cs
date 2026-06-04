@@ -10,6 +10,14 @@ internal static class LobbyLayout
         ApplyPanelOverlay(tree, "GameRulesPanel");
         ApplyPanelOverlay(tree, "MapListPanel");
         ApplyLabelDropdownSpacing(tree);
+        HidePanel(tree, "PlayerExtraOptionsPanel");
+    }
+
+    private static void HidePanel(UiNodeTree tree, string panelId)
+    {
+        UiNode? panel = tree.FindNode(panelId);
+        if (panel != null)
+            panel.Props["IsVisible"] = false;
     }
 
     /// <summary>Align random-map button and search box on one row (MG theme places search at far right).</summary>
