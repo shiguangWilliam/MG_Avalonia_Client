@@ -122,8 +122,9 @@ public static class CnCNetLobbyOperations
 
     private static string GenerateUniqueGameChannel(string chatChannel)
     {
+        // Match XNA CnCNetLobby.RandomizeChannelName (no forced lower-case on channel name).
         string baseName = chatChannel.StartsWith('#') ? chatChannel : "#" + chatChannel;
         int suffix = Random.Shared.Next(1_000_000, 9_999_999);
-        return $"{baseName}-game{suffix}".ToLowerInvariant();
+        return baseName + "-game" + suffix;
     }
 }

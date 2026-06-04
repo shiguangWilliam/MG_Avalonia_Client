@@ -48,6 +48,8 @@ public sealed class CnCNetSession : IDisposable
 
     public void EnsureStarted()
     {
+        LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (legacy GAME={ProgramConstants.UsesLegacyCnCNetGameBroadcast}).");
+
         if (_playerCountService == null)
         {
             _playerCountService = new CnCNetPlayerCountService();
@@ -443,6 +445,12 @@ public sealed class CnCNetSession : IDisposable
                 NormalizeIrcChannel(_channels.GameBroadcastChannel),
                 StringComparison.OrdinalIgnoreCase))
             return;
+
+        if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
+        {
+            int fieldCount = ctcp[5..].Split(';').Length;
+            LogActivity($"GAME CTCP from {sender} ({fieldCount} fields, rev={ctcp[5..].Split(';')[0]})");
+        }
 
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(sender, ctcp, Tunnels, out string? rejectReason);
         if (game == null)

@@ -22,6 +22,39 @@ public sealed class CnCNetTunnelEntry
 
     public int Version { get; init; }
 
+    /// <summary>Requests per-player NAT ports (XNA CnCNetTunnel.GetPlayerPortInfo).</summary>
+    public IReadOnlyList<int> RequestPlayerPorts(int playerCount)
+    {
+        if (playerCount <= 0)
+            return [];
+
+        try
+        {
+            string url = $"http://{Address}:{Port}/request?clients={playerCount}";
+            Logger.Log($"CnCNetTunnelEntry: {url}");
+
+            string? data = CnCNetHttp.DownloadString(url, 10_000);
+            if (string.IsNullOrWhiteSpace(data))
+                return [];
+
+            data = data.Replace("[", string.Empty).Replace("]", string.Empty);
+            var ports = new List<int>();
+            foreach (string part in data.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (int.TryParse(part.Trim(), out int port))
+                    ports.Add(port);
+            }
+
+            Logger.Log($"CnCNetTunnelEntry: received {ports.Count} ports from {Address}:{Port}");
+            return ports;
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"CnCNetTunnelEntry.RequestPlayerPorts failed: {ex.Message}");
+            return [];
+        }
+    }
+
     public static CnCNetTunnelEntry? Parse(string line)
     {
         try

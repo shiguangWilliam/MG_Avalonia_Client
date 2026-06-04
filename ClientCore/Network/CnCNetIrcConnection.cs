@@ -375,16 +375,22 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (_stream == null || !IsConnected)
             return;
 
-        try
+        lock (_sendLock)
         {
-            Logger.Log("CnCNet IRC SRM: " + message);
-            byte[] buffer = _encoding.GetBytes(message + "\r\n");
-            _stream.Write(buffer, 0, buffer.Length);
-            _stream.Flush();
-        }
-        catch (Exception ex)
-        {
-            Logger.Log($"CnCNetIrcConnection send failed: {ex.Message}");
+            if (_stream == null || !IsConnected)
+                return;
+
+            try
+            {
+                Logger.Log("CnCNet IRC SRM: " + message);
+                byte[] buffer = _encoding.GetBytes(message + "\r\n");
+                _stream.Write(buffer, 0, buffer.Length);
+                _stream.Flush();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"CnCNetIrcConnection send failed: {ex.Message}");
+            }
         }
     }
 
@@ -502,8 +508,16 @@ public sealed class CnCNetIrcConnection : IDisposable
             case 473:
             case 474:
             case 475:
+            case 476:
+            case 477:
+            case 405:
                 if (parameters.Count > 1)
-                    ServerMessage?.Invoke($"Cannot join {parameters[1]} ({code}).");
+                {
+                    string detail = parameters.Count > 2 ? string.Join(' ', parameters.Skip(2)) : string.Empty;
+                    string joinError = $"Cannot join {parameters[1]} (IRC {code}){ (string.IsNullOrWhiteSpace(detail) ? "" : ": " + detail) }";
+                    ServerMessage?.Invoke(joinError);
+                    ActivityLogged?.Invoke(joinError);
+                }
                 break;
             case 451:
                 Register();
@@ -559,7 +573,8 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         string user = prefix[..exclam];
-        UserJoined?.Invoke(parameters[0].ToLowerInvariant(), user);
+        string channel = NormalizeChannelParameter(parameters[0]);
+        UserJoined?.Invoke(channel, user);
     }
 
     private void HandlePart(string prefix, List<string> parameters)
@@ -572,7 +587,8 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         string user = prefix[..exclam];
-        UserLeft?.Invoke(parameters[0].ToLowerInvariant(), user);
+        string channel = NormalizeChannelParameter(parameters[0]);
+        UserLeft?.Invoke(channel, user);
     }
 
     private void HandleQuit(string prefix)
@@ -647,6 +663,15 @@ public sealed class CnCNetIrcConnection : IDisposable
             ChannelUserListReceived?.Invoke(channel, users);
 
         ChannelNamesComplete?.Invoke(channel);
+    }
+
+    private static string NormalizeChannelParameter(string channel)
+    {
+        string normalized = channel.Trim().TrimStart(':');
+        if (!normalized.StartsWith('#'))
+            normalized = "#" + normalized;
+
+        return normalized.ToLowerInvariant();
     }
 
     private static void ParseIrcMessage(string message, out string prefix, out string command, out List<string> parameters)

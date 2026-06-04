@@ -57,9 +57,9 @@ public static class CnCNetGameMessageParser
             return null;
 
         string[] parts = ctcpMessage[5..].Split(';');
-        if (parts.Length != 11 && parts.Length != 13)
+        if (parts.Length < 11)
         {
-            rejectReason = $"invalid field count ({parts.Length}/11|13)";
+            rejectReason = $"invalid field count ({parts.Length}, minimum 11)";
             Logger.Log($"CnCNetGameMessageParser: ignoring GAME from {hostName}: {rejectReason}.");
             return null;
         }
@@ -67,7 +67,16 @@ public static class CnCNetGameMessageParser
         string revision = parts[0];
         if (!IsSupportedRevision(revision))
         {
-            rejectReason = $"unsupported protocol {revision}";
+            rejectReason = $"unsupported protocol {revision} (configured {ProgramConstants.CNCNET_PROTOCOL_REVISION})";
+            Logger.Log($"CnCNetGameMessageParser: ignoring GAME from {hostName}: {rejectReason}.");
+            return null;
+        }
+
+        int expectedFields = IsLegacyRevision(revision) ? 11 : 13;
+        if (parts.Length != expectedFields)
+        {
+            rejectReason = $"field count {parts.Length} for {revision} (expected {expectedFields})";
+            Logger.Log($"CnCNetGameMessageParser: ignoring GAME from {hostName}: {rejectReason}.");
             return null;
         }
 
@@ -138,4 +147,10 @@ public static class CnCNetGameMessageParser
         => revision.Equals("R10", StringComparison.OrdinalIgnoreCase)
            || revision.Equals("R13", StringComparison.OrdinalIgnoreCase)
            || revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>R10 legacy broadcasts omit skillLevel and mapSha1 (11 fields).</summary>
+    public static bool IsLegacyRevision(string revision)
+        => revision.Equals("R10", StringComparison.OrdinalIgnoreCase)
+           || (ProgramConstants.UsesLegacyCnCNetGameBroadcast
+               && revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase));
 }

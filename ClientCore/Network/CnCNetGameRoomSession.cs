@@ -233,7 +233,7 @@ public sealed class CnCNetGameRoomSession
 
             if (humans.Count > 1)
             {
-                IReadOnlyList<int> ports = CnCNetTunnelPortAllocator.RequestPlayerPorts(Room.Tunnel, humans.Count);
+                IReadOnlyList<int> ports = Room.Tunnel.RequestPlayerPorts(humans.Count);
                 if (ports.Count < humans.Count)
                 {
                     message = "Could not contact the CnCNet tunnel server. Try another tunnel.";
