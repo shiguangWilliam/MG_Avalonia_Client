@@ -67,6 +67,9 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     public event Action<string, string, string>? GameBroadcastReceived;
 
+    /// <summary>Any channel CTCP (game room PO/GO/START/etc.).</summary>
+    public event Action<string, string, string>? ChannelCtcpReceived;
+
     /// <summary>User-facing connection progress (not raw RMP/SRM traffic).</summary>
     public event Action<string>? ActivityLogged;
 
@@ -539,6 +542,8 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string sender = prefix[..exclam];
         string ctcp = ctcpPayload.Trim('\u0001');
+
+        ChannelCtcpReceived?.Invoke(channel, sender, ctcp);
 
         if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
             GameBroadcastReceived?.Invoke(channel, sender, ctcp);

@@ -7,6 +7,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using ClientCore.Extensions;
+using ClientCore.Network;
 using ClientCore.INIProcessing;
 using Rampastring.Tools;
 
@@ -55,6 +56,22 @@ public sealed class GameLaunchService
 
     public bool TryLaunchSkirmish(ClientEnvironment environment, out string message, Window? errorOwner = null)
         => LaunchGameProcess(environment, errorOwner, out message);
+
+    public bool TryLaunchCnCNet(
+        ClientEnvironment environment,
+        CnCNetStartGameInfo startInfo,
+        SkirmishLaunchRequest request,
+        out string message,
+        Window? errorOwner = null)
+    {
+        CnCNetMultiplayerSpawnWriter.Write(
+            request.Map,
+            request.GameMode,
+            startInfo,
+            request.Players,
+            request.LobbyRoot);
+        return LaunchGameProcess(environment, errorOwner, out message);
+    }
 
     private bool LaunchGameProcess(ClientEnvironment environment, Window? errorOwner, out string message)
     {

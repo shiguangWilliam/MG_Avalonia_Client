@@ -32,6 +32,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     private UiNodeViewModel? _activeRoot;
     private UiNodeViewModel? _overlayRoot;
     private string? _floatingOverlayWindow;
+    private readonly Stack<string> _navStack = new();
 
     public string CurrentWindow { get; private set; } = "MainMenu";
 
@@ -56,6 +57,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         ClientStartupService.LocalVersionsChecked += OnLocalVersionsChecked;
         _gameResources.Loaded += OnGameResourcesLoaded;
         CnCNetSessionService.Instance.StateChanged += OnCnCNetStateChanged;
+        CnCNetSessionService.Instance.GameStarting += OnCnCNetGameStarting;
         CnCNetSessionService.Instance.EnsureStarted();
         InitializeComponent();
         KeyDown += OnKeyDown;
@@ -63,7 +65,9 @@ public partial class MainWindow : Window, IUiNavigationHost
         _updateService.RefreshInitialStatus();
     }
 
-    public void NavigateTo(string windowName)
+    public void NavigateTo(string windowName) => NavigateTo(windowName, fromBack: false);
+
+    private void NavigateTo(string windowName, bool fromBack)
     {
         if (FloatingOverlayLayout.IsOverlayWindow(windowName))
         {
@@ -72,6 +76,13 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         CloseFloatingOverlaySilently();
+
+        if (!fromBack
+            && !string.IsNullOrEmpty(CurrentWindow)
+            && !CurrentWindow.Equals(windowName, StringComparison.OrdinalIgnoreCase))
+        {
+            _navStack.Push(CurrentWindow);
+        }
 
         string? iniPath = _environment.ResolveWindowIni(windowName);
         if (iniPath == null)
@@ -201,7 +212,16 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        NavigateTo("MainMenu");
+        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            CnCNetSessionService.Instance.LeaveGameRoom();
+
+        if (_navStack.Count > 0)
+        {
+            NavigateTo(_navStack.Pop(), fromBack: true);
+            return;
+        }
+
+        NavigateTo("MainMenu", fromBack: true);
     }
 
     public void ShowStatus(string message) => PART_Status.Text = message;
@@ -454,7 +474,10 @@ public partial class MainWindow : Window, IUiNavigationHost
             LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
 
             if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyCnCNetGameRoomPlayers(root);
                 UpdateCnCNetGameBroadcastListing(root);
+            }
         }
 
         if (IsChannelLobbyWindow(windowName))
@@ -486,6 +509,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                     lbMapList.SelectedIndex,
                     resources);
                 UpdateLaunchButtonState(root);
+                RefreshCnCNetGameListing();
             };
         }
 
@@ -523,16 +547,75 @@ public partial class MainWindow : Window, IUiNavigationHost
         UiNodeViewModel? lbMapList = FindVm(root, "lbMapList");
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
-        var playerNames = _lobbySession.PlayerState.Slots
-            .Where(s => s.IsOccupied && !s.IsAi)
-            .Select(s => s.Name)
-            .ToList();
+        var playerNames = GetCnCNetPlayerNames();
 
         CnCNetSessionService.Instance.UpdateHostedGameListing(
             map?.UntranslatedName ?? string.Empty,
             gameMode?.UntranslatedUIName ?? string.Empty,
             map?.Sha1 ?? string.Empty,
             playerNames);
+
+        CnCNetSessionService.Instance.UpdateGameRoomListing(
+            map?.UntranslatedName ?? string.Empty,
+            gameMode?.UntranslatedUIName ?? string.Empty,
+            map?.Sha1 ?? string.Empty);
+    }
+
+    public void RefreshCnCNetGameListing()
+    {
+        if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            UpdateCnCNetGameBroadcastListing(_activeRoot);
+    }
+
+    private List<string> GetCnCNetPlayerNames()
+    {
+        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
+        if (gameRoom != null && gameRoom.Players.Count > 0)
+            return gameRoom.Players.Select(p => p.Name).ToList();
+
+        return _lobbySession.PlayerState.Slots
+            .Where(s => s.IsOccupied && !s.IsAi)
+            .Select(s => s.Name)
+            .ToList();
+    }
+
+    private void OnCnCNetGameStarting(CnCNetStartGameInfo startInfo)
+    {
+        if (_activeRoot == null || !CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        UiNodeViewModel? ddGameMode = FindVm(_activeRoot, "ddGameMode");
+        if (ddGameMode != null)
+            _lobbySession.FilterIndex = ddGameMode.SelectedIndex;
+
+        LobbyPlayerBindingApplier.SyncFromUi(_activeRoot, _lobbySession.PlayerState);
+
+        UiNodeViewModel? lbMapList = FindVm(_activeRoot, "lbMapList");
+        MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
+        GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
+
+        if (map == null || gameMode == null)
+        {
+            ShowStatus("Cannot launch: map or game mode missing.");
+            return;
+        }
+
+        var request = new SkirmishLaunchRequest
+        {
+            Map = map,
+            GameMode = gameMode,
+            Players = _lobbySession.PlayerState,
+            LobbyRoot = _activeRoot,
+        };
+
+        if (!_gameLaunch.TryLaunchCnCNet(_environment, startInfo, request, out string message, this))
+        {
+            ShowStatus($"Launch failed: {message}");
+            ClientDialogService.ShowError(this, "Cannot launch game", message);
+            return;
+        }
+
+        ShowStatus(message);
     }
 
     private void UpdateLaunchButtonState(UiNodeViewModel? root = null)
@@ -599,8 +682,41 @@ public partial class MainWindow : Window, IUiNavigationHost
             ShowStatus($"CnCNet: {CnCNetSessionService.Instance.LobbyState.ConnectionStatus}");
         }
 
+        if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            ApplyCnCNetGameRoomPlayers(_activeRoot);
+
         if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase) && _activeRoot != null)
             StateBindingApplier.Apply(_activeRoot, _bindingSession.State, "MainMenu");
+    }
+
+    private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
+    {
+        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
+        if (gameRoom == null)
+            return;
+
+        IReadOnlyList<CnCNetGameRoomPlayer> players = gameRoom.Players;
+        if (players.Count == 0)
+            return;
+
+        _lobbySession.PlayerState.ClearSlots();
+        for (int i = 0; i < players.Count && i < LobbyPlayerSlot.MaxSlots; i++)
+        {
+            CnCNetGameRoomPlayer player = players[i];
+            LobbyPlayerSlot slot = _lobbySession.PlayerState.Slots[i];
+            slot.Name = player.Name;
+            slot.IsAi = false;
+            slot.IsHumanLocal = player.Name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+            slot.SideIndex = player.SideId;
+            slot.ColorIndex = player.ColorId;
+            slot.TeamIndex = player.TeamId;
+            slot.StartIndex = Math.Max(0, player.StartingLocation - 1);
+        }
+
+        ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
+        LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+        UpdateLaunchButtonState(root);
+        RefreshCnCNetGameListing();
     }
 
     private void OnGameResourcesLoaded()

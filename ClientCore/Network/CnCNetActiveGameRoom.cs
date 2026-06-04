@@ -11,6 +11,8 @@ public sealed class CnCNetActiveGameRoom
 
     public required CnCNetTunnelEntry Tunnel { get; init; }
 
+    public string HostName { get; init; } = string.Empty;
+
     public bool IsHost { get; init; }
 
     public int MaxPlayers { get; init; }

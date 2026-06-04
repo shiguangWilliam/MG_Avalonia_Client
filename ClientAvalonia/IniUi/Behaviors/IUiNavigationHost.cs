@@ -44,6 +44,8 @@ public interface IUiNavigationHost
 
     bool TryLaunchCampaign(out string message);
 
+    void RefreshCnCNetGameListing();
+
     void SelectOptionsTab(int index);
 
     void CheckForUpdates();
