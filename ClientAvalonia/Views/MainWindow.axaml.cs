@@ -3,6 +3,7 @@ using Avalonia.Input;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientCore;
+using ClientCore.Network;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.IniUi.Layout;

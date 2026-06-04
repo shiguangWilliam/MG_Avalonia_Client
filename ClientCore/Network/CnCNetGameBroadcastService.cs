@@ -1,10 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Text;
-using ClientAvalonia.Network;
-using ClientCore;
-using ClientCore.Network;
+using System.Threading;
 using Rampastring.Tools;
 
-namespace ClientAvalonia.Services;
+namespace ClientCore.Network;
 
 /// <summary>Hosts GAME CTCP broadcasts on the game listing channel (XNA CnCNetGameLobby.BroadcastGame).</summary>
 public sealed class CnCNetGameBroadcastService : IDisposable

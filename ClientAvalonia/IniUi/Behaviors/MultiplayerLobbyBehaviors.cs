@@ -1,5 +1,6 @@
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Services;
+using ClientCore.Network;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -21,7 +22,7 @@ public static class MultiplayerLobbyBehaviors
                 return;
             }
 
-            if (!CnCNetLobbyOperations.TryCreateGame(out string message))
+            if (!CnCNetSessionService.Instance.TryCreateGame(out string message))
             {
                 host.ShowStatus(message);
                 return;
@@ -49,7 +50,7 @@ public static class MultiplayerLobbyBehaviors
             if (host.ActiveRoot != null)
                 GameDataBindingApplier.SyncChannelGameSelection(host.ActiveRoot, CnCNetSessionService.Instance.LobbyState);
 
-            if (!CnCNetLobbyOperations.TryJoinSelectedGame(out string message))
+            if (!CnCNetSessionService.Instance.TryJoinSelectedGame(out string message))
             {
                 host.ShowStatus(message);
                 return;

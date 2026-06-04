@@ -1,10 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
-using ClientCore;
-using ClientCore.Network;
+using System.Threading;
 using Rampastring.Tools;
 
-namespace ClientAvalonia.Network;
+namespace ClientCore.Network;
 
 /// <summary>Minimal IRC client for CnCNet lobby (Core config + Connection register/join conventions).</summary>
 public sealed class CnCNetIrcConnection : IDisposable

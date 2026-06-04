@@ -1,35 +1,14 @@
-using ClientCore;
-using ClientCore.Network;
+using System;
+using System.Linq;
 using Rampastring.Tools;
 
-namespace ClientAvalonia.Services;
-
-/// <summary>Active CnCNet game room the client is hosting or joining (IRC game channel).</summary>
-public sealed class CnCNetActiveGameRoom
-{
-    public required string RoomName { get; init; }
-
-    public required string ChannelName { get; init; }
-
-    public required string Password { get; init; }
-
-    public required CnCNetTunnelEntry Tunnel { get; init; }
-
-    public bool IsHost { get; init; }
-
-    public int MaxPlayers { get; init; }
-
-    public int SkillLevel { get; init; }
-
-    public bool CustomPassword { get; init; }
-}
+namespace ClientCore.Network;
 
 /// <summary>Create / join game room flows (XNA CnCNetLobby + GameCreationWindow subset).</summary>
 public static class CnCNetLobbyOperations
 {
-    public static bool TryCreateGame(out string message)
+    public static bool TryCreateGame(CnCNetSession session, out string message)
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
         if (session.Connection is not { IsConnected: true })
         {
             message = "Not connected to CnCNet.";
@@ -76,22 +55,8 @@ public static class CnCNetLobbyOperations
         return true;
     }
 
-    public static bool TryJoinSelectedGame(out string message)
+    public static bool TryJoinGame(CnCNetSession session, CnCNetHostedGameSummary game, string? password, out string message)
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
-        CnCNetHostedGameSummary? game = session.LobbyState.GetSelectedGame();
-        if (game == null)
-        {
-            message = "Select a game from the list first.";
-            return false;
-        }
-
-        return TryJoinGame(game, password: null, out message);
-    }
-
-    public static bool TryJoinGame(CnCNetHostedGameSummary game, string? password, out string message)
-    {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
         if (session.Connection is not { IsConnected: true })
         {
             message = "Not connected to CnCNet.";
