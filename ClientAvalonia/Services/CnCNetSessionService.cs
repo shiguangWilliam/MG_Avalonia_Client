@@ -19,6 +19,7 @@ public sealed class CnCNetSessionService : IDisposable
     private CnCNetGameChannels? _channels;
     private CnCNetPlayerCountService? _playerCountService;
     private CnCNetActiveGameRoom? _activeGameRoom;
+    private readonly CnCNetGameBroadcastService _gameBroadcast = new();
     private string _systemId = string.Empty;
     private bool _autoReconnect;
     private int _reconnectAttempts;
@@ -66,7 +67,11 @@ public sealed class CnCNetSessionService : IDisposable
             {
                 Tunnels = CnCNetTunnelListLoader.Load();
                 LogActivity($"Loaded {Tunnels.Count} NAT tunnels.");
-                Dispatcher.UIThread.Post(() => StateChanged?.Invoke());
+                Dispatcher.UIThread.Post(() =>
+                {
+                    RefreshHostedGames();
+                    StateChanged?.Invoke();
+                });
             }
             catch (Exception ex)
             {
@@ -118,6 +123,7 @@ public sealed class CnCNetSessionService : IDisposable
     public void Disconnect()
     {
         _autoReconnect = false;
+        _gameBroadcast.Stop();
         lock (_sync)
         {
             if (_connection == null)
@@ -134,6 +140,17 @@ public sealed class CnCNetSessionService : IDisposable
     }
 
     public void SetActiveGameRoom(CnCNetActiveGameRoom room) => _activeGameRoom = room;
+
+    public void UpdateHostedGameListing(
+        string mapName,
+        string gameModeName,
+        string mapSha1,
+        IReadOnlyList<string> playerNames,
+        bool locked = false,
+        bool closed = false)
+    {
+        _gameBroadcast.UpdateListing(mapName, gameModeName, mapSha1, playerNames, locked, closed);
+    }
 
     public void JoinGameChannel(string channelName, string password, out string? error)
     {
@@ -152,6 +169,7 @@ public sealed class CnCNetSessionService : IDisposable
     public void Dispose()
     {
         _autoReconnect = false;
+        _gameBroadcast.Dispose();
         Disconnect();
         _connection?.Dispose();
         _playerCountService?.Dispose();
@@ -280,6 +298,7 @@ public sealed class CnCNetSessionService : IDisposable
 
     private void ClearLobbyData()
     {
+        _gameBroadcast.Stop();
         _channelUsers.Clear();
         _games.Clear();
         _activeGameRoom = null;
@@ -314,6 +333,9 @@ public sealed class CnCNetSessionService : IDisposable
             && channel.Equals(_activeGameRoom.ChannelName, StringComparison.OrdinalIgnoreCase)
             && name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
         {
+            if (_activeGameRoom.IsHost && _connection != null && _channels != null)
+                _gameBroadcast.StartHost(_connection, _channels, _activeGameRoom);
+
             LogActivity($"Joined game room {_activeGameRoom.RoomName}.");
             GameRoomJoined?.Invoke(_activeGameRoom);
         }

@@ -121,12 +121,16 @@ public static class GameDataBindingApplier
                 state.SelectedGameIndex = -1;
             }
 
-            lbGames.SelectionChanged += () =>
+            if (!lbGames.Node.Props.ContainsKey("ChannelLobbyGamesWired"))
             {
-                int idx = lbGames.SelectedIndex;
-                if (idx >= 0 && idx < state.HostedGameDetails.Count)
-                    state.SelectedGameIndex = idx;
-            };
+                lbGames.Node.Props["ChannelLobbyGamesWired"] = true;
+                lbGames.SelectionChanged += () =>
+                {
+                    int idx = lbGames.SelectedIndex;
+                    if (idx >= 0 && idx < state.HostedGameDetails.Count)
+                        state.SelectedGameIndex = idx;
+                };
+            }
             Logger.Log($"ApplyChannelLobby: lbGameList ← {state.HostedGameDetails.Count} games.");
         }
         else

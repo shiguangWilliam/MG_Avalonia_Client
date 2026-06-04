@@ -110,6 +110,16 @@ public sealed class CnCNetIrcConnection : IDisposable
         EmitActivity($"→ {message}");
     }
 
+    /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage).</summary>
+    public void SendCtcpNotice(string channel, string ctcpMessage)
+    {
+        if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(ctcpMessage))
+            return;
+
+        string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
+        SendImmediate($"NOTICE {normalized} :\u0001{ctcpMessage}\u0001");
+    }
+
     public void RequestChannelNames(string channel)
     {
         if (string.IsNullOrWhiteSpace(channel))

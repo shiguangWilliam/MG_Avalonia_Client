@@ -62,6 +62,7 @@ internal static class OptionsWindowLayout
         ReparentControlsToPanels(tree, root);
         OptionsDisplayControlsBootstrap.Apply(tree);
         OptionsGameControlsBootstrap.Apply(tree);
+        OptionsCnCNetControlsBootstrap.Apply(tree);
         OptionsPanelStackLayout.Apply(tree);
         SetActiveTab(root, 0);
     }
@@ -263,6 +264,7 @@ internal static class OptionsWindowLayout
     private static string InferPanel(string controlId)
     {
         if (controlId.StartsWith("chkPing", StringComparison.OrdinalIgnoreCase)
+            || controlId.StartsWith("chkWriteInstall", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkPlaySound", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkNotify", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkSkip", StringComparison.OrdinalIgnoreCase)
@@ -270,7 +272,10 @@ internal static class OptionsWindowLayout
             || controlId.StartsWith("chkPersistent", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkConnect", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkAllowGame", StringComparison.OrdinalIgnoreCase)
-            || controlId.StartsWith("chkDiscord", StringComparison.OrdinalIgnoreCase))
+            || controlId.StartsWith("chkDiscord", StringComparison.OrdinalIgnoreCase)
+            || controlId.StartsWith("chkSteam", StringComparison.OrdinalIgnoreCase)
+            || controlId.Equals("lblAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase)
+            || controlId.Equals("ddAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase))
             return "CnCNetOptionsPanel";
 
         if (controlId is "lblPlayerName" or "tbPlayerName" or "lblPlayerNameNotice")
@@ -347,6 +352,7 @@ internal static class OptionsWindowLayout
             "chkPersistentMode", "chkPlaySoundOnGameHosted", "chkNotifyOnUserListChange", "chkSkipLoginWindow",
             "chkDisablePrivateMessagePopup", "chkConnectOnStartup", "chkAllowGameInvitesFromFriendsOnly",
             "chkDiscordIntegration", "chkPingUnofficialTunnels", "chkWriteInstallPathToRegistry",
+            "chkSteamIntegration", "lblAllowPrivateMessagesFrom", "ddAllowPrivateMessagesFrom",
         })
             map[id] = "CnCNetOptionsPanel";
 

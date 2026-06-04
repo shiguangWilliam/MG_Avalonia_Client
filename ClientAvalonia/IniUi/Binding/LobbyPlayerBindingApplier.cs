@@ -45,7 +45,8 @@ public static class LobbyPlayerBindingApplier
         var nameItems = BuildNameItems(playerState);
         var sideItems = BuildSideItems(playerState);
         var teamItems = BuildTeamItems(playerState);
-        var colorItems = new[] { "Random" };
+        var colorItems = new List<string> { "Random" };
+        colorItems.AddRange(MultiplayerColorCatalog.Load().Select(c => c.Name));
         var startItems = Enumerable.Range(1, 8).Select(i => i.ToString()).ToArray();
 
         UiNodeViewModel? firstName = null;
@@ -191,6 +192,46 @@ public static class LobbyPlayerBindingApplier
         panel.Children.Add(vm);
     }
 
+    public static void SyncFromUi(UiNodeViewModel root, LobbyPlayerState playerState)
+    {
+        UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
+        if (panel == null)
+            return;
+
+        for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
+        {
+            UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
+            UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
+            UiNodeViewModel? ddColor = FindVm(panel, $"ddPlayerColor{slot}");
+            UiNodeViewModel? ddTeam = FindVm(panel, $"ddPlayerTeam{slot}");
+            UiNodeViewModel? ddStart = FindVm(panel, $"ddPlayerStart{slot}");
+            if (ddName == null)
+                continue;
+
+            ApplySlotFromUi(playerState.Slots[slot], playerState, ddName, ddSide, ddColor, ddTeam, ddStart);
+        }
+    }
+
+    private static void ApplySlotFromUi(
+        LobbyPlayerSlot slot,
+        LobbyPlayerState playerState,
+        UiNodeViewModel ddName,
+        UiNodeViewModel? ddSide,
+        UiNodeViewModel? ddColor,
+        UiNodeViewModel? ddTeam,
+        UiNodeViewModel? ddStart)
+    {
+        string name = ReadSelectedText(ddName);
+        slot.Name = name;
+        slot.IsHumanLocal = name == ProgramConstants.PLAYERNAME;
+        slot.IsAi = !slot.IsHumanLocal && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+        slot.AiLevel = slot.IsAi ? Math.Max(0, IndexOfAiName(playerState.AiNames, name)) : 0;
+        slot.SideIndex = ddSide?.SelectedIndex ?? 0;
+        slot.ColorIndex = ddColor?.SelectedIndex ?? 0;
+        slot.TeamIndex = ddTeam?.SelectedIndex ?? 0;
+        slot.StartIndex = ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex : 0;
+    }
+
     private static void WireSlot(
         int slotIndex,
         LobbyPlayerState playerState,
@@ -201,15 +242,14 @@ public static class LobbyPlayerBindingApplier
     {
         void SyncFromUi()
         {
-            LobbyPlayerSlot slot = playerState.Slots[slotIndex];
-            string name = ReadSelectedText(ddName);
-            slot.Name = name;
-            slot.IsHumanLocal = name == ProgramConstants.PLAYERNAME;
-            slot.IsAi = !slot.IsHumanLocal && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
-            slot.AiLevel = slot.IsAi ? Math.Max(0, IndexOfAiName(playerState.AiNames, name)) : 0;
-            slot.SideIndex = Math.Max(0, ddSide.SelectedIndex);
-            slot.ColorIndex = Math.Max(0, ddColor.SelectedIndex);
-            slot.TeamIndex = Math.Max(0, ddTeam.SelectedIndex);
+            ApplySlotFromUi(
+                playerState.Slots[slotIndex],
+                playerState,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                null);
         }
 
         ddName.SelectionChanged += SyncFromUi;

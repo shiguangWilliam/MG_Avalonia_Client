@@ -231,6 +231,12 @@ public partial class MainWindow : Window, IUiNavigationHost
             return false;
         }
 
+        UiNodeViewModel? ddGameMode = FindVm(_activeRoot, "ddGameMode");
+        if (ddGameMode != null)
+            _lobbySession.FilterIndex = ddGameMode.SelectedIndex;
+
+        LobbyPlayerBindingApplier.SyncFromUi(_activeRoot, _lobbySession.PlayerState);
+
         UiNodeViewModel? lbMapList = FindVm(_activeRoot, "lbMapList");
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
@@ -445,6 +451,9 @@ public partial class MainWindow : Window, IUiNavigationHost
                 _lobbySession.PlayerState.LoadDefaults();
 
             LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+
+            if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+                UpdateCnCNetGameBroadcastListing(root);
         }
 
         if (IsChannelLobbyWindow(windowName))
@@ -502,6 +511,27 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         _lobbySession.MapSearchText = tbMapSearch.InputText;
         RefreshLobbyMapList();
+    }
+
+    private void UpdateCnCNetGameBroadcastListing(UiNodeViewModel root)
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room is not { IsHost: true })
+            return;
+
+        UiNodeViewModel? lbMapList = FindVm(root, "lbMapList");
+        MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
+        GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
+        var playerNames = _lobbySession.PlayerState.Slots
+            .Where(s => s.IsOccupied && !s.IsAi)
+            .Select(s => s.Name)
+            .ToList();
+
+        CnCNetSessionService.Instance.UpdateHostedGameListing(
+            map?.UntranslatedName ?? string.Empty,
+            gameMode?.UntranslatedUIName ?? string.Empty,
+            map?.Sha1 ?? string.Empty,
+            playerNames);
     }
 
     private void UpdateLaunchButtonState(UiNodeViewModel? root = null)

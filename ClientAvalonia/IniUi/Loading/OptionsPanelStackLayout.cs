@@ -30,20 +30,23 @@ internal static class OptionsPanelStackLayout
 
     private static readonly string[] CnCNetLeftColumn =
     [
-        "chkPlaySoundOnGameHosted",
-        "chkNotifyOnUserListChange",
-        "chkSkipLoginWindow",
-        "chkDisablePrivateMessagePopup",
         "chkPingUnofficialTunnels",
         "chkWriteInstallPathToRegistry",
+        "chkPlaySoundOnGameHosted",
+        "chkNotifyOnUserListChange",
+        "chkDisablePrivateMessagePopup",
+        "lblAllowPrivateMessagesFrom",
+        "ddAllowPrivateMessagesFrom",
     ];
 
     private static readonly string[] CnCNetRightColumn =
     [
+        "chkSkipLoginWindow",
         "chkPersistentMode",
         "chkConnectOnStartup",
-        "chkAllowGameInvitesFromFriendsOnly",
         "chkDiscordIntegration",
+        "chkAllowGameInvitesFromFriendsOnly",
+        "chkSteamIntegration",
     ];
 
     private static readonly string[] GameOrder =
@@ -115,9 +118,20 @@ internal static class OptionsPanelStackLayout
         int leftY = MarginTop;
         foreach (string id in leftIds)
         {
+            if (id.Equals("ddAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             UiNode? node = panel.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
             if (node == null || !IsVisible(node))
                 continue;
+
+            if (id.Equals("lblAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase))
+            {
+                UiNode? dropdown = panel.Children.FirstOrDefault(c =>
+                    c.Id.Equals("ddAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase));
+                leftY = PlaceLabelDropdownRow(node, dropdown, leftY);
+                continue;
+            }
 
             leftY = PlaceBlock(node, MarginLeft, leftY);
         }
