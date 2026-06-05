@@ -29,6 +29,10 @@ public sealed class CnCNetGameRoomPlayer
 
     public bool IsHost { get; set; }
 
+    public bool IsAi { get; set; }
+
+    public int AiLevel { get; set; }
+
     public bool Ready { get; set; }
 
     public int Port { get; set; }

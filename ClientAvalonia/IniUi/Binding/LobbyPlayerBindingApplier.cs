@@ -6,6 +6,7 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.IniUi.Binding;
 
@@ -194,12 +195,18 @@ public static class LobbyPlayerBindingApplier
 
     public static void SyncFromUi(UiNodeViewModel root, LobbyPlayerState playerState)
     {
+        if (playerState.PlayerUpdatingInProgress)
+            return;
+
         UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
         if (panel == null)
             return;
 
         for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
         {
+            if (LobbyPlayerSlotUiRules.GetUiRowKind(slot, playerState) == LobbyPlayerRowKind.Closed)
+                continue;
+
             UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
             UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
             UiNodeViewModel? ddColor = FindVm(panel, $"ddPlayerColor{slot}");
@@ -208,11 +215,20 @@ public static class LobbyPlayerBindingApplier
             if (ddName == null)
                 continue;
 
-            ApplySlotFromUi(playerState.Slots[slot], playerState, ddName, ddSide, ddColor, ddTeam, ddStart);
+            ApplySlotFromUi(
+                slot,
+                playerState.Slots[slot],
+                playerState,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                ddStart);
         }
     }
 
     private static void ApplySlotFromUi(
+        int slotIndex,
         LobbyPlayerSlot slot,
         LobbyPlayerState playerState,
         UiNodeViewModel ddName,
@@ -221,6 +237,20 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel? ddTeam,
         UiNodeViewModel? ddStart)
     {
+        if (LobbyPlayerSlotUiRules.IsKickSelection(ddName) || LobbyPlayerSlotUiRules.IsBanSelection(ddName))
+            return;
+
+        LobbyPlayerRowKind rowKind = LobbyPlayerSlotUiRules.GetUiRowKind(slotIndex, playerState);
+
+        if (rowKind == LobbyPlayerRowKind.Human)
+        {
+            slot.SideIndex = ddSide?.SelectedIndex >= 0 ? ddSide.SelectedIndex : 0;
+            slot.ColorIndex = ddColor?.SelectedIndex >= 0 ? ddColor.SelectedIndex : 0;
+            slot.TeamIndex = ddTeam?.SelectedIndex >= 0 ? ddTeam.SelectedIndex : 0;
+            slot.StartIndex = ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex : 0;
+            return;
+        }
+
         string name = ReadSelectedText(ddName);
         if (string.IsNullOrWhiteSpace(name) || name == "-")
         {
@@ -233,9 +263,9 @@ public static class LobbyPlayerBindingApplier
         slot.IsAi = !slot.IsHumanLocal
             && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
         slot.AiLevel = slot.IsAi ? Math.Max(0, IndexOfAiName(playerState.AiNames, name)) : 0;
-        slot.SideIndex = ddSide?.SelectedIndex ?? 0;
-        slot.ColorIndex = ddColor?.SelectedIndex ?? 0;
-        slot.TeamIndex = ddTeam?.SelectedIndex ?? 0;
+        slot.SideIndex = ddSide?.SelectedIndex >= 0 ? ddSide.SelectedIndex : 0;
+        slot.ColorIndex = ddColor?.SelectedIndex >= 0 ? ddColor.SelectedIndex : 0;
+        slot.TeamIndex = ddTeam?.SelectedIndex >= 0 ? ddTeam.SelectedIndex : 0;
         slot.StartIndex = ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex : 0;
     }
 
@@ -248,9 +278,14 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel ddColor,
         UiNodeViewModel ddTeam)
     {
-        void SyncFromUi()
+        void SyncNameFromUi()
         {
+            if (playerState.PlayerUpdatingInProgress)
+                return;
+
+            LobbyPlayerSlot previous = playerState.Slots[slotIndex].Clone();
             ApplySlotFromUi(
+                slotIndex,
                 playerState.Slots[slotIndex],
                 playerState,
                 ddName,
@@ -258,13 +293,45 @@ public static class LobbyPlayerBindingApplier
                 ddColor,
                 ddTeam,
                 null);
+
+            if (playerState.Mode == LobbyPlayerMode.Multiplayer)
+                MultiplayerSlotCoordinator.HandleHostSlotEdit(
+                    playerState,
+                    slotIndex,
+                    previous,
+                    ddName,
+                    CnCNetSession.Instance.GameRoom);
+            else
+                MultiplayerSlotCoordinator.HandleSkirmishNameEdit(playerState, slotIndex, ddName);
+
             SyncUiFromState(panel, playerState);
         }
 
-        ddName.SelectionChanged += SyncFromUi;
-        ddSide.SelectionChanged += SyncFromUi;
-        ddColor.SelectionChanged += SyncFromUi;
-        ddTeam.SelectionChanged += SyncFromUi;
+        void SyncOptionsFromUi()
+        {
+            if (playerState.PlayerUpdatingInProgress)
+                return;
+
+            ApplySlotFromUi(
+                slotIndex,
+                playerState.Slots[slotIndex],
+                playerState,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                null);
+
+            if (playerState.Mode == LobbyPlayerMode.Multiplayer)
+                MultiplayerSlotCoordinator.HandleHostOptionsEdit(
+                    playerState,
+                    CnCNetSession.Instance.GameRoom);
+        }
+
+        ddName.SelectionChanged += SyncNameFromUi;
+        ddSide.SelectionChanged += SyncOptionsFromUi;
+        ddColor.SelectionChanged += SyncOptionsFromUi;
+        ddTeam.SelectionChanged += SyncOptionsFromUi;
     }
 
     private static void WireStartSlot(int slotIndex, LobbyPlayerState playerState, UiNodeViewModel ddStart)
@@ -279,70 +346,67 @@ public static class LobbyPlayerBindingApplier
 
     private static void SyncUiFromState(UiNodeViewModel panel, LobbyPlayerState playerState)
     {
-        for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
+        playerState.PlayerUpdatingInProgress = true;
+        try
         {
-            LobbyPlayerSlot state = playerState.Slots[slot];
-            UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
-            UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
-            UiNodeViewModel? ddColor = FindVm(panel, $"ddPlayerColor{slot}");
-            UiNodeViewModel? ddTeam = FindVm(panel, $"ddPlayerTeam{slot}");
-            UiNodeViewModel? ddStart = FindVm(panel, $"ddPlayerStart{slot}");
-
-            if (ddName == null)
-                continue;
-
-            ddName.SetComboItems(LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState));
-            ddName.IsEnabled = LobbyPlayerSlotUiRules.IsNameDropdownEnabled(slot, playerState);
-            ddName.SetSelectedIndexSilent(ClampSelectedIndex(
-                ddName,
-                LobbyPlayerSlotUiRules.ResolveNameSelectedIndex(ddName, state, playerState)));
-
-            bool optionsEnabled = LobbyPlayerSlotUiRules.ArePlayerOptionsEnabled(slot, playerState);
-            if (ddSide != null)
+            for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
             {
-                ddSide.IsEnabled = optionsEnabled;
-                ddSide.SetSelectedIndexSilent(ClampSelectedIndex(
-                    ddSide,
-                    state.IsOccupied
-                        ? Math.Clamp(state.SideIndex, 0, Math.Max(0, ddSide.ComboItems.Count - 1))
-                        : 0));
-            }
+                LobbyPlayerSlot state = playerState.Slots[slot];
+                LobbyPlayerRowKind rowKind = LobbyPlayerSlotUiRules.GetUiRowKind(slot, playerState);
+                UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
+                UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
+                UiNodeViewModel? ddColor = FindVm(panel, $"ddPlayerColor{slot}");
+                UiNodeViewModel? ddTeam = FindVm(panel, $"ddPlayerTeam{slot}");
+                UiNodeViewModel? ddStart = FindVm(panel, $"ddPlayerStart{slot}");
 
-            if (ddColor != null)
-            {
-                ddColor.IsEnabled = optionsEnabled;
-                ddColor.SetSelectedIndexSilent(ClampSelectedIndex(
-                    ddColor,
-                    state.IsOccupied
-                        ? Math.Clamp(state.ColorIndex, 0, Math.Max(0, ddColor.ComboItems.Count - 1))
-                        : 0));
-            }
+                if (ddName == null)
+                    continue;
 
-            if (ddTeam != null)
-            {
-                ddTeam.IsEnabled = optionsEnabled;
-                ddTeam.SetSelectedIndexSilent(ClampSelectedIndex(
-                    ddTeam,
-                    state.IsOccupied
-                        ? Math.Clamp(state.TeamIndex, 0, Math.Max(0, ddTeam.ComboItems.Count - 1))
-                        : 0));
-            }
+                ddName.SetComboItems(LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState));
+                ddName.IsEnabled = LobbyPlayerSlotUiRules.IsNameDropdownEnabled(slot, playerState);
+                ddName.SetSelectedIndexSilent(ResolveSelectedIndex(
+                    ddName,
+                    LobbyPlayerSlotUiRules.ResolveNameSelectedIndex(ddName, state, playerState)));
 
-            if (ddStart != null)
-            {
-                ddStart.IsEnabled = optionsEnabled && state.IsOccupied;
-                ddStart.SetSelectedIndexSilent(ClampSelectedIndex(
-                    ddStart,
-                    state.IsOccupied
-                        ? Math.Clamp(state.StartIndex, 0, Math.Max(0, ddStart.ComboItems.Count - 1))
-                        : 0));
+                bool optionsEnabled = LobbyPlayerSlotUiRules.ArePlayerOptionsEnabled(slot, playerState);
+                bool showOptions = rowKind is LobbyPlayerRowKind.Human or LobbyPlayerRowKind.Ai;
+
+                ApplyOptionDropdown(ddSide, showOptions, optionsEnabled, state.SideIndex);
+                ApplyOptionDropdown(ddColor, showOptions, optionsEnabled, state.ColorIndex);
+                ApplyOptionDropdown(ddTeam, showOptions, optionsEnabled, state.TeamIndex);
+
+                if (ddStart != null)
+                {
+                    ddStart.IsEnabled = optionsEnabled && showOptions;
+                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled && showOptions, state.StartIndex);
+                }
             }
+        }
+        finally
+        {
+            playerState.PlayerUpdatingInProgress = false;
         }
     }
 
-    private static int ClampSelectedIndex(UiNodeViewModel dropdown, int index)
+    private static void ApplyOptionDropdown(
+        UiNodeViewModel? dropdown,
+        bool showOptions,
+        bool enabled,
+        int selectedIndex)
     {
-        if (dropdown.ComboItems.Count == 0)
+        if (dropdown == null)
+            return;
+
+        dropdown.IsEnabled = enabled && showOptions;
+        dropdown.SetSelectedIndexSilent(showOptions
+            ? ResolveSelectedIndex(dropdown, selectedIndex)
+            : -1);
+    }
+
+    /// <summary>Maps slot index to combo index; -1 clears selection (XNA unused slots).</summary>
+    private static int ResolveSelectedIndex(UiNodeViewModel dropdown, int index)
+    {
+        if (index < 0 || dropdown.ComboItems.Count == 0)
             return -1;
 
         return Math.Clamp(index, 0, dropdown.ComboItems.Count - 1);

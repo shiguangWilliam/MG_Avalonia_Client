@@ -82,6 +82,24 @@ public sealed class CnCNetGameCollection
         return list;
     }
 
+    public CnCNetGameEntry? FindByBroadcastChannel(string broadcastChannel)
+    {
+        if (string.IsNullOrWhiteSpace(broadcastChannel))
+            return null;
+
+        string normalized = NormalizeChannel(broadcastChannel);
+        foreach (CnCNetGameEntry game in Games)
+        {
+            if (!game.HasGameBroadcast)
+                continue;
+
+            if (NormalizeChannel(game.GameBroadcastChannel!).Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                return game;
+        }
+
+        return null;
+    }
+
     private static CnCNetGameEntry Entry(
         string id,
         string uiName,

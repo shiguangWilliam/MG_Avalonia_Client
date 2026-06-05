@@ -72,6 +72,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         ClientStartupService.LocalVersionsChecked += OnLocalVersionsChecked;
         _gameResources.Loaded += OnGameResourcesLoaded;
         CnCNetSessionService.Instance.StateChanged += OnCnCNetStateChanged;
+        CnCNetSessionService.Instance.GameRoomJoined += OnCnCNetGameRoomJoined;
         CnCNetSessionService.Instance.GameStarting += OnCnCNetGameStarting;
         CnCNetSessionService.Instance.EnsureStarted();
         InitializeComponent();
@@ -659,11 +660,16 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             {
+                CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
                 string localNick = CnCNetSessionService.Instance.LocalNick;
+                string hostName = room?.HostName ?? localNick;
+                bool resetSlots = _lobbySession.PlayerState.Mode != LobbyPlayerMode.Multiplayer;
                 LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
                     _lobbySession.PlayerState,
                     localNick,
-                    CnCNetSessionService.Instance.ActiveGameRoom?.IsHost == true);
+                    hostName,
+                    room?.IsHost == true,
+                    resetSlots);
             }
             else
             {
@@ -929,6 +935,16 @@ public partial class MainWindow : Window, IUiNavigationHost
         return null;
     }
 
+    private void OnCnCNetGameRoomJoined(CnCNetActiveGameRoom room)
+    {
+        if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            NavigateTo("CnCNetGameLobby");
+        else if (_activeRoot != null)
+            ApplyCnCNetGameRoomPlayers(_activeRoot);
+
+        ShowStatus($"Entered \"{room.RoomName}\".");
+    }
+
     private void OnCnCNetStateChanged()
     {
         int count = CnCNetSessionService.Instance.OnlinePlayerCount;
@@ -950,62 +966,32 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
     {
-        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
         CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
-        if (gameRoom == null || room == null)
+        if (room == null)
             return;
 
+        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
         string localNick = CnCNetSessionService.Instance.LocalNick;
-        IReadOnlyList<CnCNetGameRoomPlayer> players = gameRoom.Players;
+        string hostName = room.HostName;
+        if (string.IsNullOrWhiteSpace(hostName))
+            hostName = gameRoom?.HostName ?? localNick;
+        if (string.IsNullOrWhiteSpace(hostName))
+            hostName = localNick;
 
-        LobbyPlayerSlotUiRules.ConfigureForMultiplayer(_lobbySession.PlayerState, localNick, room.IsHost);
+        IReadOnlyList<CnCNetGameRoomPlayer> entries = gameRoom?.Players ?? [];
 
-        LobbyPlayerSlot[] hostAiSlots = room.IsHost
-            ? _lobbySession.PlayerState.Slots.Where(s => s.IsAi).Select(s => s.Clone()).ToArray()
-            : [];
+        LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
+            _lobbySession.PlayerState,
+            localNick,
+            hostName,
+            room.IsHost);
 
-        _lobbySession.PlayerState.ClearSlots();
-
-        if (players.Count == 0 && room.IsHost)
-        {
-            LobbyPlayerSlot hostSlot = _lobbySession.PlayerState.Slots[0];
-            hostSlot.Name = localNick;
-            hostSlot.IsAi = false;
-            hostSlot.IsHumanLocal = true;
-        }
-        else
-        {
-            for (int i = 0; i < players.Count && i < LobbyPlayerSlot.MaxSlots; i++)
-            {
-                CnCNetGameRoomPlayer player = players[i];
-                LobbyPlayerSlot slot = _lobbySession.PlayerState.Slots[i];
-                slot.Name = player.Name;
-                slot.IsAi = false;
-                slot.IsHumanLocal = player.Name.Equals(localNick, StringComparison.OrdinalIgnoreCase);
-                slot.SideIndex = player.SideId;
-                slot.ColorIndex = player.ColorId;
-                slot.TeamIndex = player.TeamId;
-                slot.StartIndex = Math.Max(0, player.StartingLocation - 1);
-            }
-        }
+        MultiplayerSlotLayout.ApplyToState(_lobbySession.PlayerState, entries, localNick);
 
         if (room.IsHost)
-        {
-            int insertAt = 0;
-            while (insertAt < LobbyPlayerSlot.MaxSlots && _lobbySession.PlayerState.Slots[insertAt].IsOccupied)
-                insertAt++;
-
-            foreach (LobbyPlayerSlot ai in hostAiSlots)
-            {
-                if (insertAt >= LobbyPlayerSlot.MaxSlots)
-                    break;
-
-                _lobbySession.PlayerState.Slots[insertAt] = ai;
-                insertAt++;
-                while (insertAt < LobbyPlayerSlot.MaxSlots && _lobbySession.PlayerState.Slots[insertAt].IsOccupied)
-                    insertAt++;
-            }
-        }
+            _lobbySession.PlayerState.EnsureHostAsFirstHuman(hostName, localNick);
+        else
+            _lobbySession.PlayerState.MarkLocalHuman(localNick);
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
         LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);

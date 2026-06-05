@@ -39,6 +39,9 @@ public sealed class CnCNetHostedGameSummary
 
     public int SkillLevel { get; init; }
 
+    /// <summary>CnCNet game id for the broadcast channel this entry came from (XNA CnCNetGame.InternalName).</summary>
+    public string SourceGameId { get; init; } = string.Empty;
+
     public string DisplayLine => Locked
         ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
         : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
@@ -50,7 +53,8 @@ public static class CnCNetGameMessageParser
         string hostName,
         string ctcpMessage,
         IReadOnlyList<CnCNetTunnelEntry>? tunnels,
-        out string? rejectReason)
+        out string? rejectReason,
+        string sourceGameId = "")
     {
         rejectReason = null;
 
@@ -135,6 +139,7 @@ public static class CnCNetGameMessageParser
             MapName = parts[7],
             GameMode = parts[8],
             SkillLevel = skillLevel,
+            SourceGameId = sourceGameId,
         };
     }
 

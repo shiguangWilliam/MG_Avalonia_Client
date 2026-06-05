@@ -33,6 +33,11 @@ public sealed class LobbyPlayerState
 
     public string LocalPlayerName { get; set; } = ProgramConstants.PLAYERNAME;
 
+    public string HostPlayerName { get; set; } = ProgramConstants.PLAYERNAME;
+
+    /// <summary>Suppresses UI→state sync while applying CopyPlayerDataToUI (XNA PlayerUpdatingInProgress).</summary>
+    public bool PlayerUpdatingInProgress { get; set; }
+
     public void LoadCatalogs(bool includeSpectator = true)
     {
         SideEntries = LobbySideCatalog.Load(includeSpectator);
@@ -97,9 +102,174 @@ public sealed class LobbyPlayerState
         }
     }
 
-    public int HumanCount => Slots.Count(s => s.IsOccupied && !s.IsAi);
+    public int HumanCount => HumanRowCount;
 
-    public int AiCount => Slots.Count(s => s.IsOccupied && s.IsAi);
+    public int AiCount => AiRowCount;
+
+    /// <summary>Consecutive human rows from slot 0 (XNA Players list).</summary>
+    public int HumanRowCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < Slots.Length; i++)
+            {
+                if (Slots[i].IsOccupied && !Slots[i].IsAi)
+                    count++;
+                else
+                    break;
+            }
+
+            return count;
+        }
+    }
+
+    /// <summary>Consecutive AI rows after humans (XNA AIPlayers list).</summary>
+    public int AiRowCount
+    {
+        get
+        {
+            int start = HumanRowCount;
+            int count = 0;
+            for (int i = start; i < Slots.Length; i++)
+            {
+                if (Slots[i].IsOccupied && Slots[i].IsAi)
+                    count++;
+                else
+                    break;
+            }
+
+            return count;
+        }
+    }
+
+    public int OccupiedRowCount => HumanRowCount + AiRowCount;
+
+    /// <summary>Repack humans (host first) + AIs into consecutive rows (XNA Players + AIPlayers).</summary>
+    public void RepopulateRows(IReadOnlyList<LobbyPlayerSlot> humans, IReadOnlyList<LobbyPlayerSlot> ais)
+    {
+        ClearSlots();
+        int row = 0;
+        foreach (LobbyPlayerSlot human in humans)
+        {
+            if (row >= Slots.Length)
+                break;
+
+            Slots[row] = human.Clone();
+            row++;
+        }
+
+        foreach (LobbyPlayerSlot ai in ais)
+        {
+            if (row >= Slots.Length)
+                break;
+
+            Slots[row] = ai.Clone();
+            row++;
+        }
+    }
+
+    /// <summary>Host is always Players[0] in DXMain; ensure row 0 when hosting.</summary>
+    public void EnsureHostAsFirstHuman(string hostName, string localNick)
+    {
+        hostName = NormalizeNick(hostName, localNick);
+
+        var humans = new List<LobbyPlayerSlot>();
+        var ais = new List<LobbyPlayerSlot>();
+        foreach (LobbyPlayerSlot slot in Slots)
+        {
+            if (!slot.IsOccupied)
+                continue;
+
+            if (slot.IsAi)
+                ais.Add(slot.Clone());
+            else
+                humans.Add(slot.Clone());
+        }
+
+        LobbyPlayerSlot host = humans.FirstOrDefault(h =>
+            h.Name.Equals(hostName, StringComparison.OrdinalIgnoreCase))
+            ?? new LobbyPlayerSlot
+            {
+                Name = hostName,
+                SideIndex = 0,
+                ColorIndex = 0,
+                TeamIndex = 0,
+                StartIndex = 0,
+            };
+
+        host.IsAi = false;
+        host.IsHumanLocal = host.Name.Equals(localNick, StringComparison.OrdinalIgnoreCase);
+
+        humans.RemoveAll(h => h.Name.Equals(hostName, StringComparison.OrdinalIgnoreCase));
+        humans.Insert(0, host);
+        RepopulateRows(humans, ais);
+    }
+
+    public void MarkLocalHuman(string localNick)
+    {
+        foreach (LobbyPlayerSlot slot in Slots)
+        {
+            if (slot.IsOccupied && !slot.IsAi)
+                slot.IsHumanLocal = slot.Name.Equals(localNick, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string NormalizeNick(string primary, string fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(primary))
+            return primary.Trim();
+
+        if (!string.IsNullOrWhiteSpace(fallback))
+            return fallback.Trim();
+
+        return ProgramConstants.PLAYERNAME;
+    }
+
+    public LobbyPlayerRowKind GetRowKind(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= Slots.Length)
+            return LobbyPlayerRowKind.Closed;
+
+        int humans = HumanRowCount;
+        int ais = AiRowCount;
+
+        if (slotIndex < humans)
+            return LobbyPlayerRowKind.Human;
+
+        if (slotIndex < humans + ais)
+            return LobbyPlayerRowKind.Ai;
+
+        if (slotIndex == humans + ais)
+            return LobbyPlayerRowKind.Open;
+
+        return LobbyPlayerRowKind.Closed;
+    }
+
+    /// <summary>Rebuild AI rows from UI starting at first AI row (XNA CopyPlayerDataFromUI).</summary>
+    public void RebuildAiRowsFromUi(int firstAiRow)
+    {
+        var preserved = new List<LobbyPlayerSlot>();
+        for (int i = firstAiRow; i < Slots.Length; i++)
+        {
+            LobbyPlayerSlot slot = Slots[i];
+            if (slot.IsOccupied && slot.IsAi)
+                preserved.Add(slot.Clone());
+        }
+
+        for (int i = firstAiRow; i < Slots.Length; i++)
+            Slots[i].Clear();
+
+        int row = firstAiRow;
+        foreach (LobbyPlayerSlot ai in preserved)
+        {
+            if (row >= Slots.Length)
+                break;
+
+            Slots[row] = ai;
+            row++;
+        }
+    }
 
     public bool TryLoadSkirmishSettings()
     {

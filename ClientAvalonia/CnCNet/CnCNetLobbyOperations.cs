@@ -45,13 +45,17 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
+        string hostName = string.IsNullOrWhiteSpace(session.LocalNick)
+            ? ProgramConstants.PLAYERNAME
+            : session.LocalNick;
+
         session.SetActiveGameRoom(new CnCNetActiveGameRoom
         {
             RoomName = roomName,
             ChannelName = channelName,
             Password = password,
             Tunnel = request.Tunnel,
-            HostName = ProgramConstants.PLAYERNAME,
+            HostName = hostName,
             IsHost = true,
             MaxPlayers = request.MaxPlayers,
             SkillLevel = request.SkillLevel,
@@ -86,6 +90,17 @@ public static class CnCNetLobbyOperations
         if (session.Connection is not { IsConnected: true })
         {
             message = "Not connected to CnCNet.";
+            return false;
+        }
+
+        string localGameId = ClientConfiguration.Instance.LocalGame;
+        if (!string.IsNullOrWhiteSpace(game.SourceGameId)
+            && !game.SourceGameId.Equals(localGameId, StringComparison.OrdinalIgnoreCase))
+        {
+            CnCNetGameEntry? target = session.GameCollection?.Games
+                .FirstOrDefault(g => g.InternalName.Equals(game.SourceGameId, StringComparison.OrdinalIgnoreCase));
+            string gameName = target?.UiName ?? game.SourceGameId;
+            message = $"The selected game is for {gameName}.";
             return false;
         }
 

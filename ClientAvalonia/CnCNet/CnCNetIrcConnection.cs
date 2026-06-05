@@ -178,6 +178,15 @@ public sealed class CnCNetIrcConnection : IDisposable
         EnqueueSend($"PART {normalized.ToLowerInvariant()}");
     }
 
+    public void KickFromChannel(string channel, string userName)
+    {
+        if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(userName))
+            return;
+
+        string normalized = channel.StartsWith('#') ? channel : "#" + channel;
+        SendInstant($"KICK {normalized.ToLowerInvariant()} {userName}");
+    }
+
     public void Dispose()
     {
         Disconnect();

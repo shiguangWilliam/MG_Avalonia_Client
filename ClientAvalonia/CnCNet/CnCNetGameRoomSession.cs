@@ -1,4 +1,6 @@
 using ClientCore;
+using ClientAvalonia.Domain;
+using ClientAvalonia.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -62,7 +64,11 @@ public sealed class CnCNetGameRoomSession
         _channels = channels;
         _localNick = connection.CurrentNick;
         if (IsHost)
+        {
             HostName = _localNick;
+            lock (_sync)
+                EnsureHostPlayerLocked();
+        }
     }
 
     public void OnLocalJoined()
@@ -206,6 +212,65 @@ public sealed class CnCNetGameRoomSession
 
         lock (_sync)
             BroadcastGameOptionsLocked(mapName, gameModeName, mapSha1);
+    }
+
+    public void KickPlayer(string playerName)
+    {
+        if (!IsHost || _connection == null || string.IsNullOrWhiteSpace(playerName))
+            return;
+
+        if (playerName.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        LogNotice($"Kicking {playerName} from the game...");
+        _connection.KickFromChannel(Room.ChannelName, playerName);
+    }
+
+    public void UpdateHumanFromSlot(LobbyPlayerSlot slot)
+    {
+        if (!IsHost)
+            return;
+
+        lock (_sync)
+        {
+            CnCNetGameRoomPlayer? player = FindPlayerLocked(slot.Name);
+            if (player == null)
+                return;
+
+            player.SideId = slot.SideIndex;
+            player.ColorId = slot.ColorIndex;
+            player.TeamId = slot.TeamIndex;
+            player.StartingLocation = slot.StartIndex + 1;
+        }
+    }
+
+    public void SyncPlayersFromLobby(LobbyPlayerState state, string hostName)
+    {
+        if (!IsHost)
+            return;
+
+        lock (_sync)
+        {
+            List<CnCNetGameRoomPlayer> entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
+            var readyByName = _players.Where(p => !p.IsAi)
+                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+
+            _players.Clear();
+            foreach (CnCNetGameRoomPlayer entry in entries)
+            {
+                if (!entry.IsAi && readyByName.TryGetValue(entry.Name, out CnCNetGameRoomPlayer? existing))
+                    entry.Ready = existing.Ready;
+
+                if (entry.IsHost || (!entry.IsAi && entry.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost))
+                    entry.Ready = true;
+
+                _players.Add(entry);
+            }
+
+            BroadcastPlayerOptionsLocked();
+        }
+
+        StateChanged?.Invoke();
     }
 
     public bool TryHostLaunch(out string message)
@@ -358,7 +423,7 @@ public sealed class CnCNetGameRoomSession
             _players.Clear();
             for (int i = 0; i < parts.Length;)
             {
-                string name = parts[i++];
+                string nameOrLevel = parts[i++];
                 if (i >= parts.Length)
                     break;
 
@@ -366,6 +431,22 @@ public sealed class CnCNetGameRoomSession
                     break;
 
                 UnpackOptions(packed, out int team, out int start, out int color, out int side);
+
+                if (int.TryParse(nameOrLevel, out int aiLevel) && aiLevel >= 0)
+                {
+                    _players.Add(new CnCNetGameRoomPlayer
+                    {
+                        IsAi = true,
+                        AiLevel = aiLevel,
+                        Name = AiLevelToName(aiLevel),
+                        Ready = true,
+                        TeamId = team,
+                        StartingLocation = start,
+                        ColorId = color,
+                        SideId = side,
+                    });
+                    continue;
+                }
 
                 bool ready = false;
                 if (i < parts.Length && int.TryParse(parts[i], out int readyState))
@@ -376,8 +457,8 @@ public sealed class CnCNetGameRoomSession
 
                 _players.Add(new CnCNetGameRoomPlayer
                 {
-                    Name = name,
-                    IsHost = name.Equals(HostName, StringComparison.OrdinalIgnoreCase),
+                    Name = nameOrLevel,
+                    IsHost = nameOrLevel.Equals(HostName, StringComparison.OrdinalIgnoreCase),
                     Ready = ready,
                     TeamId = team,
                     StartingLocation = start,
@@ -388,6 +469,15 @@ public sealed class CnCNetGameRoomSession
         }
 
         StateChanged?.Invoke();
+    }
+
+    private static string AiLevelToName(int aiLevel)
+    {
+        IReadOnlyList<string> names = ProgramConstants.AI_PLAYER_NAMES;
+        if (aiLevel >= 0 && aiLevel < names.Count)
+            return names[aiLevel];
+
+        return names.Count > 0 ? names[0] : "AI";
     }
 
     private void ApplyGameOptions(string sender, string message)
@@ -412,12 +502,20 @@ public sealed class CnCNetGameRoomSession
         var sb = new StringBuilder("PO ");
         foreach (CnCNetGameRoomPlayer player in _players)
         {
-            sb.Append(player.Name);
+            if (player.IsAi)
+                sb.Append(player.AiLevel);
+            else
+                sb.Append(player.Name);
+
             sb.Append(';');
             sb.Append(PackOptions(player.TeamId, player.StartingLocation, player.ColorId, player.SideId));
             sb.Append(';');
-            sb.Append(player.Ready ? 1 : 0);
-            sb.Append(';');
+
+            if (!player.IsAi)
+            {
+                sb.Append(player.Ready ? 1 : 0);
+                sb.Append(';');
+            }
         }
 
         SendCtcp(sb.ToString());

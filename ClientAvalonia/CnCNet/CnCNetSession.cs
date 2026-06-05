@@ -174,6 +174,7 @@ public sealed class CnCNetSession : IDisposable
         if (nextChat != localChat && nextChat != cncnetChat)
             _connection.JoinChannelInstant(next.ChatChannel);
 
+        JoinGameBroadcastChannel(next);
         _connection.RequestChannelNames(next.ChatChannel);
         LobbyState.SetChannelName(next.UiName, next.ChatChannel);
         UpdateChannelListState();
@@ -208,24 +209,23 @@ public sealed class CnCNetSession : IDisposable
         return 0;
     }
 
-    private void JoinAllBroadcastChannels()
+    private void JoinGameBroadcastChannel(CnCNetGameEntry game)
     {
-        if (_connection == null || _gameCollection == null)
+        if (_connection == null || !game.HasGameBroadcast)
             return;
 
-        foreach (CnCNetGameEntry game in _gameCollection.GetSelectableGames())
-        {
-            if (!game.HasGameBroadcast)
-                continue;
+        string broadcast = NormalizeIrcChannel(game.GameBroadcastChannel!);
+        if (_joinedBroadcastChannels.Contains(broadcast))
+            return;
 
-            string broadcast = NormalizeIrcChannel(game.GameBroadcastChannel!);
-            if (_joinedBroadcastChannels.Contains(broadcast))
-                continue;
-
-            _connection.JoinChannelInstant(game.GameBroadcastChannel!);
-            _joinedBroadcastChannels.Add(broadcast);
-        }
+        _connection.JoinChannelInstant(game.GameBroadcastChannel!);
+        _joinedBroadcastChannels.Add(broadcast);
     }
+
+    private bool IsCurrentGameBroadcast(string normalizedBroadcastChannel)
+        => _currentGame?.HasGameBroadcast == true
+           && NormalizeIrcChannel(_currentGame.GameBroadcastChannel!)
+               .Equals(normalizedBroadcastChannel, StringComparison.OrdinalIgnoreCase);
 
     public void Disconnect()
     {
@@ -434,7 +434,7 @@ public sealed class CnCNetSession : IDisposable
         string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
         _connection.JoinChannelInstant(chatChannel);
         _connection.JoinChannelInstant("#cncnet");
-        JoinAllBroadcastChannels();
+        JoinGameBroadcastChannel(_currentGame);
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_currentGame.ChatChannel);
 
@@ -596,7 +596,20 @@ public sealed class CnCNetSession : IDisposable
     private void OnGameBroadcast(string channel, string sender, string ctcp)
     {
         string normalizedBroadcast = NormalizeIrcChannel(channel);
-        CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(sender, ctcp, Tunnels, out string? rejectReason);
+
+        CnCNetGameEntry? sourceGame = _gameCollection?.FindByBroadcastChannel(normalizedBroadcast);
+        if (sourceGame == null)
+        {
+            Logger.Log($"CnCNet: ignoring GAME from unknown broadcast channel {normalizedBroadcast}.");
+            return;
+        }
+
+        CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(
+            sender,
+            ctcp,
+            Tunnels,
+            out string? rejectReason,
+            sourceGame.InternalName);
         if (game == null)
         {
             if (ctcp.StartsWith("GAME ", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(rejectReason))
@@ -615,15 +628,19 @@ public sealed class CnCNetSession : IDisposable
         {
             bucket.Remove(game.ChannelName);
             _games.Remove(game.ChannelName);
-            LogActivity($"Game closed: {game.RoomName} ({sender})", notifyUi: false);
+            if (IsCurrentGameBroadcast(normalizedBroadcast))
+                LogActivity($"Game closed: {game.RoomName} ({sender})", notifyUi: false);
         }
         else
         {
             bucket[game.ChannelName] = game;
             _games[game.ChannelName] = game;
-            LogActivity(
-                $"Game listed: {game.RoomName} by {sender} ({game.PlayerCount}/{game.MaxPlayers})",
-                notifyUi: false);
+            if (IsCurrentGameBroadcast(normalizedBroadcast))
+            {
+                LogActivity(
+                    $"Game listed: {game.RoomName} by {sender} ({game.PlayerCount}/{game.MaxPlayers})",
+                    notifyUi: false);
+            }
         }
 
         RefreshHostedGames();
@@ -631,11 +648,23 @@ public sealed class CnCNetSession : IDisposable
 
     private void RefreshHostedGames()
     {
-        var list = _games.Values
-            .OrderBy(g => g.RoomName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        List<CnCNetHostedGameSummary> list = GetHostedGamesForCurrentChannel();
         LobbyState.SetHostedGames(list);
         StateChanged?.Invoke();
+    }
+
+    private List<CnCNetHostedGameSummary> GetHostedGamesForCurrentChannel()
+    {
+        if (_currentGame?.HasGameBroadcast != true)
+            return [];
+
+        string broadcast = NormalizeIrcChannel(_currentGame.GameBroadcastChannel!);
+        if (!_gamesByBroadcast.TryGetValue(broadcast, out Dictionary<string, CnCNetHostedGameSummary>? bucket))
+            return [];
+
+        return bucket.Values
+            .OrderBy(g => g.RoomName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private void RefreshLobbyPlayers()
