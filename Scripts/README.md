@@ -7,6 +7,24 @@
 
 Click the following script file: `Build.bat`.
 
+## ClientAvalonia (Avalonia UI)
+
+| Script | Purpose |
+|--------|---------|
+| `build-clientavalonia.ps1` | Compile Release single-file exe → `CompiledAvalonia/` |
+| `package-mg-avalonia-patch.ps1` | MG patch zip: exe + `ClientDefinitions.ini` → `Dist/` |
+| `package-clientavalonia-patch.ps1` | Generic patch zip: exe + DTA lobby INI → `Dist/` |
+
+Examples:
+
+```powershell
+.\Scripts\build-clientavalonia.ps1
+.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2" -SkipValidate
+.\Scripts\package-mg-avalonia-patch.ps1
+```
+
+Full documentation: [README.md — ClientAvalonia section](../README.md#clientavalonia-avalonia-ui).
+
 ## Update the common assembly list
 
 You should do this if you have introduced any new NuGet dependencies.

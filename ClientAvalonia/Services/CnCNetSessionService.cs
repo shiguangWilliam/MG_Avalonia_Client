@@ -131,7 +131,8 @@ public sealed class CnCNetSessionService : IDisposable
 
     public bool TryLaunchHostedGame(out string message) => _session.TryLaunchHostedGame(out message);
 
-    public void SetGameRoomReady(bool ready) => _session.SetGameRoomReady(ready);
+    public void SetGameRoomReady(bool ready, bool autoReady = false)
+        => _session.SetGameRoomReady(ready, autoReady);
 
     public void SetGameRoomLocked(bool locked) => _session.SetGameRoomLocked(locked);
 

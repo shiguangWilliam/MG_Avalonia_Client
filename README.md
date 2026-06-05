@@ -60,6 +60,133 @@ Refer to [Docs/Build.md](/Docs/Build.md) for more information about building the
 
 </details>
 
+## ClientAvalonia (Avalonia UI)
+
+This fork adds **ClientAvalonia**, a .NET 8 Avalonia-based launcher for MG and other CnCNet mods. It publishes a **single-file** `ClientAvalonia.exe` (self-contained, Windows x64).
+
+> Before running scripts in `Scripts/`, close Visual Studio to avoid file locks on `obj/` / output folders.
+
+### Requirements
+
+* [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (build)
+* PowerShell 5.1 or newer (`powershell.exe`; `pwsh` also works)
+* Windows x64 (runtime target)
+* An installed MG (or mod) game root with `Resources/ThemeMG/`, `gamemd.exe`, and existing CnCNet config
+
+### Compile
+
+From the repository root:
+
+```powershell
+.\Scripts\build-clientavalonia.ps1
+```
+
+This will:
+
+1. Build `ClientCore` and `ClientUpdater` (Release, net8.0)
+2. Publish `ClientAvalonia` as a single-file exe to **`CompiledAvalonia/`**
+3. Stage fallback `Resources/DTA/` INI into `CompiledAvalonia/Resources/`
+4. Mirror the same bundle to **`ClientAvalonia/publish/`**
+5. Run a headless `MainMenu.ini` validation (unless skipped)
+
+Useful flags:
+
+| Flag | Purpose |
+|------|---------|
+| `-IsDebug` | Local dev only: multi-file publish (not for deploy) |
+| `-NoClean` | Incremental rebuild, keep previous output |
+| `-SkipValidate` | Skip INI smoke test after publish |
+| `-SkipWorkspaceMirror` | Do not copy to `ClientAvalonia/publish/` |
+
+Quick compile without cleaning:
+
+```powershell
+.\Scripts\build-clientavalonia.ps1 -SkipValidate -NoClean
+```
+
+Output to run locally:
+
+```powershell
+cd CompiledAvalonia
+.\ClientAvalonia.exe
+```
+
+Set the game root with `--game-root` if the exe is not inside the mod folder.
+
+### Deploy (test folder)
+
+To copy **only** `ClientAvalonia.exe` into an existing MG install (does **not** overwrite `Resources/`, maps, or INI):
+
+```powershell
+.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2" -SkipValidate
+```
+
+Or copy manually after a normal build:
+
+```powershell
+Copy-Item -Force .\CompiledAvalonia\ClientAvalonia.exe "D:\MG\MG-Avalonia测试区2\"
+```
+
+**Important:** close `ClientAvalonia.exe` before copying, or Windows will lock the file.
+
+The deploy step does **not** update `ClientDefinitions.ini`. For MG, merge or replace that file separately (see packaging below).
+
+### Package (patch zip)
+
+Two packaging scripts write to **`Dist/`**:
+
+#### MG patch (recommended for Moment of Genesis)
+
+Includes `ClientAvalonia.exe` + `Resources\ClientDefinitions.ini` (MG / YR / CnCNet R10).
+
+```powershell
+.\Scripts\package-mg-avalonia-patch.ps1
+```
+
+Optional:
+
+```powershell
+# Reuse an existing build
+.\Scripts\package-mg-avalonia-patch.ps1 -SkipBuild
+
+# Custom ClientDefinitions.ini (e.g. from your test install)
+.\Scripts\package-mg-avalonia-patch.ps1 -ClientDefinitionsIni "D:\MG\my-test\Resources\ClientDefinitions.ini"
+```
+
+Default INI template: `Packaging/MG-Avalonia/ClientDefinitions.ini`
+
+Output:
+
+* `Dist/MG-Avalonia-Patch-<yyyyMMdd-HHmm>/` — folder
+* `Dist/MG-Avalonia-Patch-<yyyyMMdd-HHmm>.zip` — distribute this
+
+Install: extract the zip into the **MG game root** (same folder as `gamemd.exe`). See `PATCH_README.txt` inside the zip.
+
+#### Generic DTA lobby patch
+
+Includes exe + `Resources/DTA/` lobby INI fallbacks (does not touch `ClientDefinitions.ini` or ThemeMG):
+
+```powershell
+.\Scripts\package-clientavalonia-patch.ps1
+```
+
+Output: `Dist/ClientAvalonia-Patch-<timestamp>.zip`
+
+### Patch contents (what gets overwritten)
+
+| Package | Overwrites | Does not overwrite |
+|---------|------------|-------------------|
+| MG-Avalonia-Patch | `ClientAvalonia.exe`, `Resources\ClientDefinitions.ini` | `ThemeMG/`, `DTA/`, `GameCollectionConfig.ini`, game INI/MIX |
+| ClientAvalonia-Patch | `ClientAvalonia.exe`, `Resources/DTA/*.ini` (listed lobby INIs) | `ThemeMG/`, `ClientDefinitions.ini`, `GameCollectionConfig.ini` |
+
+### Troubleshooting
+
+* **Copy failed / file in use** — exit ClientAvalonia and MGLauncher, then retry deploy or extract the zip again.
+* **Empty lobby / wrong game** — check `Resources\ClientDefinitions.ini` (`LocalGame`, `CnCNetProtocolRevision`) and `Resources/GameCollectionConfig.ini`.
+* **Missing UI windows** — ensure `Resources/ThemeMG/` exists; optionally add `package-clientavalonia-patch` DTA INIs as fallback.
+
+See also [Scripts/README.md](/Scripts/README.md) for the legacy XNA client build scripts.
+
 ## End-user usage
 
 * Windows: Windows 7 SP1 or higher is required. The preferred build is DirectX11 (.NET 4.8), i.e., `clientdx.exe`. If your GPU does not support DX11, consider using the OpenGL or XNA build instead. Advanced users may experiment with the .NET 8 builds at their discretion.

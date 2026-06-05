@@ -1,5 +1,6 @@
-using ClientAvalonia.Services;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Rendering;
+using ClientAvalonia.Services;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -80,8 +81,37 @@ public static class LobbyBehaviors
             return;
         }
 
-        CnCNetSessionService.Instance.SetGameRoomReady(true);
-        host.ShowStatus("Ready — waiting for host to launch.");
+        bool autoReady = host.ActiveRoot != null
+            && FindCheckBox(host.ActiveRoot, "chkAutoReady")?.IsChecked == true;
+
+        CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
+            .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+
+        if (autoReady)
+        {
+            CnCNetSessionService.Instance.SetGameRoomReady(true, autoReady: true);
+            host.ShowStatus("Auto ready — waiting for host to launch.");
+            return;
+        }
+
+        bool ready = !(local?.Ready ?? false);
+        CnCNetSessionService.Instance.SetGameRoomReady(ready, autoReady: false);
+        host.ShowStatus(ready ? "Ready — waiting for host to launch." : "Not ready.");
+    }
+
+    private static UiNodeViewModel? FindCheckBox(UiNodeViewModel root, string id)
+    {
+        if (root.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+            return root;
+
+        foreach (UiNodeViewModel child in root.Children)
+        {
+            UiNodeViewModel? found = FindCheckBox(child, id);
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
     private static void RefreshCnCNetListing(IUiNavigationHost host, string windowName)

@@ -891,8 +891,39 @@ public partial class MainWindow : Window, IUiNavigationHost
         UiNodeViewModel? lbMapList = FindVm(root, "lbMapList");
         bool canLaunch = _lobbySession.VisibleMaps.Count > 0
             && (lbMapList?.SelectedIndex ?? -1) >= 0;
+
+        CnCNetActiveGameRoom? cncRoom = CnCNetSessionService.Instance.ActiveGameRoom;
+        UiNodeViewModel? btnLaunch = FindVm(root, "btnLaunchGame");
+        UiNodeViewModel? chkAutoReady = FindVm(root, "chkAutoReady");
+
+        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase) && cncRoom != null)
+        {
+            if (cncRoom.IsHost)
+            {
+                btnLaunch?.SetDisplayText("Launch Game");
+            }
+            else
+            {
+                bool autoReady = chkAutoReady?.IsChecked == true;
+                canLaunch = canLaunch && !autoReady;
+                if (chkAutoReady != null)
+                    chkAutoReady.IsEnabled = true;
+
+                CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
+                    .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+                btnLaunch?.SetDisplayText(local is { Ready: true } ? "Not Ready" : "I'm Ready");
+            }
+
+            if (cncRoom.IsHost && chkAutoReady != null)
+            {
+                chkAutoReady.IsEnabled = false;
+                chkAutoReady.IsChecked = false;
+            }
+        }
+
         _bindingSession.State.SetCanLaunchGame(canLaunch);
-        FindVm(root, "btnLaunchGame")?.IsEnabled = canLaunch;
+        if (btnLaunch != null)
+            btnLaunch.IsEnabled = canLaunch;
     }
 
     private static bool IsGameLobbyWindow(string windowName)

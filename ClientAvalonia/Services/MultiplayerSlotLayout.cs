@@ -53,7 +53,7 @@ public static class MultiplayerSlotLayout
                 SideId = slot.SideIndex,
                 ColorId = slot.ColorIndex,
                 TeamId = slot.TeamIndex,
-                StartingLocation = slot.StartIndex + 1,
+                StartingLocation = slot.StartIndex,
                 Ready = slot.IsHumanLocal && slot.Name.Equals(hostName, StringComparison.OrdinalIgnoreCase),
             });
         }
@@ -72,7 +72,7 @@ public static class MultiplayerSlotLayout
                 SideId = slot.SideIndex,
                 ColorId = slot.ColorIndex,
                 TeamId = slot.TeamIndex,
-                StartingLocation = slot.StartIndex + 1,
+                StartingLocation = slot.StartIndex,
                 Ready = true,
             });
         }
@@ -106,7 +106,7 @@ public static class MultiplayerSlotLayout
         slot.SideIndex = human.SideId;
         slot.ColorIndex = human.ColorId;
         slot.TeamIndex = human.TeamId;
-        slot.StartIndex = Math.Max(0, human.StartingLocation - 1);
+        slot.StartIndex = Math.Max(0, human.StartingLocation);
     }
 
     private static void ApplyAi(LobbyPlayerSlot slot, CnCNetGameRoomPlayer ai)
@@ -118,7 +118,7 @@ public static class MultiplayerSlotLayout
         slot.SideIndex = ai.SideId;
         slot.ColorIndex = ai.ColorId;
         slot.TeamIndex = ai.TeamId;
-        slot.StartIndex = Math.Max(0, ai.StartingLocation - 1);
+        slot.StartIndex = Math.Max(0, ai.StartingLocation);
     }
 
     private static string ResolveAiName(IReadOnlyList<string> aiNames, int aiLevel)

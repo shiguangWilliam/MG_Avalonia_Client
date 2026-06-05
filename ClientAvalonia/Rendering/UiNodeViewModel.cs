@@ -67,6 +67,8 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     public ICommand ClickCommand { get; }
 
+    public void InvokeClick() => _behaviors.Resolve(Id).OnClick(this);
+
     public double CanvasLeft => Node.GetNumericProp("CanvasLeft");
     public double CanvasTop => Node.GetNumericProp("CanvasTop");
     public double Width => Node.GetNumericProp("Width");

@@ -40,7 +40,9 @@ public sealed class LobbyPlayerState
 
     public void LoadCatalogs(bool includeSpectator = true)
     {
-        SideEntries = LobbySideCatalog.Load(includeSpectator);
+        LobbySideCatalog.InvalidateCache();
+        LobbySideCatalogSnapshot snapshot = LobbySideCatalog.GetSnapshot(includeSpectator);
+        SideEntries = snapshot.Entries;
         SideNames = SideEntries.Select(s => s.DisplayName).ToList();
         AiNames = ProgramConstants.AI_PLAYER_NAMES.ToList();
         TeamNames = ProgramConstants.TEAMS.ToList();

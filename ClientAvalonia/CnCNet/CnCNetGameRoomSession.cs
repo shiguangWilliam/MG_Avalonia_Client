@@ -170,6 +170,12 @@ public sealed class CnCNetGameRoomSession
             return;
         }
 
+        if (ctcp.StartsWith("OR ", StringComparison.Ordinal) && IsHost)
+        {
+            ApplyOptionsRequest(sender, ctcp[3..].Trim());
+            return;
+        }
+
         if (ctcp.Equals("STRTD", StringComparison.Ordinal))
             LogNotice($"{sender} started the game.");
     }
@@ -186,20 +192,34 @@ public sealed class CnCNetGameRoomSession
         StateChanged?.Invoke();
     }
 
-    public void SetLocalReady(bool ready)
+    public void SetLocalReady(bool ready, bool autoReady = false)
     {
         if (IsHost)
             return;
 
-        SendCtcp($"R {(ready ? 1 : 0)}");
+        int readyState = autoReady ? 2 : ready ? 1 : 0;
+        SendCtcp($"R {readyState}");
         lock (_sync)
         {
             CnCNetGameRoomPlayer? local = FindPlayerLocked(_localNick);
             if (local != null)
-                local.Ready = ready;
+            {
+                local.Ready = readyState > 0;
+                local.AutoReady = autoReady;
+            }
         }
 
         StateChanged?.Invoke();
+    }
+
+    /// <summary>Joiner sends side/color/start/team (XNA CnCNetGameLobby.RequestPlayerOptions / OR CTCP).</summary>
+    public void RequestLocalPlayerOptions(LobbyPlayerSlot slot)
+    {
+        if (IsHost || _connection == null)
+            return;
+
+        int packed = PackOptionsRequest(slot.SideIndex, slot.ColorIndex, slot.StartIndex, slot.TeamIndex);
+        SendCtcp($"OR {packed}");
     }
 
     public void UpdateHostListing(string mapName, string gameModeName, string mapSha1)
@@ -240,7 +260,7 @@ public sealed class CnCNetGameRoomSession
             player.SideId = slot.SideIndex;
             player.ColorId = slot.ColorIndex;
             player.TeamId = slot.TeamIndex;
-            player.StartingLocation = slot.StartIndex + 1;
+            player.StartingLocation = slot.StartIndex;
         }
     }
 
@@ -253,13 +273,16 @@ public sealed class CnCNetGameRoomSession
         {
             List<CnCNetGameRoomPlayer> entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
             var readyByName = _players.Where(p => !p.IsAi)
-                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(p => p.Name, p => (p.Ready, p.AutoReady), StringComparer.OrdinalIgnoreCase);
 
             _players.Clear();
             foreach (CnCNetGameRoomPlayer entry in entries)
             {
-                if (!entry.IsAi && readyByName.TryGetValue(entry.Name, out CnCNetGameRoomPlayer? existing))
+                if (!entry.IsAi && readyByName.TryGetValue(entry.Name, out (bool Ready, bool AutoReady) existing))
+                {
                     entry.Ready = existing.Ready;
+                    entry.AutoReady = existing.AutoReady;
+                }
 
                 if (entry.IsHost || (!entry.IsAi && entry.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost))
                     entry.Ready = true;
@@ -294,11 +317,23 @@ public sealed class CnCNetGameRoomSession
             if (humans.Count == 0)
                 EnsureHostPlayerLocked();
 
-            humans = _players.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+            humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
             if (humans.Count == 0)
             {
                 message = "No players in the room.";
                 return false;
+            }
+
+            foreach (CnCNetGameRoomPlayer human in humans)
+            {
+                if (human.IsHost || human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost)
+                    continue;
+
+                if (!human.Ready)
+                {
+                    message = "Not all players are ready.";
+                    return false;
+                }
             }
 
             if (humans.Count > 1)
@@ -400,10 +435,58 @@ public sealed class CnCNetGameRoomSession
                 return;
 
             player.Ready = readyState > 0;
+            player.AutoReady = readyState > 1;
             BroadcastPlayerOptionsLocked();
         }
 
         StateChanged?.Invoke();
+    }
+
+    private void ApplyOptionsRequest(string playerName, string payload)
+    {
+        if (!IsHost || !int.TryParse(payload, out int packed))
+            return;
+
+        UnpackOptionsRequest(packed, out int side, out int color, out int start, out int team);
+
+        lock (_sync)
+        {
+            CnCNetGameRoomPlayer? player = FindPlayerLocked(playerName);
+            if (player == null || player.IsAi)
+                return;
+
+            if (side < 0 || color < 0 || start < 0 || team < 0)
+                return;
+
+            if (side != player.SideId || start != player.StartingLocation || team != player.TeamId)
+                ClearHumanReadyStatesLocked(exceptName: playerName);
+
+            player.SideId = side;
+            player.ColorId = color;
+            player.StartingLocation = start;
+            player.TeamId = team;
+            BroadcastPlayerOptionsLocked();
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    private void ClearHumanReadyStatesLocked(string? exceptName = null)
+    {
+        foreach (CnCNetGameRoomPlayer player in _players)
+        {
+            if (player.IsAi)
+                continue;
+
+            if (exceptName != null && player.Name.Equals(exceptName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (player.IsHost)
+                continue;
+
+            player.Ready = false;
+            player.AutoReady = false;
+        }
     }
 
     private void ApplyPlayerOptions(string sender, string message)
@@ -449,9 +532,11 @@ public sealed class CnCNetGameRoomSession
                 }
 
                 bool ready = false;
+                bool autoReady = false;
                 if (i < parts.Length && int.TryParse(parts[i], out int readyState))
                 {
                     ready = readyState > 0;
+                    autoReady = readyState > 1;
                     i++;
                 }
 
@@ -460,6 +545,7 @@ public sealed class CnCNetGameRoomSession
                     Name = nameOrLevel,
                     IsHost = nameOrLevel.Equals(HostName, StringComparison.OrdinalIgnoreCase),
                     Ready = ready,
+                    AutoReady = autoReady,
                     TeamId = team,
                     StartingLocation = start,
                     ColorId = color,
@@ -513,7 +599,8 @@ public sealed class CnCNetGameRoomSession
 
             if (!player.IsAi)
             {
-                sb.Append(player.Ready ? 1 : 0);
+                int readyState = player.AutoReady ? 2 : player.Ready ? 1 : 0;
+                sb.Append(readyState);
                 sb.Append(';');
             }
         }
@@ -611,6 +698,22 @@ public sealed class CnCNetGameRoomSession
     {
         byte[] bytes = [(byte)team, (byte)start, (byte)color, (byte)side];
         return BitConverter.ToInt32(bytes, 0);
+    }
+
+    /// <summary>OR CTCP uses side, color, start, team (XNA RequestPlayerOptions).</summary>
+    private static int PackOptionsRequest(int side, int color, int start, int team)
+    {
+        byte[] bytes = [(byte)side, (byte)color, (byte)start, (byte)team];
+        return BitConverter.ToInt32(bytes, 0);
+    }
+
+    private static void UnpackOptionsRequest(int packed, out int side, out int color, out int start, out int team)
+    {
+        byte[] bytes = BitConverter.GetBytes(packed);
+        side = bytes[0];
+        color = bytes[1];
+        start = bytes[2];
+        team = bytes[3];
     }
 
     private static void UnpackOptions(int packed, out int team, out int start, out int color, out int side)

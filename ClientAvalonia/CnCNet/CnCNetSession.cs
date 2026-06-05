@@ -306,7 +306,8 @@ public sealed class CnCNetSession : IDisposable
         return _gameRoom.TryHostLaunch(out message);
     }
 
-    public void SetGameRoomReady(bool ready) => _gameRoom?.SetLocalReady(ready);
+    public void SetGameRoomReady(bool ready, bool autoReady = false)
+        => _gameRoom?.SetLocalReady(ready, autoReady);
 
     public void SetGameRoomLocked(bool locked) => _gameRoom?.SetLocked(locked);
 

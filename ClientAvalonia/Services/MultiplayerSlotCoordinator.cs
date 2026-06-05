@@ -55,6 +55,22 @@ public static class MultiplayerSlotCoordinator
         gameRoom.SyncPlayersFromLobby(state, state.HostPlayerName);
     }
 
+    /// <summary>Joiner side/color/start/team edits (XNA MultiplayerGameLobby.CopyPlayerDataFromUI → OR CTCP).</summary>
+    public static void HandleJoinerOptionsEdit(
+        LobbyPlayerState state,
+        int slotIndex,
+        CnCNetGameRoomSession? gameRoom)
+    {
+        if (state.Mode != LobbyPlayerMode.Multiplayer || state.AllowHostPlayerOptions || gameRoom == null)
+            return;
+
+        LobbyPlayerSlot slot = state.Slots[slotIndex];
+        if (!slot.IsHumanLocal)
+            return;
+
+        gameRoom.RequestLocalPlayerOptions(slot);
+    }
+
     public static void HandleSkirmishNameEdit(LobbyPlayerState state, int slotIndex, UiNodeViewModel ddName)
     {
         LobbyPlayerRowKind rowKind = state.GetRowKind(slotIndex);

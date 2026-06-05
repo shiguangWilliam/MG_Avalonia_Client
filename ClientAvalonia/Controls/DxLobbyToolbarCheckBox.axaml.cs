@@ -14,6 +14,7 @@ public partial class DxLobbyToolbarCheckBox : UserControl
             return;
 
         vm.IsChecked = !vm.IsChecked;
+        vm.InvokeClick();
         e.Handled = true;
     }
 }

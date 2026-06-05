@@ -47,12 +47,13 @@ public static class LobbyPlayerBindingApplier
         var sideItems = BuildSideItems(playerState, resources);
         var teamItems = BuildTeamItems(playerState);
         var colorItems = BuildColorItems(resources);
-        var startItems = Enumerable.Range(1, 8).Select(i => i.ToString()).ToArray();
+        var startItems = Enumerable.Range(0, 8).Select(i => i.ToString()).ToArray();
 
         UiNodeViewModel? firstName = null;
         UiNodeViewModel? firstSide = null;
         UiNodeViewModel? firstColor = null;
         UiNodeViewModel? firstTeam = null;
+        UiNodeViewModel? firstStart = null;
 
         for (int slot = LobbyPlayerSlot.MaxSlots - 1; slot >= 0; slot--)
         {
@@ -80,25 +81,26 @@ public static class LobbyPlayerBindingApplier
             x += layout.TeamWidth + layout.HorizontalMargin;
             firstTeam ??= ddTeam;
 
-            WireSlot(slot, playerState, panel, ddName, ddSide, ddColor, ddTeam);
+            UiNodeViewModel? ddStart = null;
+            if (layout.StartWidth > 0)
+            {
+                ddStart = CreateDropdown(
+                    $"ddPlayerStart{slot}", x, y, layout.StartWidth, DropDownHeight, resources, behaviors, startItems);
+                ddStart.IsVisible = true;
+                firstStart ??= ddStart;
+            }
+
+            WireSlot(slot, playerState, panel, ddName, ddSide, ddColor, ddTeam, ddStart);
 
             panel.Children.Add(ddName);
             panel.Children.Add(ddSide);
             panel.Children.Add(ddColor);
             panel.Children.Add(ddTeam);
-
-            if (layout.StartWidth > 0)
-            {
-                UiNodeViewModel ddStart = CreateDropdown(
-                    $"ddPlayerStart{slot}", x, y, layout.StartWidth, DropDownHeight, resources, behaviors, startItems);
-                ddStart.IsVisible = false;
-                ddStart.IsEnabled = false;
-                WireStartSlot(slot, playerState, ddStart);
+            if (ddStart != null)
                 panel.Children.Add(ddStart);
-            }
         }
 
-        EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, resources, behaviors);
+        EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
 
         panel.Node.Props["LobbyPlayerSlotsBuilt"] = true;
         SyncUiFromState(panel, playerState);
@@ -147,6 +149,7 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel? ddSide,
         UiNodeViewModel? ddColor,
         UiNodeViewModel? ddTeam,
+        UiNodeViewModel? ddStart,
         ResourceResolver resources,
         BehaviorRegistry behaviors)
     {
@@ -157,6 +160,9 @@ public static class LobbyPlayerBindingApplier
         EnsureCaption(panel, "lblSide", "SIDE", ddSide.CanvasLeft, layout.CaptionY, resources, behaviors);
         EnsureCaption(panel, "lblColor", "COLOR", ddColor.CanvasLeft, layout.CaptionY, resources, behaviors);
         EnsureCaption(panel, "lblTeam", "TEAM", ddTeam.CanvasLeft, layout.CaptionY, resources, behaviors);
+
+        if (ddStart != null)
+            EnsureCaption(panel, "lblStart", "START", ddStart.CanvasLeft, layout.CaptionY, resources, behaviors);
     }
 
     private static void EnsureCaption(
@@ -276,7 +282,8 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel ddName,
         UiNodeViewModel ddSide,
         UiNodeViewModel ddColor,
-        UiNodeViewModel ddTeam)
+        UiNodeViewModel ddTeam,
+        UiNodeViewModel? ddStart)
     {
         void SyncNameFromUi()
         {
@@ -292,7 +299,7 @@ public static class LobbyPlayerBindingApplier
                 ddSide,
                 ddColor,
                 ddTeam,
-                null);
+                ddStart);
 
             if (playerState.Mode == LobbyPlayerMode.Multiplayer)
                 MultiplayerSlotCoordinator.HandleHostSlotEdit(
@@ -320,28 +327,29 @@ public static class LobbyPlayerBindingApplier
                 ddSide,
                 ddColor,
                 ddTeam,
-                null);
+                ddStart);
 
-            if (playerState.Mode == LobbyPlayerMode.Multiplayer)
-                MultiplayerSlotCoordinator.HandleHostOptionsEdit(
-                    playerState,
-                    CnCNetSession.Instance.GameRoom);
+            if (playerState.Mode != LobbyPlayerMode.Multiplayer)
+                return;
+
+            CnCNetGameRoomSession? gameRoom = CnCNetSession.Instance.GameRoom;
+            if (playerState.AllowHostPlayerOptions)
+            {
+                MultiplayerSlotCoordinator.HandleHostOptionsEdit(playerState, gameRoom);
+                SyncUiFromState(panel, playerState);
+            }
+            else if (playerState.Slots[slotIndex].IsHumanLocal)
+            {
+                MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(playerState, slotIndex, gameRoom);
+            }
         }
 
         ddName.SelectionChanged += SyncNameFromUi;
         ddSide.SelectionChanged += SyncOptionsFromUi;
         ddColor.SelectionChanged += SyncOptionsFromUi;
         ddTeam.SelectionChanged += SyncOptionsFromUi;
-    }
-
-    private static void WireStartSlot(int slotIndex, LobbyPlayerState playerState, UiNodeViewModel ddStart)
-    {
-        void SyncFromUi()
-        {
-            playerState.Slots[slotIndex].StartIndex = ddStart.SelectedIndex >= 0 ? ddStart.SelectedIndex : 0;
-        }
-
-        ddStart.SelectionChanged += SyncFromUi;
+        if (ddStart != null)
+            ddStart.SelectionChanged += SyncOptionsFromUi;
     }
 
     private static void SyncUiFromState(UiNodeViewModel panel, LobbyPlayerState playerState)
@@ -377,8 +385,8 @@ public static class LobbyPlayerBindingApplier
 
                 if (ddStart != null)
                 {
-                    ddStart.IsEnabled = optionsEnabled && showOptions;
-                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled && showOptions, state.StartIndex);
+                    ddStart.IsVisible = showOptions;
+                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled, state.StartIndex);
                 }
             }
         }
@@ -428,6 +436,8 @@ public static class LobbyPlayerBindingApplier
             {
                 LobbySideCatalog.RandomInternalName => resources.LoadFirstBitmap(["randomicon.png"]),
                 LobbySideCatalog.SpectatorInternalName => resources.LoadFirstBitmap(["spectatoricon.png"]),
+                _ when entry.IsRandomSelector => GameAssetResolver.LoadSideIcon(resources, entry.IconBaseName)
+                    ?? resources.LoadFirstBitmap(["randomicon.png"]),
                 _ => GameAssetResolver.LoadSideIcon(resources, entry.IconBaseName),
             };
 

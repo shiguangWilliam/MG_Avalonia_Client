@@ -1,7 +1,5 @@
 using ClientAvalonia.Domain;
 using ClientCore;
-using ClientCore.Extensions;
-using Rampastring.Tools;
 
 namespace ClientAvalonia.Services;
 
@@ -24,16 +22,15 @@ public static class LobbyPlayerHouseResolver
         if (occupiedSlots.Count == 0)
             return [];
 
-        string[] sideNames = ClientConfiguration.Instance.Sides
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        int sideCount = sideNames.Length;
-        int randomSelectorCount = LoadRandomSelectorCount();
-        int spectatorSideId = sideCount + randomSelectorCount;
+        LobbySideCatalogSnapshot sides = LobbySideCatalog.GetSnapshot();
+        int sideCount = sides.SideCount;
+        int randomSelectorCount = sides.RandomSelectorCount;
+        int spectatorSideId = sides.SpectatorSideIndex;
 
         var random = new Random(randomSeed);
         var freeColors = Enumerable.Range(0, MultiplayerColorCatalog.Load().Count).ToList();
         var mpColors = MultiplayerColorCatalog.Load();
-        var randomSelectors = LoadRandomSelectors();
+        var randomSelectors = sides.RandomSelectorSideIds;
         var disallowedSides = new bool[sideCount];
 
         var resolved = new List<ResolvedHouse>(occupiedSlots.Count);
@@ -134,36 +131,5 @@ public static class LobbyPlayerHouseResolver
         }
 
         return sideIndex;
-    }
-
-    private static int LoadRandomSelectorCount()
-        => LoadRandomSelectors().Count + 1;
-
-    private static List<int[]> LoadRandomSelectors()
-    {
-        string path = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
-        if (!File.Exists(path))
-            return [];
-
-        var ini = new IniFile(path);
-        List<string>? keys = ini.GetSectionKeys("RandomSelectors");
-        if (keys == null)
-            return [];
-
-        var selectors = new List<int[]>();
-        foreach (string key in keys)
-        {
-            string raw = ini.GetStringValue("RandomSelectors", key, string.Empty);
-            if (string.IsNullOrWhiteSpace(raw))
-                continue;
-
-            int[] sides = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(int.Parse)
-                .ToArray();
-            if (sides.Length > 0)
-                selectors.Add(sides);
-        }
-
-        return selectors;
     }
 }

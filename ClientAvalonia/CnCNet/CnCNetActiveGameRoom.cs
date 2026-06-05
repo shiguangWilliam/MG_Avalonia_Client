@@ -35,6 +35,8 @@ public sealed class CnCNetGameRoomPlayer
 
     public bool Ready { get; set; }
 
+    public bool AutoReady { get; set; }
+
     public int Port { get; set; }
 
     public int SideId { get; set; }
