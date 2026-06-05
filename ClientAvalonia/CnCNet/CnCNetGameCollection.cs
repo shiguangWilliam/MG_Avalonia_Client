@@ -1,0 +1,163 @@
+using ClientCore;
+using Rampastring.Tools;
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace ClientAvalonia.CnCNet;
+
+/// <summary>Supported CnCNet games and IRC channels (XNA GameCollection parity).</summary>
+public sealed class CnCNetGameCollection
+{
+    public IReadOnlyList<CnCNetGameEntry> Games { get; private set; } = [];
+
+    public void Initialize()
+    {
+        var games = new List<CnCNetGameEntry>();
+
+        CnCNetGameEntry[] defaultGames =
+        [
+            Entry("dta", "Dawn of the Tiberium Age", "#cncnet-dta", "#cncnet-dta-games", "dtaicon.png"),
+            Entry("ti", "Twisted Insurrection", "#cncnet-ti", "#cncnet-ti-games", "tiicon.png"),
+            Entry("mo", "Mental Omega", "#cncnet-mo", "#cncnet-mo-games", "moicon.png"),
+            Entry("rr", "YR Red-Resurrection", "#redres-lobby", "#redres-games", "rricon.png"),
+            Entry("re", "Rise of the East", "#riseoftheeast", "#rote-games", "reicon.png"),
+            Entry("cncr", "C&C: Reloaded", "#cncreloaded", "#cncreloaded-games", "cncricon.png"),
+            Entry("td", "Tiberian Dawn", "#cncnet-td", "#cncnet-td-games", "tdicon.png", supported: false),
+            Entry("ra", "Red Alert", "#cncnet-ra", "#cncnet-ra-games", "raicon.png"),
+            Entry("d2k", "Dune 2000", "#cncnet-d2k", "#cncnet-d2k-games", "d2kicon.png", supported: false),
+            Entry("ts", "Tiberian Sun", "#cncnet-ts", "#cncnet-ts-games", "tsicon.png"),
+            Entry("yr", "Yuri's Revenge", "#cncnet-yr", "#cncnet-yr-games", "yricon.png"),
+            Entry("ss", "Sole Survivor", "#cncnet-ss", "#cncnet-ss-games", "ssicon.png", supported: false),
+        ];
+
+        games.AddRange(defaultGames);
+        games.AddRange(LoadCustomGames(defaultGames));
+        games.Add(new CnCNetGameEntry
+        {
+            InternalName = "cncnet",
+            UiName = "General CnCNet Chat",
+            ChatChannel = "#cncnet",
+            AlwaysEnabled = true,
+            IconFileName = "cncneticon.png",
+        });
+
+        Games = games;
+
+        if (GetGameIndexFromInternalName(ClientConfiguration.Instance.LocalGame) < 0)
+            Logger.Log($"CnCNetGameCollection: LocalGame={ClientConfiguration.Instance.LocalGame} not found in collection.");
+    }
+
+    public int GetGameIndexFromInternalName(string gameName)
+    {
+        for (int i = 0; i < Games.Count; i++)
+        {
+            if (gameName.Equals(Games[i].InternalName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
+    }
+
+    public CnCNetGameEntry? GetLocalGame()
+    {
+        int index = GetGameIndexFromInternalName(ClientConfiguration.Instance.LocalGame);
+        return index >= 0 ? Games[index] : null;
+    }
+
+    public IReadOnlyList<CnCNetGameEntry> GetSelectableGames()
+    {
+        var list = new List<CnCNetGameEntry>();
+        foreach (CnCNetGameEntry game in Games)
+        {
+            if (!game.Supported)
+                continue;
+
+            if (string.IsNullOrWhiteSpace(game.ChatChannel))
+                continue;
+
+            list.Add(game);
+        }
+
+        return list;
+    }
+
+    private static CnCNetGameEntry Entry(
+        string id,
+        string uiName,
+        string chat,
+        string broadcast,
+        string icon,
+        bool supported = true)
+        => new()
+        {
+            InternalName = id,
+            UiName = uiName,
+            ChatChannel = NormalizeChannel(chat),
+            GameBroadcastChannel = NormalizeChannel(broadcast),
+            IconFileName = icon,
+            Supported = supported,
+        };
+
+    private static List<CnCNetGameEntry> LoadCustomGames(IReadOnlyList<CnCNetGameEntry> existingGames)
+    {
+        var customGames = new List<CnCNetGameEntry>();
+        string? path = ResolveConfigPath();
+        if (path == null)
+            return customGames;
+
+        var ini = new IniFile(path);
+        List<string>? keys = ini.GetSectionKeys("CustomGames");
+        if (keys == null)
+            return customGames;
+
+        var knownIds = new HashSet<string>(existingGames.Select(g => g.InternalName), StringComparer.OrdinalIgnoreCase);
+
+        foreach (string key in keys)
+        {
+            string section = ini.GetStringValue("CustomGames", key, string.Empty);
+            if (string.IsNullOrWhiteSpace(section) || !ini.SectionExists(section))
+                continue;
+
+            string id = ini.GetStringValue(section, "InternalName", string.Empty).ToLowerInvariant();
+            if (string.IsNullOrEmpty(id) || knownIds.Contains(id))
+                continue;
+
+            string chat = NormalizeChannel(ini.GetStringValue(section, "ChatChannel", string.Empty));
+            string broadcast = NormalizeChannel(ini.GetStringValue(section, "GameBroadcastChannel", string.Empty));
+            if (string.IsNullOrEmpty(chat))
+                continue;
+
+            string icon = ini.GetStringValue(section, "IconFilename", id + "icon.png");
+            customGames.Add(new CnCNetGameEntry
+            {
+                InternalName = id,
+                UiName = ini.GetStringValue(section, "UIName", id.ToUpperInvariant()),
+                ChatChannel = chat,
+                GameBroadcastChannel = string.IsNullOrEmpty(broadcast) ? null : broadcast,
+                IconFileName = icon,
+            });
+            knownIds.Add(id);
+        }
+
+        return customGames;
+    }
+
+    private static string? ResolveConfigPath()
+    {
+        string basePath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "GameCollectionConfig.ini");
+        if (File.Exists(basePath))
+            return basePath;
+
+        string themePath = SafePath.CombineFilePath(ProgramConstants.GetResourcePath(), "GameCollectionConfig.ini");
+        return File.Exists(themePath) ? themePath : null;
+    }
+
+    private static string NormalizeChannel(string channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+            return string.Empty;
+
+        return channel.StartsWith('#') ? channel : "#" + channel;
+    }
+}

@@ -5,12 +5,15 @@
 #
 # Builds the CnCNet Avalonia UI Client.
 #
-# Unlike the main build.ps1 which handles multiple rendering engines
-# (XNA/DX/GL) and .NET Framework 4.8, this script focuses solely on
-# the cross-platform Avalonia client targeting .NET 8.0.
+# Release publish: self-contained single-file ClientAvalonia.exe
+# (Avalonia / SkiaSharp / ClientCore DLLs embedded in the exe).
+# Policy: note/clientavalonia-build.md — Release packaging is ALWAYS single-file.
 #
-# Post-publish it stages DXMainClient example resources into
-# CompiledAvalonia/ so the output is runnable without a separate copy step.
+# Default outputs (Release):
+#   1. CompiledAvalonia/          — project pack directory (+ staged resources)
+#   2. ClientAvalonia/publish/    — workspace mirror of the same bundle
+#
+# Debug (-IsDebug): multi-file bin output for local dev ONLY — not for deploy.
 #
 #####################################################################
 
@@ -18,24 +21,27 @@
 .SYNOPSIS
   Builds the Avalonia-based CnCNet Client.
 .DESCRIPTION
-  Restores/builds shared dependencies (ClientCore), publishes ClientAvalonia,
-  and copies DTA + core INI resources into CompiledAvalonia/.
+  Restores/builds shared dependencies (ClientCore), publishes ClientAvalonia
+  as a self-contained single-file exe, stages DTA + core INI resources, and
+  mirrors the bundle to ClientAvalonia/publish/.
 .PARAMETER IsDebug
-  Build in Debug configuration instead of Release.
+  Local development only: framework-dependent multi-file publish (NOT for packaging/deploy).
 .PARAMETER Log
   Enable diagnostic verbosity for the build output.
 .PARAMETER NoClean
-  Skip cleaning the CompiledAvalonia output folder before building.
-.PARAMETER BuildDependencies
-  Also build ClientCore (requires Rampastring.Tools submodule). Off by default until ClientAvalonia references ClientCore.
+  Skip cleaning output folders before building.
 .PARAMETER SkipValidate
   Skip headless MainMenu.ini validation after publish.
+.PARAMETER SkipWorkspaceMirror
+  Skip copying the bundle to ClientAvalonia/publish/.
+.PARAMETER DeployTo
+  Optional third deploy target (e.g. MG mod test folder). Only runtime exe
+  is copied — game Resources/INI on the target are not overwritten.
 .EXAMPLE
   build-clientavalonia.ps1
-  Build the Avalonia client in Release mode.
+  Release single-file build → CompiledAvalonia + ClientAvalonia/publish
 .EXAMPLE
-  build-clientavalonia.ps1 -IsDebug
-  Build the Avalonia client in Debug mode.
+  build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2"
 #>
 param(
   [Parameter()]
@@ -55,6 +61,10 @@ param(
   $SkipValidate,
 
   [Parameter()]
+  [switch]
+  $SkipWorkspaceMirror,
+
+  [Parameter()]
   [string]
   $DeployTo
 )
@@ -66,7 +76,9 @@ $Script:ProjectPath = Join-Path (Join-Path $RepoRoot 'ClientAvalonia') 'ClientAv
 $Script:ClientCorePath = Join-Path (Join-Path $RepoRoot 'ClientCore') 'ClientCore.csproj'
 $Script:ClientUpdaterPath = Join-Path (Join-Path $RepoRoot 'ClientUpdater') 'ClientUpdater.csproj'
 $Script:CompiledRoot = Join-Path $RepoRoot 'CompiledAvalonia'
+$Script:WorkspacePackRoot = Join-Path (Join-Path $RepoRoot 'ClientAvalonia') 'publish'
 $Script:Configuration = if ($IsDebug) { 'Debug' } else { 'Release' }
+$Script:IsSingleFile = -not $IsDebug
 # PowerShell 5.1 splits bare semicolons in -property values; MSBuild accepts %3B.
 $Script:ConfigurationsProperty = '-p:Configurations=Debug%3BRelease'
 
@@ -101,7 +113,7 @@ function Copy-AvaloniaClientResources {
     return
   }
 
-  Write-Host 'Staging client resources into CompiledAvalonia ...'
+  Write-Host "Staging client resources into $DestinationRoot ..."
 
   $DtaSrc = Join-Path $ResourcesSrc 'DTA'
   $DtaDest = Join-Path $DestinationRoot 'Resources\DTA'
@@ -132,7 +144,58 @@ function Copy-AvaloniaClientResources {
   }
 }
 
-function Copy-AvaloniaClientToDeployTarget {
+function Copy-AvaloniaPublishBundle {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]
+    $SourceRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]
+    $DestinationRoot,
+
+    [Parameter()]
+    [switch]
+    $RuntimeOnly
+  )
+
+  if (!(Test-Path -LiteralPath $DestinationRoot)) {
+    New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
+  }
+
+  Write-Host "Copying publish bundle → $DestinationRoot ..."
+
+  if ($RuntimeOnly) {
+    Copy-AvaloniaRuntimeOnly -SourceRoot $SourceRoot -DestinationRoot $DestinationRoot
+    return
+  }
+
+  # Full mirror: exe + staged resources (skip loose Avalonia DLLs in single-file mode).
+  $items = @('ClientAvalonia.exe', 'Resources', 'SUN.ini', 'Maps', 'INI', 'MIX')
+  foreach ($name in $items) {
+    $src = Join-Path $SourceRoot $name
+    if (!(Test-Path -LiteralPath $src)) {
+      continue
+    }
+
+    $dest = Join-Path $DestinationRoot $name
+    if (Test-Path -LiteralPath $src -PathType Container) {
+      if (Test-Path -LiteralPath $dest) {
+        Remove-Item -LiteralPath $dest -Recurse -Force
+      }
+      Copy-Item -LiteralPath $src -Destination $dest -Recurse -Force
+    }
+    else {
+      Copy-Item -LiteralPath $src -Destination $DestinationRoot -Force
+    }
+  }
+
+  if (-not $Script:IsSingleFile) {
+    Copy-AvaloniaRuntimeOnly -SourceRoot $SourceRoot -DestinationRoot $DestinationRoot
+  }
+}
+
+function Copy-AvaloniaRuntimeOnly {
   param(
     [Parameter(Mandatory = $true)]
     [string]
@@ -143,11 +206,17 @@ function Copy-AvaloniaClientToDeployTarget {
     $DestinationRoot
   )
 
-  if (!(Test-Path -LiteralPath $DestinationRoot)) {
-    throw "Deploy target not found: $DestinationRoot"
-  }
+  if ($Script:IsSingleFile) {
+    $exe = Join-Path $SourceRoot 'ClientAvalonia.exe'
+    if (!(Test-Path -LiteralPath $exe)) {
+      throw "Single-file publish missing: $exe"
+    }
 
-  Write-Host "Deploying ClientAvalonia runtime to $DestinationRoot ..."
+    Remove-LooseSingleFileArtifacts -PackRoot $DestinationRoot
+    Copy-Item -LiteralPath $exe -Destination $DestinationRoot -Force
+    Write-Host "Deployed single-file exe (removed legacy loose DLLs in target)."
+    return
+  }
 
   $RuntimeFiles = @(
     'ClientAvalonia.exe',
@@ -173,7 +242,7 @@ function Copy-AvaloniaClientToDeployTarget {
     }
   }
 
-  Get-ChildItem -LiteralPath $SourceRoot -Filter 'Avalonia*.dll' | ForEach-Object {
+  Get-ChildItem -LiteralPath $SourceRoot -Filter 'Avalonia*.dll' -ErrorAction SilentlyContinue | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $DestinationRoot -Force
   }
 
@@ -190,16 +259,67 @@ function Copy-AvaloniaClientToDeployTarget {
   }
 }
 
-# -----------------------------------------------------------------
-# Clean previous output
-# -----------------------------------------------------------------
-if (!$NoClean -and (Test-Path -LiteralPath $Script:CompiledRoot)) {
-  Write-Host "Cleaning $Script:CompiledRoot ..."
-  Remove-Item -Recurse -Force -LiteralPath $Script:CompiledRoot
+function Remove-LooseSingleFileArtifacts {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]
+    $PackRoot
+  )
+
+  if (-not $Script:IsSingleFile) {
+    return
+  }
+
+  $patterns = @(
+    'Avalonia*.dll',
+    'ClientAvalonia.dll',
+    'ClientCore.dll',
+    'ClientUpdater.dll',
+    'Rampastring.Tools.dll',
+    'HarfBuzzSharp.dll',
+    'SkiaSharp.dll',
+    'MicroCom.Runtime.dll',
+    'System.IO.Pipelines.dll',
+    'Tmds.DBus.Protocol.dll',
+    'Newtonsoft.Json*.dll',
+    'System.Net.Http.Formatting.dll',
+    'Ude.NetStandard.dll',
+    '*.deps.json',
+    '*.runtimeconfig.json',
+    '*.pdb'
+  )
+
+  foreach ($pattern in $patterns) {
+    Get-ChildItem -LiteralPath $PackRoot -Filter $pattern -File -ErrorAction SilentlyContinue |
+      ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+  }
+
+  $runtimesDir = Join-Path $PackRoot 'runtimes'
+  if (Test-Path -LiteralPath $runtimesDir) {
+    Remove-Item -LiteralPath $runtimesDir -Recurse -Force
+  }
+}
+
+function Clear-PackDirectory {
+  param([string]$Path)
+  if (Test-Path -LiteralPath $Path) {
+    Write-Host "Cleaning $Path ..."
+    Remove-Item -Recurse -Force -LiteralPath $Path
+  }
 }
 
 # -----------------------------------------------------------------
-# Build shared dependencies (ClientCore)
+# Clean previous output
+# -----------------------------------------------------------------
+if (!$NoClean) {
+  Clear-PackDirectory -Path $Script:CompiledRoot
+  if (!$SkipWorkspaceMirror) {
+    Clear-PackDirectory -Path $Script:WorkspacePackRoot
+  }
+}
+
+# -----------------------------------------------------------------
+# Build shared dependencies
 # -----------------------------------------------------------------
 if (Test-Path -LiteralPath $Script:ClientCorePath) {
   Write-Host "Building ClientCore ($Script:Configuration) ..."
@@ -225,18 +345,41 @@ if (Test-Path -LiteralPath $Script:ClientUpdaterPath) {
 # -----------------------------------------------------------------
 # Publish ClientAvalonia
 # -----------------------------------------------------------------
-Write-Host "Publishing ClientAvalonia ($Script:Configuration) ..."
-Invoke-DotNet publish $Script:ProjectPath `
-  "--configuration:$Script:Configuration" `
-  '--framework:net8.0' `
-  "--output:$Script:CompiledRoot" `
-  '--self-contained:false' `
-  $Script:ConfigurationsProperty `
-  '-p:DisableGitVersionTask=true' `
-  '-p:GitVersion_MsBuildTask_Disabled=true' `
+Write-Host "Publishing ClientAvalonia ($Script:Configuration$(if ($Script:IsSingleFile) { ', single-file win-x64' } else { ''})) ..."
+
+$publishArgs = @(
+  'publish', $Script:ProjectPath,
+  "--configuration:$Script:Configuration",
+  '--framework:net8.0',
+  "--output:$Script:CompiledRoot",
+  $Script:ConfigurationsProperty,
+  '-p:DisableGitVersionTask=true',
+  '-p:GitVersion_MsBuildTask_Disabled=true',
   '-p:LangVersion=latest'
+)
+
+if ($Script:IsSingleFile) {
+  $publishArgs += @(
+    '-p:PublishProfile=win-x64-singlefile'
+  )
+}
+else {
+  $publishArgs += '--self-contained:false'
+  Write-Warning 'Debug multi-file publish is for local dev only — do not deploy.'
+}
+
+Invoke-DotNet @publishArgs
+
+Remove-LooseSingleFileArtifacts -PackRoot $Script:CompiledRoot
 
 Copy-AvaloniaClientResources -DestinationRoot $Script:CompiledRoot
+
+# -----------------------------------------------------------------
+# Mirror to workspace pack directory (ClientAvalonia/publish)
+# -----------------------------------------------------------------
+if (!$SkipWorkspaceMirror) {
+  Copy-AvaloniaPublishBundle -SourceRoot $Script:CompiledRoot -DestinationRoot $Script:WorkspacePackRoot
+}
 
 # -----------------------------------------------------------------
 # Headless smoke test
@@ -247,7 +390,13 @@ if (!$SkipValidate) {
     Write-Host 'Validating MainMenu.ini load ...'
     Push-Location $Script:CompiledRoot
     try {
-      Invoke-DotNet ClientAvalonia.dll --validate-ini $MainMenuIni
+      if ($Script:IsSingleFile -and (Test-Path -LiteralPath (Join-Path $Script:CompiledRoot 'ClientAvalonia.exe'))) {
+        & (Join-Path $Script:CompiledRoot 'ClientAvalonia.exe') --validate-ini $MainMenuIni
+        if ($LASTEXITCODE -ne 0) { throw "Validation failed (exit $LASTEXITCODE)" }
+      }
+      else {
+        Invoke-DotNet ClientAvalonia.dll --validate-ini $MainMenuIni
+      }
     }
     finally {
       Pop-Location
@@ -259,10 +408,27 @@ if (!$SkipValidate) {
 }
 
 Write-Host ''
-Write-Host "Build succeeded. Output: $Script:CompiledRoot"
-Write-Host 'Run:  cd CompiledAvalonia && dotnet ClientAvalonia.dll'
+Write-Host 'Build succeeded.'
+Write-Host "  Project pack:  $Script:CompiledRoot"
+if (!$SkipWorkspaceMirror) {
+  Write-Host "  Workspace:     $Script:WorkspacePackRoot"
+}
+if ($Script:IsSingleFile) {
+  $exe = Join-Path $Script:CompiledRoot 'ClientAvalonia.exe'
+  if (Test-Path -LiteralPath $exe) {
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $exe).Length / 1MB, 1)
+    Write-Host "  Single-file:   ClientAvalonia.exe (${sizeMb} MB)"
+  }
+  Write-Host 'Run:  cd CompiledAvalonia && .\ClientAvalonia.exe'
+}
+else {
+  Write-Host 'Run:  cd CompiledAvalonia && dotnet ClientAvalonia.dll'
+}
 
 if ($DeployTo) {
-  Copy-AvaloniaClientToDeployTarget -SourceRoot $Script:CompiledRoot -DestinationRoot $DeployTo
-  Write-Host "Deployed to: $DeployTo"
+  if (!(Test-Path -LiteralPath $DeployTo)) {
+    throw "Deploy target not found: $DeployTo"
+  }
+  Copy-AvaloniaRuntimeOnly -SourceRoot $Script:CompiledRoot -DestinationRoot $DeployTo
+  Write-Host "  Deployed exe:  $DeployTo"
 }

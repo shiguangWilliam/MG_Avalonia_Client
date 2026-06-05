@@ -12,6 +12,10 @@ public sealed class MultiplayerLobbyState
 
     public string ChatChannelDisplay { get; private set; } = string.Empty;
 
+    public IReadOnlyList<string> AvailableChannelNames { get; private set; } = [];
+
+    public int SelectedChannelIndex { get; private set; }
+
     public IReadOnlyList<string> ChannelPlayers { get; private set; } = [];
 
     public IReadOnlyList<string> HostedGames { get; private set; } = [];
@@ -37,6 +41,8 @@ public sealed class MultiplayerLobbyState
         LocalPlayerName = core.LocalPlayerName;
         ConnectionStatus = core.ConnectionStatus;
         ChatChannelDisplay = core.ChatChannelDisplay;
+        AvailableChannelNames = core.AvailableChannelNames;
+        SelectedChannelIndex = core.SelectedChannelIndex;
         ChannelPlayers = core.ChannelPlayers;
         HostedGameDetails = core.HostedGameDetails;
         HostedGames = core.HostedGames;

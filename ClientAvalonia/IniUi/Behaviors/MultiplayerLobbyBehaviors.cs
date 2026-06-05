@@ -4,10 +4,10 @@ using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
-/// <summary>CnCNet / LAN channel lobby behaviors wired to Core CnCNet session.</summary>
+/// <summary>CnCNet / LAN channel lobby behaviors (XNA CnCNetLobby create/join flow).</summary>
 public static class MultiplayerLobbyBehaviors
 {
-    private static bool _gameRoomNavigationPending;
+    private static bool _handlersRegistered;
 
     public static void Register(BehaviorRegistry registry, IUiNavigationHost host, string windowName)
     {
@@ -16,38 +16,7 @@ public static class MultiplayerLobbyBehaviors
             : "CnCNetGameLobby";
 
         if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
-        {
-            void OnGameRoomJoined(CnCNetActiveGameRoom room)
-            {
-                if (!_gameRoomNavigationPending)
-                    return;
-
-                _gameRoomNavigationPending = false;
-                UnregisterGameRoomHandlers();
-                host.ShowStatus($"Entered \"{room.RoomName}\".");
-                host.NavigateTo(gameLobbyWindow);
-            }
-
-            void OnGameRoomJoinFailed(string message)
-            {
-                if (!_gameRoomNavigationPending)
-                    return;
-
-                _gameRoomNavigationPending = false;
-                UnregisterGameRoomHandlers();
-                host.ShowStatus(message);
-            }
-
-            void UnregisterGameRoomHandlers()
-            {
-                CnCNetSessionService.Instance.GameRoomJoined -= OnGameRoomJoined;
-                CnCNetSessionService.Instance.GameRoomJoinFailed -= OnGameRoomJoinFailed;
-            }
-
-            UnregisterGameRoomHandlers();
-            CnCNetSessionService.Instance.GameRoomJoined += OnGameRoomJoined;
-            CnCNetSessionService.Instance.GameRoomJoinFailed += OnGameRoomJoinFailed;
-        }
+            EnsureCnCNetGameRoomHandlers(host, gameLobbyWindow);
 
         registry.Register("btnNewGame", _ =>
         {
@@ -71,16 +40,7 @@ public static class MultiplayerLobbyBehaviors
                 return;
             }
 
-            _gameRoomNavigationPending = true;
-
-            if (!CnCNetSessionService.Instance.TryCreateGame(out string message))
-            {
-                _gameRoomNavigationPending = false;
-                host.ShowStatus(message);
-                return;
-            }
-
-            host.ShowStatus(message);
+            host.OpenGameCreationOverlay();
         });
 
         registry.Register("btnJoinGame", _ =>
@@ -107,27 +67,47 @@ public static class MultiplayerLobbyBehaviors
             if (host.ActiveRoot != null)
                 GameDataBindingApplier.SyncChannelGameSelection(host.ActiveRoot, CnCNetSessionService.Instance.LobbyState);
 
-            _gameRoomNavigationPending = true;
-
             if (!CnCNetSessionService.Instance.TryJoinSelectedGame(out string message))
             {
-                _gameRoomNavigationPending = false;
                 host.ShowStatus(message);
                 return;
             }
 
             host.ShowStatus(message);
+            host.NavigateTo(gameLobbyWindow);
         });
 
         registry.Register("btnLogout", _ =>
         {
-            _gameRoomNavigationPending = false;
-
             if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
                 CnCNetSessionService.Instance.Disconnect();
 
             host.ShowStatus("Logged out.");
             host.NavigateBack();
         });
+    }
+
+    private static void EnsureCnCNetGameRoomHandlers(IUiNavigationHost host, string gameLobbyWindow)
+    {
+        if (_handlersRegistered)
+            return;
+
+        _handlersRegistered = true;
+
+        CnCNetSessionService.Instance.GameRoomJoined += room =>
+        {
+            host.ShowStatus($"Entered \"{room.RoomName}\".");
+            if (!host.CurrentWindow.Equals(gameLobbyWindow, StringComparison.OrdinalIgnoreCase))
+                host.NavigateTo(gameLobbyWindow);
+            else
+                host.RefreshCnCNetGameRoomPlayers();
+        };
+
+        CnCNetSessionService.Instance.GameRoomJoinFailed += message =>
+        {
+            host.ShowStatus(message);
+            if (host.CurrentWindow.Equals(gameLobbyWindow, StringComparison.OrdinalIgnoreCase))
+                host.NavigateBack();
+        };
     }
 }

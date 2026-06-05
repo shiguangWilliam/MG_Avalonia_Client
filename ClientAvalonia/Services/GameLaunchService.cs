@@ -5,6 +5,7 @@ using System.Threading;
 using Avalonia.Controls;
 using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Loading;
+using ClientAvalonia.Platform;
 using ClientCore;
 using ClientCore.Extensions;
 using ClientAvalonia.CnCNet;
@@ -21,6 +22,12 @@ public sealed class GameLaunchService
     public bool IsRunning => _runningProcess is { HasExited: false };
 
     public event Action<string>? StatusChanged;
+
+    /// <summary>Raised after the game process starts (UI should minimize / show in-progress overlay).</summary>
+    public event Action? GameProcessStarted;
+
+    /// <summary>Raised after the game process exits; client must stay open (XNA GameInProgressWindow).</summary>
+    public event Action? GameProcessExited;
 
     public bool TryLaunchSkirmish(
         ClientEnvironment environment,
@@ -122,29 +129,26 @@ public sealed class GameLaunchService
 
         try
         {
-            var process = new Process
+            var startInfo = new ProcessStartInfo
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = gameFileInfo.FullName,
-                    Arguments = arguments,
-                    WorkingDirectory = ProgramConstants.GamePath,
-                    UseShellExecute = false,
-                },
-                EnableRaisingEvents = true,
+                FileName = gameFileInfo.FullName,
+                Arguments = arguments,
+                WorkingDirectory = ProgramConstants.GamePath,
+                UseShellExecute = false,
             };
 
-            process.Exited += (_, _) =>
-            {
-                StatusChanged?.Invoke("Game exited.");
-                _runningProcess = null;
-            };
+            Logger.Log("Launch executable: " + startInfo.FileName);
+            Logger.Log("Launch arguments: " + startInfo.Arguments);
 
-            Logger.Log("Launch executable: " + process.StartInfo.FileName);
-            Logger.Log("Launch arguments: " + process.StartInfo.Arguments);
+            Process process = StartDetachedProcess(startInfo);
+            process.EnableRaisingEvents = true;
+            process.Exited += OnProcessExited;
 
-            process.Start();
             _runningProcess = process;
+            ProgramConstants.IsInGame = true;
+            GameProcessStarting?.Invoke();
+            GameProcessStarted?.Invoke();
+
             message = $"Launched {gameExecutableName}";
             StatusChanged?.Invoke(message);
             return true;
@@ -158,6 +162,41 @@ public sealed class GameLaunchService
             StatusChanged?.Invoke(message);
             return false;
         }
+    }
+
+    /// <summary>Aligned with XNA <see cref="ClientGUI.GameProcessLogic.GameProcessStarting"/>.</summary>
+    public event Action? GameProcessStarting;
+
+    private static Process StartDetachedProcess(ProcessStartInfo startInfo)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return WindowsDetachedProcess.Start(startInfo);
+
+        var process = new Process { StartInfo = startInfo };
+        process.Start();
+        return process;
+    }
+
+    private void OnProcessExited(object? sender, EventArgs e)
+    {
+        if (sender is Process process)
+        {
+            process.Exited -= OnProcessExited;
+            try
+            {
+                process.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        _runningProcess = null;
+        ProgramConstants.IsInGame = false;
+
+        Logger.Log("GameLaunchService: game process exited.");
+        GameProcessExited?.Invoke();
+        StatusChanged?.Invoke("Game exited.");
     }
 
     private static bool WaitForIniPreprocessor(Window? errorOwner)

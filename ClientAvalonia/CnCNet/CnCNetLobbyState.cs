@@ -17,6 +17,10 @@ public sealed class CnCNetLobbyState
 
     public string ChatChannelDisplay { get; private set; } = string.Empty;
 
+    public IReadOnlyList<string> AvailableChannelNames { get; private set; } = [];
+
+    public int SelectedChannelIndex { get; private set; }
+
     public IReadOnlyList<string> ChannelPlayers { get; private set; } = [];
 
     public IReadOnlyList<string> HostedGames { get; private set; } = [];
@@ -38,6 +42,12 @@ public sealed class CnCNetLobbyState
 
     public void SetChannelName(string uiName, string chatChannel)
         => ChatChannelDisplay = string.IsNullOrWhiteSpace(uiName) ? chatChannel : uiName;
+
+    public void SetAvailableChannels(IReadOnlyList<string> names, int selectedIndex)
+    {
+        AvailableChannelNames = names;
+        SelectedChannelIndex = selectedIndex >= 0 && selectedIndex < names.Count ? selectedIndex : 0;
+    }
 
     public void SetChannelPlayers(IReadOnlyList<string> players) => ChannelPlayers = players;
 

@@ -28,6 +28,10 @@ public interface IUiNavigationHost
 
     void OpenCampaignOverlay();
 
+    void OpenGameCreationOverlay();
+
+    void CloseGameCreationOverlay();
+
     void ShowStatus(string message);
 
     void ExitApplication();
@@ -45,6 +49,8 @@ public interface IUiNavigationHost
     bool TryLaunchCampaign(out string message);
 
     void RefreshCnCNetGameListing();
+
+    void RefreshCnCNetGameRoomPlayers();
 
     void SelectOptionsTab(int index);
 

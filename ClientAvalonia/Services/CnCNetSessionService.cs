@@ -27,13 +27,17 @@ public sealed class CnCNetSessionService : IDisposable
 
     public CnCNetIrcConnection? Connection => _session.Connection;
 
-    public CnCNetGameChannels? Channels => _session.Channels;
+    public CnCNetGameCollection? GameCollection => _session.GameCollection;
+
+    public int SelectedChannelIndex => _session.SelectedChannelIndex;
 
     public CnCNetActiveGameRoom? ActiveGameRoom => _session.ActiveGameRoom;
 
     public CnCNetGameRoomSession? GameRoom => _session.GameRoom;
 
     public bool IsGameRoomJoinPending => _session.IsGameRoomJoinPending;
+
+    public string LocalNick => _session.LocalNick;
 
     private int _uiUpdateScheduled;
 
@@ -75,6 +79,17 @@ public sealed class CnCNetSessionService : IDisposable
     public void UpdateGameRoomListing(string mapName, string gameModeName, string mapSha1)
         => _session.GameRoom?.UpdateHostListing(mapName, gameModeName, mapSha1);
 
+    public bool TryCreateGame(CnCNetGameCreationRequest request, out string message)
+    {
+        if (_session.IsGameRoomJoinPending)
+        {
+            message = "Already joining a game room — please wait.";
+            return false;
+        }
+
+        return CnCNetLobbyOperations.TryCreateGame(_session, request, out message);
+    }
+
     public bool TryCreateGame(out string message)
     {
         if (_session.IsGameRoomJoinPending)
@@ -103,6 +118,8 @@ public sealed class CnCNetSessionService : IDisposable
 
         return CnCNetLobbyOperations.TryJoinGame(_session, game, password: null, out message);
     }
+
+    public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);
 
     public bool TryLaunchHostedGame(out string message) => _session.TryLaunchHostedGame(out message);
 

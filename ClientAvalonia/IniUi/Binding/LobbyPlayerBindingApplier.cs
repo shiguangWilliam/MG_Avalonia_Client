@@ -1,3 +1,4 @@
+using Avalonia.Media.Imaging;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Loading;
@@ -43,7 +44,7 @@ public static class LobbyPlayerBindingApplier
 
         PlayerOptionLayout layout = ReadLayout(root);
         var nameItems = BuildNameItems(playerState);
-        var sideItems = BuildSideItems(playerState);
+        var sideItems = BuildSideItems(playerState, resources);
         var teamItems = BuildTeamItems(playerState);
         var colorItems = new List<string> { "Random" };
         colorItems.AddRange(MultiplayerColorCatalog.Load().Select(c => c.Name));
@@ -64,7 +65,7 @@ public static class LobbyPlayerBindingApplier
             x += layout.NameWidth + layout.HorizontalMargin;
             firstName ??= ddName;
 
-            UiNodeViewModel ddSide = CreateDropdown(
+            UiNodeViewModel ddSide = CreateSideDropdown(
                 $"ddPlayerSide{slot}", x, y, layout.SideWidth, DropDownHeight, resources, behaviors, sideItems);
             x += layout.SideWidth + layout.HorizontalMargin;
             firstSide ??= ddSide;
@@ -331,11 +332,24 @@ public static class LobbyPlayerBindingApplier
         return items.ToArray();
     }
 
-    private static string[] BuildSideItems(LobbyPlayerState playerState)
+    private static IReadOnlyList<ComboItemViewModel> BuildSideItems(LobbyPlayerState playerState, ResourceResolver resources)
     {
-        var items = new List<string> { "Random" };
-        items.AddRange(playerState.SideNames);
-        return items.ToArray();
+        return playerState.SideEntries.Select(entry =>
+        {
+            Bitmap? icon = entry.InternalName switch
+            {
+                LobbySideCatalog.RandomInternalName => resources.LoadFirstBitmap(["randomicon.png"]),
+                LobbySideCatalog.SpectatorInternalName => resources.LoadFirstBitmap(["spectatoricon.png"]),
+                _ => GameAssetResolver.LoadSideIcon(resources, entry.IconBaseName),
+            };
+
+            return new ComboItemViewModel
+            {
+                Text = entry.DisplayName,
+                Tag = entry.InternalName,
+                Icon = icon,
+            };
+        }).ToList();
     }
 
     private static string[] BuildTeamItems(LobbyPlayerState playerState)
@@ -366,6 +380,34 @@ public static class LobbyPlayerBindingApplier
     {
         string? raw = root.GetIniString(key);
         return int.TryParse(raw, out int value) ? value : fallback;
+    }
+
+    private static UiNodeViewModel CreateSideDropdown(
+        string id,
+        double x,
+        double y,
+        double width,
+        double height,
+        ResourceResolver resources,
+        BehaviorRegistry behaviors,
+        IReadOnlyList<ComboItemViewModel> items)
+    {
+        var node = new UiNode
+        {
+            Id = id,
+            ControlType = "XNAClientDropDown",
+            TemplateKey = "DxLobbyComboBox",
+        };
+        node.Props["CanvasLeft"] = x;
+        node.Props["CanvasTop"] = y;
+        node.Props["Width"] = width;
+        node.Props["Height"] = height;
+        node.Props["IsVisible"] = true;
+        node.Props["IsEnabled"] = true;
+
+        var vm = new UiNodeViewModel(node, resources, behaviors);
+        vm.SetComboItemEntries(items);
+        return vm;
     }
 
     private static UiNodeViewModel CreateDropdown(

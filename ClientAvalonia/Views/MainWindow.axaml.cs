@@ -1,14 +1,19 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
+using Avalonia.Threading;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientCore;
+using ClientCore.Settings;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
+using ClientAvalonia.IniUi.Overlays;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 
@@ -31,6 +36,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     private UiViewModelFactory? _mainViewModelFactory;
     private UiNodeViewModel? _activeRoot;
     private UiNodeViewModel? _overlayRoot;
+    private GameCreationOverlayContext? _gameCreationOverlay;
     private string? _floatingOverlayWindow;
     private readonly Stack<string> _navStack = new();
 
@@ -48,10 +54,14 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public UiNodeViewModel? OverlayRoot => _overlayRoot;
 
+    private bool _restoreWindowAfterGame;
+
     public MainWindow()
     {
         _bindingSession = new UiBindingSession(_environment);
-        _gameLaunch.StatusChanged += msg => ShowStatus(msg);
+        _gameLaunch.StatusChanged += msg => Dispatcher.UIThread.Post(() => ShowStatus(msg));
+        _gameLaunch.GameProcessStarted += () => Dispatcher.UIThread.Post(OnGameProcessStarted);
+        _gameLaunch.GameProcessExited += () => Dispatcher.UIThread.Post(OnGameProcessExited);
         _updateService.EnsureHandlersRegistered();
         _updateService.StatusChanged += OnUpdateStatusChanged;
         ClientStartupService.LocalVersionsChecked += OnLocalVersionsChecked;
@@ -183,6 +193,12 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void CloseFloatingOverlay()
     {
+        if (_floatingOverlayWindow?.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            CloseGameCreationOverlay();
+            return;
+        }
+
         PART_FloatingOverlay.IsVisible = false;
         PART_FloatingOverlay.IsHitTestVisible = false;
         PART_OverlayView.Content = null;
@@ -190,6 +206,55 @@ public partial class MainWindow : Window, IUiNavigationHost
         _overlayRoot = null;
         _overlayEngine = null;
         _overlayBehaviors.Clear();
+        _floatingOverlayWindow = null;
+    }
+
+    public void OpenGameCreationOverlay()
+    {
+        if (IsFloatingOverlayOpen)
+            return;
+
+        if (!CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowStatus("Create game is only available from the CnCNet lobby.");
+            return;
+        }
+
+        var tunnels = CnCNetSessionService.Instance.Tunnels;
+        if (tunnels.Count == 0)
+        {
+            ShowStatus("No NAT tunnels available.");
+            return;
+        }
+
+        (Control root, GameCreationOverlayContext context) = GameCreationOverlayBuilder.Build(tunnels);
+        _gameCreationOverlay = context;
+        GameCreationOverlayBehaviors.Wire(context, this, "CnCNetGameLobby");
+
+        double overlayWidth = double.IsNaN(root.Width) || root.Width <= 0 ? 490 : root.Width;
+        double overlayHeight = double.IsNaN(root.Height) || root.Height <= 0 ? 220 : root.Height;
+        PART_OverlayPanel.Width = overlayWidth;
+        PART_OverlayPanel.Height = overlayHeight;
+        PART_OverlayView.Width = overlayWidth;
+        PART_OverlayView.Height = overlayHeight;
+        PART_OverlayView.Content = root;
+        PART_FloatingOverlay.IsVisible = true;
+        PART_FloatingOverlay.IsHitTestVisible = true;
+        PART_RootView.IsHitTestVisible = false;
+        _floatingOverlayWindow = "GameCreationWindow";
+        ShowStatus("Configure game room settings.");
+    }
+
+    public void CloseGameCreationOverlay()
+    {
+        if (_floatingOverlayWindow?.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase) != true)
+            return;
+
+        PART_FloatingOverlay.IsVisible = false;
+        PART_FloatingOverlay.IsHitTestVisible = false;
+        PART_OverlayView.Content = null;
+        PART_RootView.IsHitTestVisible = true;
+        _gameCreationOverlay = null;
         _floatingOverlayWindow = null;
     }
 
@@ -226,7 +291,40 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void ShowStatus(string message) => PART_Status.Text = message;
 
-    public void ExitApplication() => Close();
+    public void ExitApplication()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            desktop.Shutdown();
+        else
+            Close();
+    }
+
+    private void OnGameProcessStarted()
+    {
+        if (!UserINISettings.Instance.MinimizeWindowsOnGameStart)
+            return;
+
+        _restoreWindowAfterGame = WindowState != WindowState.Minimized;
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnGameProcessExited()
+    {
+        UserINISettings.Instance.ReloadSettings();
+
+        if (_restoreWindowAfterGame && UserINISettings.Instance.MinimizeWindowsOnGameStart)
+        {
+            WindowState = WindowState.Normal;
+            Activate();
+        }
+
+        _restoreWindowAfterGame = false;
+
+        if (_activeRoot != null && IsGameLobbyWindow(CurrentWindow))
+            UpdateLaunchButtonState(_activeRoot);
+
+        ShowStatus("Game exited — returned to lobby.");
+    }
 
     public void CommitSettings()
     {
@@ -570,6 +668,12 @@ public partial class MainWindow : Window, IUiNavigationHost
             UpdateCnCNetGameBroadcastListing(_activeRoot);
     }
 
+    public void RefreshCnCNetGameRoomPlayers()
+    {
+        if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            ApplyCnCNetGameRoomPlayers(_activeRoot);
+    }
+
     private List<string> GetCnCNetPlayerNames()
     {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
@@ -695,31 +799,48 @@ public partial class MainWindow : Window, IUiNavigationHost
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
     {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
-        if (gameRoom == null)
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (gameRoom == null || room == null)
             return;
 
+        string localNick = CnCNetSessionService.Instance.LocalNick;
         IReadOnlyList<CnCNetGameRoomPlayer> players = gameRoom.Players;
-        if (players.Count == 0)
-            return;
 
         _lobbySession.PlayerState.ClearSlots();
-        for (int i = 0; i < players.Count && i < LobbyPlayerSlot.MaxSlots; i++)
+
+        if (players.Count == 0 && room.IsHost)
         {
-            CnCNetGameRoomPlayer player = players[i];
-            LobbyPlayerSlot slot = _lobbySession.PlayerState.Slots[i];
-            slot.Name = player.Name;
-            slot.IsAi = false;
-            slot.IsHumanLocal = player.Name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
-            slot.SideIndex = player.SideId;
-            slot.ColorIndex = player.ColorId;
-            slot.TeamIndex = player.TeamId;
-            slot.StartIndex = Math.Max(0, player.StartingLocation - 1);
+            LobbyPlayerSlot hostSlot = _lobbySession.PlayerState.Slots[0];
+            hostSlot.Name = localNick;
+            hostSlot.IsAi = false;
+            hostSlot.IsHumanLocal = true;
+        }
+        else
+        {
+            for (int i = 0; i < players.Count && i < LobbyPlayerSlot.MaxSlots; i++)
+            {
+                CnCNetGameRoomPlayer player = players[i];
+                LobbyPlayerSlot slot = _lobbySession.PlayerState.Slots[i];
+                slot.Name = player.Name;
+                slot.IsAi = false;
+                slot.IsHumanLocal = player.Name.Equals(localNick, StringComparison.OrdinalIgnoreCase);
+                slot.SideIndex = player.SideId;
+                slot.ColorIndex = player.ColorId;
+                slot.TeamIndex = player.TeamId;
+                slot.StartIndex = Math.Max(0, player.StartingLocation - 1);
+            }
         }
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
         LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
         UpdateLaunchButtonState(root);
-        RefreshCnCNetGameListing();
+
+        if (room.IsHost)
+            RefreshCnCNetGameListing();
+
+        ShowStatus(room.IsHost
+            ? $"Hosting \"{room.RoomName}\" — waiting for players."
+            : $"Joined \"{room.RoomName}\" — waiting for host.");
     }
 
     private void OnGameResourcesLoaded()

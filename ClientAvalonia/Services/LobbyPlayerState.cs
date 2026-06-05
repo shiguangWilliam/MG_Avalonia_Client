@@ -15,15 +15,16 @@ public sealed class LobbyPlayerState
 
     public IReadOnlyList<string> SideNames { get; private set; } = [];
 
+    public IReadOnlyList<LobbySideEntry> SideEntries { get; private set; } = [];
+
     public IReadOnlyList<string> AiNames { get; private set; } = [];
 
     public IReadOnlyList<string> TeamNames { get; private set; } = [];
 
-    public void LoadDefaults()
+    public void LoadDefaults(bool includeSpectator = true)
     {
-        SideNames = ClientConfiguration.Instance.Sides
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+        SideEntries = LobbySideCatalog.Load(includeSpectator);
+        SideNames = SideEntries.Select(s => s.DisplayName).ToList();
         AiNames = ProgramConstants.AI_PLAYER_NAMES.ToList();
         TeamNames = ProgramConstants.TEAMS.ToList();
 

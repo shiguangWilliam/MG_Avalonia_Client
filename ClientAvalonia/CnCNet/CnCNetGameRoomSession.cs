@@ -19,6 +19,7 @@ public sealed class CnCNetGameRoomSession
     private CnCNetGameChannels? _channels;
     private bool _locked;
     private int _uniqueGameId;
+    private string _localNick = ProgramConstants.PLAYERNAME;
 
     public CnCNetGameRoomSession(CnCNetActiveGameRoom room)
     {
@@ -59,6 +60,9 @@ public sealed class CnCNetGameRoomSession
         _connection = connection;
         _gameBroadcast = gameBroadcast;
         _channels = channels;
+        _localNick = connection.CurrentNick;
+        if (IsHost)
+            HostName = _localNick;
     }
 
     public void OnLocalJoined()
@@ -66,11 +70,11 @@ public sealed class CnCNetGameRoomSession
         lock (_sync)
         {
             _uniqueGameId = Random.Shared.Next(1_000_000, int.MaxValue);
-            _channelUsers.Add(ProgramConstants.PLAYERNAME);
+            _channelUsers.Add(_localNick);
 
             if (IsHost)
             {
-                HostName = ProgramConstants.PLAYERNAME;
+                HostName = _localNick;
                 EnsureHostPlayerLocked();
                 _gameBroadcast?.StartHost(_connection!, _channels!, Room);
                 BroadcastPlayerOptionsLocked();
@@ -105,7 +109,7 @@ public sealed class CnCNetGameRoomSession
 
             if (IsHost)
             {
-                AddOrRefreshHumanPlayerLocked(name, name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase));
+                AddOrRefreshHumanPlayerLocked(name, name.Equals(_localNick, StringComparison.OrdinalIgnoreCase));
                 BroadcastPlayerOptionsLocked();
             }
         }
@@ -443,12 +447,12 @@ public sealed class CnCNetGameRoomSession
 
     private void EnsureHostPlayerLocked()
     {
-        if (_players.Any(p => p.Name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase)))
+        if (_players.Any(p => p.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)))
             return;
 
         _players.Insert(0, new CnCNetGameRoomPlayer
         {
-            Name = ProgramConstants.PLAYERNAME,
+            Name = _localNick,
             IsHost = true,
             Ready = true,
         });

@@ -46,9 +46,19 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     public string? ConnectedServer { get; private set; }
 
+    /// <summary>Confirmed IRC nick (001 / local JOIN / NICK).</summary>
+    public string CurrentNick { get; private set; } = ProgramConstants.PLAYERNAME;
+
+    public bool IsLocalUser(string nick)
+        => !string.IsNullOrWhiteSpace(nick)
+           && nick.Equals(CurrentNick, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Fired after TCP connect and USER/NICK registration sent.</summary>
     public event Action? Connected;
 
-    /// <summary>Fired after IRC numeric 001 ‚Ä?client may JOIN channels.</summary>
+    public event Action<int, string, string>? ChannelJoinFailed;
+
+    /// <summary>Fired after IRC numeric 001 ù?client may JOIN channels.</summary>
     public event Action<string>? WelcomeReceived;
 
     public event Action<string>? ConnectionFailed;
@@ -104,7 +114,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             ? $"JOIN {normalized}"
             : $"JOIN {normalized} {key}";
         EnqueueSend(command);
-        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"‚Ü?JOIN {normalized}" : $"‚Ü?JOIN {normalized} (key)");
+        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"ù?JOIN {normalized}" : $"ù?JOIN {normalized} (key)");
     }
 
     /// <summary>Immediate JOIN (welcome / create game). Bypasses SendSleep queue delay.</summary>
@@ -128,7 +138,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         SendImmediate(message);
-        EmitActivity($"‚Ü?{message}");
+        EmitActivity($"ù?{message}");
     }
 
     /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage).</summary>
@@ -239,13 +249,13 @@ public sealed class CnCNetIrcConnection : IDisposable
         EnqueueSend($"USER {localGame}.{_systemId} 0 * :{realname}");
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
         EmitActivity("Registering USER/NICK...");
-        EmitActivity("‚Ü?NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("ù?NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void ChangeNickname()
     {
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
-        EmitActivity("‚Ü?NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("ù?NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void OnNameAlreadyInUse()
@@ -312,7 +322,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             }
             catch (IOException)
             {
-                // ReadTimeout (1s) when idle ‚Ä?not a disconnect.
+                // ReadTimeout (1s) when idle ù?not a disconnect.
                 continue;
             }
             catch (Exception ex)
@@ -474,6 +484,9 @@ public sealed class CnCNetIrcConnection : IDisposable
             case "JOIN":
                 HandleJoin(prefix, parameters);
                 break;
+            case "NICK":
+                HandleNick(prefix, parameters);
+                break;
             case "PART":
                 HandlePart(prefix, parameters);
                 break;
@@ -489,6 +502,9 @@ public sealed class CnCNetIrcConnection : IDisposable
         {
             case 001:
             {
+                if (parameters.Count > 0 && !string.IsNullOrWhiteSpace(parameters[0]))
+                    SetCurrentNick(parameters[0]);
+
                 string welcome = parameters.Count > 1 ? parameters[1] : "Welcome.";
                 _welcomeMessageReceived = true;
                 ServerMessage?.Invoke(welcome);
@@ -515,9 +531,10 @@ public sealed class CnCNetIrcConnection : IDisposable
                 if (parameters.Count > 1)
                 {
                     string detail = parameters.Count > 2 ? string.Join(' ', parameters.Skip(2)) : string.Empty;
-                    string joinError = $"Cannot join {parameters[1]} (IRC {code}){ (string.IsNullOrWhiteSpace(detail) ? "" : ": " + detail) }";
+                    string joinError = $"Cannot join {parameters[1]} (IRC {code}){(string.IsNullOrWhiteSpace(detail) ? "" : ": " + detail)}";
                     ServerMessage?.Invoke(joinError);
                     ActivityLogged?.Invoke(joinError);
+                    ChannelJoinFailed?.Invoke(code, parameters[1], detail);
                 }
                 break;
             case 451:
@@ -575,7 +592,33 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string user = prefix[..exclam];
         string channel = NormalizeChannelParameter(parameters[0]);
+        if (IsLocalUser(user))
+            SetCurrentNick(user);
         UserJoined?.Invoke(channel, user);
+    }
+
+    private void HandleNick(string prefix, List<string> parameters)
+    {
+        if (parameters.Count == 0)
+            return;
+
+        int exclam = prefix.IndexOf('!');
+        if (exclam <= 0)
+            return;
+
+        string oldNick = prefix[..exclam];
+        string newNick = parameters[0].TrimStart(':');
+        if (IsLocalUser(oldNick))
+            SetCurrentNick(newNick);
+    }
+
+    private void SetCurrentNick(string nick)
+    {
+        if (string.IsNullOrWhiteSpace(nick))
+            return;
+
+        CurrentNick = nick;
+        ProgramConstants.PLAYERNAME = nick;
     }
 
     private void HandlePart(string prefix, List<string> parameters)
@@ -608,7 +651,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         if (parameters[0].Length > 0
-            && !parameters[0].Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase)
+            && !IsLocalUser(parameters[0])
             && !parameters[0].Equals("*", StringComparison.Ordinal))
             return;
 

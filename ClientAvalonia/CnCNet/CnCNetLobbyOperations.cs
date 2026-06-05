@@ -8,7 +8,7 @@ namespace ClientAvalonia.CnCNet;
 /// <summary>Create / join game room flows (XNA CnCNetLobby + GameCreationWindow subset).</summary>
 public static class CnCNetLobbyOperations
 {
-    public static bool TryCreateGame(CnCNetSession session, out string message)
+    public static bool TryCreateGame(CnCNetSession session, CnCNetGameCreationRequest request, out string message)
     {
         if (session.Connection is not { IsConnected: true })
         {
@@ -22,16 +22,21 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        if (session.Tunnels.Count == 0)
+        string roomName = request.RoomName.Trim();
+        if (string.IsNullOrWhiteSpace(roomName))
         {
-            message = "No NAT tunnels available.";
+            message = "Game room name is required.";
             return false;
         }
 
-        CnCNetTunnelEntry tunnel = session.Tunnels.FirstOrDefault(t => t.Official) ?? session.Tunnels[0];
+        if (roomName.Length > 23)
+            roomName = roomName[..23];
+
         string channelName = GenerateUniqueGameChannel(session.Channels.ChatChannel);
-        string password = Utilities.CalculateSHA1ForString(channelName)[..10];
-        string roomName = $"{ProgramConstants.PLAYERNAME}'s Game";
+        bool customPassword = !string.IsNullOrWhiteSpace(request.Password);
+        string password = customPassword
+            ? request.Password.Trim()
+            : Utilities.CalculateSHA1ForString(channelName)[..10];
 
         session.JoinGameChannel(channelName, password, out string? joinError);
         if (joinError != null)
@@ -45,16 +50,35 @@ public static class CnCNetLobbyOperations
             RoomName = roomName,
             ChannelName = channelName,
             Password = password,
-            Tunnel = tunnel,
+            Tunnel = request.Tunnel,
             HostName = ProgramConstants.PLAYERNAME,
             IsHost = true,
-            MaxPlayers = 8,
-            SkillLevel = 0,
-            CustomPassword = false,
+            MaxPlayers = request.MaxPlayers,
+            SkillLevel = request.SkillLevel,
+            CustomPassword = customPassword,
         });
 
         message = $"Creating game \"{roomName}\" on {channelName}...";
         return true;
+    }
+
+    public static bool TryCreateGame(CnCNetSession session, out string message)
+    {
+        if (session.Tunnels.Count == 0)
+        {
+            message = "No NAT tunnels available.";
+            return false;
+        }
+
+        CnCNetTunnelEntry tunnel = session.Tunnels.FirstOrDefault(t => t.Official) ?? session.Tunnels[0];
+        var request = new CnCNetGameCreationRequest
+        {
+            RoomName = $"{ProgramConstants.PLAYERNAME}'s Game",
+            MaxPlayers = 8,
+            Tunnel = tunnel,
+            SkillLevel = ClientConfiguration.Instance.DefaultSkillLevelIndex,
+        };
+        return TryCreateGame(session, request, out message);
     }
 
     public static bool TryJoinGame(CnCNetSession session, CnCNetHostedGameSummary game, string? password, out string message)

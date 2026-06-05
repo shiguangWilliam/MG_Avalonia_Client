@@ -167,25 +167,59 @@
   </DataTemplate>
 
   <DataTemplate x:Key="DxLobbyComboBox" DataType="vm:UiNodeViewModel">
-    <ComboBox Width="{Binding Width}"
-              Height="{Binding Height}"
-              MinWidth="{Binding Width}"
-              MaxWidth="{Binding Width}"
-              MinHeight="{Binding Height}"
-              MaxHeight="{Binding Height}"
-              Background="#CC14100C"
-              BorderBrush="#6B4E2E"
-              Foreground="{StaticResource DxTextPrimaryBrush}"
-              FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
-              FontSize="11"
-              Padding="4,2"
-              CornerRadius="4"
-              ItemsSource="{Binding ComboItems}"
-              SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
-              IsEnabled="{Binding IsEnabled}"
-              IsVisible="{Binding IsVisible}"
-              PlaceholderText="{Binding Text}"
-              ToolTip.Tip="{Binding ToolTip}" />
+    <Panel Width="{Binding Width}" Height="{Binding Height}">
+      <ComboBox Width="{Binding Width}"
+                Height="{Binding Height}"
+                MinWidth="{Binding Width}"
+                MaxWidth="{Binding Width}"
+                MinHeight="{Binding Height}"
+                MaxHeight="{Binding Height}"
+                Background="#CC14100C"
+                BorderBrush="#6B4E2E"
+                Foreground="{StaticResource DxTextPrimaryBrush}"
+                FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                FontSize="11"
+                Padding="4,2"
+                CornerRadius="4"
+                ItemsSource="{Binding ComboItems}"
+                SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                IsEnabled="{Binding IsEnabled}"
+                IsVisible="{Binding UseComboItemIcons, Converter={x:Static BoolConverters.Not}}"
+                PlaceholderText="{Binding Text}"
+                ToolTip.Tip="{Binding ToolTip}" />
+      <ComboBox Width="{Binding Width}"
+                Height="{Binding Height}"
+                MinWidth="{Binding Width}"
+                MaxWidth="{Binding Width}"
+                MinHeight="{Binding Height}"
+                MaxHeight="{Binding Height}"
+                Background="#CC14100C"
+                BorderBrush="#6B4E2E"
+                Foreground="{StaticResource DxTextPrimaryBrush}"
+                FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                FontSize="11"
+                Padding="4,2"
+                CornerRadius="4"
+                ItemsSource="{Binding ComboItemEntries}"
+                SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                IsEnabled="{Binding IsEnabled}"
+                IsVisible="{Binding UseComboItemIcons}"
+                PlaceholderText="{Binding Text}"
+                ToolTip.Tip="{Binding ToolTip}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate DataType="vm:ComboItemViewModel">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <Image Width="16"
+                     Height="16"
+                     Source="{Binding Icon}"
+                     IsVisible="{Binding HasIcon}"
+                     VerticalAlignment="Center" />
+              <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
+            </StackPanel>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Panel>
   </DataTemplate>
 
   <DataTemplate x:Key="DxTextBox" DataType="vm:UiNodeViewModel">

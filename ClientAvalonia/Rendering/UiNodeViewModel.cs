@@ -51,6 +51,10 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     public ObservableCollection<string> ComboItems { get; }
 
+    public ObservableCollection<ComboItemViewModel> ComboItemEntries { get; } = [];
+
+    public bool UseComboItemIcons { get; private set; }
+
     public ObservableCollection<string> ListItems { get; } = [];
 
     public ObservableCollection<CatalogListItemViewModel> CatalogListItems { get; } = [];
@@ -269,11 +273,31 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     public void SetComboItems(IEnumerable<string> items)
     {
+        UseComboItemIcons = false;
+        ComboItemEntries.Clear();
         ComboItems.Clear();
         foreach (string item in items)
             ComboItems.Add(item);
 
         OnPropertyChanged(nameof(ComboItems));
+        OnPropertyChanged(nameof(UseComboItemIcons));
+        OnPropertyChanged(nameof(ComboItemEntries));
+    }
+
+    public void SetComboItemEntries(IEnumerable<ComboItemViewModel> items)
+    {
+        UseComboItemIcons = true;
+        ComboItems.Clear();
+        ComboItemEntries.Clear();
+        foreach (ComboItemViewModel item in items)
+        {
+            ComboItemEntries.Add(item);
+            ComboItems.Add(item.Text);
+        }
+
+        OnPropertyChanged(nameof(ComboItems));
+        OnPropertyChanged(nameof(ComboItemEntries));
+        OnPropertyChanged(nameof(UseComboItemIcons));
     }
 
     public void SetListItems(IEnumerable<string> items)

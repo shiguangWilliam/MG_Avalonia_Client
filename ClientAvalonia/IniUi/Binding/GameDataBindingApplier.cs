@@ -150,11 +150,24 @@ public static class GameDataBindingApplier
         UiNodeViewModel? ddChannel = FindVm(root, "ddCurrentChannel");
         if (ddChannel != null)
         {
-            string channelName = string.IsNullOrWhiteSpace(state.ChatChannelDisplay)
-                ? statusText
-                : state.ChatChannelDisplay;
-            ddChannel.SetComboItems([channelName]);
-            ddChannel.SelectedIndex = 0;
+            var channelNames = state.AvailableChannelNames.Count > 0
+                ? state.AvailableChannelNames.ToList()
+                : new List<string> { state.ChatChannelDisplay };
+
+            ddChannel.SetComboItems(channelNames);
+            int channelIndex = Math.Clamp(state.SelectedChannelIndex, 0, Math.Max(0, channelNames.Count - 1));
+            ddChannel.SelectedIndex = channelIndex;
+
+            if (!ddChannel.Node.Props.ContainsKey("ChannelLobbyWired"))
+            {
+                ddChannel.Node.Props["ChannelLobbyWired"] = true;
+                ddChannel.SelectionChanged += () =>
+                {
+                    int idx = ddChannel.SelectedIndex;
+                    if (idx >= 0 && idx != CnCNetSessionService.Instance.SelectedChannelIndex)
+                        CnCNetSessionService.Instance.SwitchToChannel(idx);
+                };
+            }
         }
 
         FindVm(root, "lblColor")?.SetDisplayText("聊天文字颜色：");
