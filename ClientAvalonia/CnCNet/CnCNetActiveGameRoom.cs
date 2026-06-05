@@ -1,4 +1,4 @@
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Active CnCNet game room the client is hosting or joining (IRC game channel).</summary>
 public sealed class CnCNetActiveGameRoom

@@ -1,8 +1,9 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>CnCNet channel / browser lobby state (players, games, connection log).</summary>
 public sealed class CnCNetLobbyState

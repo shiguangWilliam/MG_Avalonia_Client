@@ -1,8 +1,9 @@
+using ClientCore;
 using System;
 using System.Threading;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Polls CnCNet live player count (ClientConfiguration.CnCNetPlayerCountURL).</summary>
 public sealed class CnCNetPlayerCountService : IDisposable

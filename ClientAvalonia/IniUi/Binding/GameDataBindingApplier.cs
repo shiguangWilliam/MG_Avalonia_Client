@@ -4,6 +4,7 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientCore;
+using ClientAvalonia.CnCNet;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.IniUi.Binding;

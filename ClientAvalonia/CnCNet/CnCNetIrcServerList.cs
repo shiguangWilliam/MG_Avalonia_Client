@@ -1,8 +1,9 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 public static class CnCNetIrcServerList
 {

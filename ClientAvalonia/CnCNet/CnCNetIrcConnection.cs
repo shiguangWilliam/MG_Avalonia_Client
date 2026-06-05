@@ -1,3 +1,4 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -7,7 +8,7 @@ using System.Text;
 using System.Threading;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Minimal IRC client for CnCNet lobby (Core config + Connection register/join conventions).</summary>
 public sealed class CnCNetIrcConnection : IDisposable
@@ -47,7 +48,7 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     public event Action? Connected;
 
-    /// <summary>Fired after IRC numeric 001 â€” client may JOIN channels.</summary>
+    /// <summary>Fired after IRC numeric 001 â€?client may JOIN channels.</summary>
     public event Action<string>? WelcomeReceived;
 
     public event Action<string>? ConnectionFailed;
@@ -103,7 +104,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             ? $"JOIN {normalized}"
             : $"JOIN {normalized} {key}";
         EnqueueSend(command);
-        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"â†’ JOIN {normalized}" : $"â†’ JOIN {normalized} (key)");
+        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"â†?JOIN {normalized}" : $"â†?JOIN {normalized} (key)");
     }
 
     /// <summary>Immediate JOIN (welcome / create game). Bypasses SendSleep queue delay.</summary>
@@ -127,7 +128,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         SendImmediate(message);
-        EmitActivity($"â†’ {message}");
+        EmitActivity($"â†?{message}");
     }
 
     /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage).</summary>
@@ -238,13 +239,13 @@ public sealed class CnCNetIrcConnection : IDisposable
         EnqueueSend($"USER {localGame}.{_systemId} 0 * :{realname}");
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
         EmitActivity("Registering USER/NICK...");
-        EmitActivity("â†’ NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("â†?NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void ChangeNickname()
     {
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
-        EmitActivity("â†’ NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("â†?NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void OnNameAlreadyInUse()
@@ -311,7 +312,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             }
             catch (IOException)
             {
-                // ReadTimeout (1s) when idle â€” not a disconnect.
+                // ReadTimeout (1s) when idle â€?not a disconnect.
                 continue;
             }
             catch (Exception ex)

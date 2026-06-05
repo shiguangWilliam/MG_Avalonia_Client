@@ -7,7 +7,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using ClientCore.Extensions;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 using ClientCore.INIProcessing;
 using Rampastring.Tools;
 

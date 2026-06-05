@@ -1,9 +1,9 @@
 using ClientCore;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.Services;
 
-/// <summary>View-model for channel / browser lobby UI; mirrors <see cref="CnCNetLobbyState"/> from Core.</summary>
+/// <summary>View-model for channel lobby UI; mirrors <see cref="CnCNetLobbyState"/> from ClientAvalonia.CnCNet.</summary>
 public sealed class MultiplayerLobbyState
 {
     public string LocalPlayerName { get; private set; } = ProgramConstants.PLAYERNAME;
@@ -45,6 +45,8 @@ public sealed class MultiplayerLobbyState
 
         if (SelectedGameIndex >= HostedGameDetails.Count)
             SelectedGameIndex = HostedGameDetails.Count > 0 ? 0 : -1;
+        else if (HostedGameDetails.Count > 0 && SelectedGameIndex < 0)
+            SelectedGameIndex = 0;
     }
 
     public void RefreshFromCore(string? localName = null)

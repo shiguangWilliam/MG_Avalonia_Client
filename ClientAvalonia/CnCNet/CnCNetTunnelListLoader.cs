@@ -1,3 +1,4 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -6,7 +7,7 @@ using System.Linq;
 using System.Text;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 public sealed class CnCNetTunnelEntry
 {

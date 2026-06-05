@@ -5,7 +5,15 @@ public static class OptionsOverlayBehaviors
 {
     public static void Register(BehaviorRegistry registry, IUiNavigationHost host)
     {
-        RegisterClose(registry, host, "btnSave", commit: true);
+        registry.Register("btnSave", _ =>
+        {
+            if (!host.IsFloatingOverlayOpen)
+                return;
+
+            host.CommitSettings();
+            host.ShowStatus("设置已保存");
+        });
+
         RegisterClose(registry, host, "btnOK", commit: true);
         RegisterClose(registry, host, "btnCancel", discard: true);
     }

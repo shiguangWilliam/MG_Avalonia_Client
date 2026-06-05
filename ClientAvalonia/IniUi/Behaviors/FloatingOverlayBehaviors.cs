@@ -8,7 +8,6 @@ internal static class FloatingOverlayBehaviors
         {
             case "OptionsWindow":
                 OptionsWindowBehaviors.Register(registry, host);
-                OptionsOverlayBehaviors.Register(registry, host);
                 break;
             case "CampaignSelector":
                 CampaignOverlayBehaviors.Register(registry, host);
@@ -16,5 +15,9 @@ internal static class FloatingOverlayBehaviors
         }
 
         CommonWindowBehaviors.Register(registry, host);
+
+        // Register after CommonWindowBehaviors so overlay-specific Save/Cancel win.
+        if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+            OptionsOverlayBehaviors.Register(registry, host);
     }
 }

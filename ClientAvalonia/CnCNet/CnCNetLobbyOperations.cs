@@ -1,8 +1,9 @@
 using System;
 using System.Linq;
+using ClientCore;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Create / join game room flows (XNA CnCNetLobby + GameCreationWindow subset).</summary>
 public static class CnCNetLobbyOperations
@@ -122,9 +123,12 @@ public static class CnCNetLobbyOperations
 
     private static string GenerateUniqueGameChannel(string chatChannel)
     {
-        // Match XNA CnCNetLobby.RandomizeChannelName (no forced lower-case on channel name).
+        // XNA CnCNetLobby.RandomizeChannelName; MG mod uses localized suffix.
         string baseName = chatChannel.StartsWith('#') ? chatChannel : "#" + chatChannel;
         int suffix = Random.Shared.Next(1_000_000, 9_999_999);
-        return baseName + "-game" + suffix;
+        string channelSuffix = ClientConfiguration.Instance.LocalGame.Equals("MG", StringComparison.OrdinalIgnoreCase)
+            ? "-游戏" + suffix
+            : "-game" + suffix;
+        return baseName + channelSuffix;
     }
 }

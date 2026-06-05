@@ -3,7 +3,7 @@ using System.IO;
 using System.Net;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>HTTP helper for CnCNet status/tunnel endpoints (timeout-aware).</summary>
 public static class CnCNetHttp

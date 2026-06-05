@@ -1,10 +1,11 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Hosts GAME CTCP broadcasts on the game listing channel (XNA CnCNetGameLobby.BroadcastGame).</summary>
 public sealed class CnCNetGameBroadcastService : IDisposable
@@ -117,7 +118,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         string broadcastChannel = NormalizeChannel(_channels.GameBroadcastChannel);
         string payload = BuildGamePayload(closed);
         _connection.SendCtcpNotice(broadcastChannel, payload);
-        Logger.Log($"CnCNetGameBroadcastService: GAME â†’ {broadcastChannel} ({_room.RoomName}, closed={closed})");
+        Logger.Log($"CnCNetGameBroadcastService: GAME â†?{broadcastChannel} ({_room.RoomName}, closed={closed})");
     }
 
     private string BuildGamePayload(bool closed)

@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using ClientCore;
+using ClientCore.Settings;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.</summary>
 public sealed class CnCNetSession : IDisposable
@@ -25,10 +27,15 @@ public sealed class CnCNetSession : IDisposable
     private bool _autoReconnect;
     private int _reconnectAttempts;
     private int _namesRetryCount;
+    private bool _gameRoomJoinPending;
+
+    public bool IsGameRoomJoinPending => _gameRoomJoinPending;
 
     public event Action? StateChanged;
 
     public event Action<CnCNetActiveGameRoom>? GameRoomJoined;
+
+    public event Action<string>? GameRoomJoinFailed;
 
     public CnCNetLobbyState LobbyState { get; } = new();
 
@@ -98,7 +105,7 @@ public sealed class CnCNetSession : IDisposable
             _channels = CnCNetGameChannels.LoadForLocalGame();
             if (_channels == null)
             {
-                LogActivity("No GameCollectionConfig channels for LocalGame — IRC connect skipped.");
+                LogActivity("No GameCollectionConfig channels for LocalGame �?IRC connect skipped.");
                 LobbyState.SetConnectionStatus("No chat channels configured.");
                 StateChanged?.Invoke();
                 return;
@@ -143,6 +150,7 @@ public sealed class CnCNetSession : IDisposable
     {
         _gameRoom?.Leave();
         _activeGameRoom = room;
+        _gameRoomJoinPending = true;
         _gameRoom = new CnCNetGameRoomSession(room);
         if (_connection != null)
             AttachGameRoomSession();
@@ -177,6 +185,7 @@ public sealed class CnCNetSession : IDisposable
 
         _gameRoom = null;
         _activeGameRoom = null;
+        _gameRoomJoinPending = false;
         StateChanged?.Invoke();
     }
 
@@ -217,7 +226,7 @@ public sealed class CnCNetSession : IDisposable
 
         string normalized = channelName.StartsWith('#') ? channelName : "#" + channelName;
         _connection.SendInstant($"JOIN {normalized.ToLowerInvariant()} {password}");
-        LogActivity($"→ JOIN game channel {normalized}");
+        LogActivity($"? JOIN game channel {normalized}", notifyUi: false);
     }
 
     public void Dispose()
@@ -239,7 +248,7 @@ public sealed class CnCNetSession : IDisposable
         {
             if (msg.Length > 120)
                 msg = msg[..117] + "...";
-            LogActivity($"← {msg}");
+            LogActivity($"? {msg}", notifyUi: false);
         };
         connection.ChannelUserListReceived += OnUserList;
         connection.UserJoined += OnUserJoined;
@@ -247,7 +256,7 @@ public sealed class CnCNetSession : IDisposable
         connection.GameBroadcastReceived += OnGameBroadcast;
         connection.ChannelCtcpReceived += OnChannelCtcp;
         connection.ChannelNamesComplete += OnChannelNamesComplete;
-        connection.ActivityLogged += LogActivity;
+        connection.ActivityLogged += msg => LogActivity(msg, notifyUi: false);
     }
 
     private void OnChannelNamesComplete(string channel)
@@ -275,7 +284,7 @@ public sealed class CnCNetSession : IDisposable
     private void OnWelcomeReceived(string welcomeLine)
     {
         ApplyPlayerNameFromUserSettings();
-        LobbyState.SetConnectionStatus("Connected — joining channels...");
+        LobbyState.SetConnectionStatus("Connected �?joining channels...");
         LogActivity($"IRC welcome: {welcomeLine}");
         StateChanged?.Invoke();
 
@@ -386,6 +395,7 @@ public sealed class CnCNetSession : IDisposable
 
             if (name.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
             {
+                _gameRoomJoinPending = false;
                 _gameRoom?.OnLocalJoined();
                 LogActivity($"Joined game room {_activeGameRoom.RoomName}.");
                 GameRoomJoined?.Invoke(_activeGameRoom);
@@ -446,29 +456,33 @@ public sealed class CnCNetSession : IDisposable
                 StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
-        {
-            int fieldCount = ctcp[5..].Split(';').Length;
-            LogActivity($"GAME CTCP from {sender} ({fieldCount} fields, rev={ctcp[5..].Split(';')[0]})");
-        }
-
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(sender, ctcp, Tunnels, out string? rejectReason);
         if (game == null)
         {
-            if (!string.IsNullOrWhiteSpace(rejectReason))
-                LogActivity($"GAME from {sender} ignored: {rejectReason}");
+            if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
+            {
+                int fieldCount = ctcp[5..].Split(';').Length;
+                LogActivity(
+                    $"GAME CTCP from {sender} ({fieldCount} fields, rev={ctcp[5..].Split(';')[0]})",
+                    notifyUi: false);
+                if (!string.IsNullOrWhiteSpace(rejectReason))
+                    LogActivity($"GAME from {sender} ignored: {rejectReason}");
+            }
+
             return;
         }
 
         if (game.IsClosed)
         {
             _games.Remove(game.ChannelName);
-            LogActivity($"Game closed: {game.RoomName} ({sender})");
+            LogActivity($"Game closed: {game.RoomName} ({sender})", notifyUi: false);
         }
         else
         {
             _games[game.ChannelName] = game;
-            LogActivity($"Game listed: {game.RoomName} by {sender} ({game.PlayerCount}/{game.MaxPlayers})");
+            LogActivity(
+                $"Game listed: {game.RoomName} by {sender} ({game.PlayerCount}/{game.MaxPlayers})",
+                notifyUi: false);
         }
 
         RefreshHostedGames();
@@ -508,11 +522,12 @@ public sealed class CnCNetSession : IDisposable
         return normalized.ToLowerInvariant();
     }
 
-    private void LogActivity(string message)
+    private void LogActivity(string message, bool notifyUi = true)
     {
         Logger.Log(message.StartsWith("CnCNet", StringComparison.Ordinal) ? message : $"CnCNet: {message}");
         LobbyState.AppendConnectionLog(message);
-        StateChanged?.Invoke();
+        if (notifyUi)
+            StateChanged?.Invoke();
     }
 
     private static void ApplyPlayerNameFromUserSettings()

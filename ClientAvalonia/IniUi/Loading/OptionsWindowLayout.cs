@@ -58,6 +58,7 @@ internal static class OptionsWindowLayout
         PositionTabPanels(tree);
         PositionTabButtons(root);
         PositionWindowChrome(tree);
+        EnsureFooterButtons(root);
         PositionFooterButtons(tree);
         ReparentControlsToPanels(tree, root);
         OptionsDisplayControlsBootstrap.Apply(tree);
@@ -152,6 +153,32 @@ internal static class OptionsWindowLayout
         SetRect(tree.FindNode("panelBorderCornerBR"), DialogWidth - 1, DialogHeight - 1, 9, 9);
     }
 
+    private static void EnsureFooterButtons(UiNode root)
+    {
+        // MG OptionsWindow.ini omits footer buttons; XNA OptionsWindow creates them in code.
+        EnsureFooterButton(root, "btnSave", "保存");
+        EnsureFooterButton(root, "btnCancel", "取消");
+    }
+
+    private static void EnsureFooterButton(UiNode root, string id, string text)
+    {
+        UiNode? btn = root.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        if (btn == null)
+        {
+            btn = CreatePanelNode(id, "XNAClientButton", "DxButton");
+            btn.Parent = root;
+            root.Children.Add(btn);
+        }
+
+        btn.TemplateKey = "DxButton";
+        if (!btn.Props.ContainsKey("Text") || string.IsNullOrWhiteSpace(btn.Props["Text"]?.ToString()))
+            btn.Props["Text"] = text;
+        if (btn.GetIntProp("Width") <= 0)
+            btn.Props["Width"] = 92.0;
+        if (btn.GetIntProp("Height") <= 0)
+            btn.Props["Height"] = 23.0;
+    }
+
     private static void PositionFooterButtons(UiNodeTree tree)
     {
         UiNode? btnSave = tree.FindNode("btnSave");
@@ -159,6 +186,7 @@ internal static class OptionsWindowLayout
         {
             btnSave.Props["CanvasLeft"] = 12.0;
             btnSave.Props["CanvasTop"] = (double)(DialogHeight - 35);
+            btnSave.Props["IsVisible"] = true;
             if (btnSave.GetIntProp("Width") <= 0)
                 btnSave.Props["Width"] = 92.0;
             if (btnSave.GetIntProp("Height") <= 0)
@@ -170,6 +198,7 @@ internal static class OptionsWindowLayout
         {
             btnCancel.Props["CanvasLeft"] = (double)(DialogWidth - 104);
             btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 35);
+            btnCancel.Props["IsVisible"] = true;
             if (btnCancel.GetIntProp("Width") <= 0)
                 btnCancel.Props["Width"] = 92.0;
             if (btnCancel.GetIntProp("Height") <= 0)

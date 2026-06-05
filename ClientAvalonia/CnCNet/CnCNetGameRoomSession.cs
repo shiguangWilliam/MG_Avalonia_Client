@@ -1,10 +1,11 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>In-room CnCNet game lobby logic (XNA CnCNetGameLobby CTCP subset).</summary>
 public sealed class CnCNetGameRoomSession

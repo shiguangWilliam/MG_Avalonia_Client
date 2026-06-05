@@ -3,7 +3,7 @@ using Avalonia.Input;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientCore;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.IniUi.Layout;
@@ -483,7 +483,10 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (IsChannelLobbyWindow(windowName))
         {
             if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
+            {
                 CnCNetSessionService.Instance.ConnectIfNeeded();
+                CnCNetSessionService.Instance.SyncLobbyStateFromCore();
+            }
 
             GameDataBindingApplier.ApplyChannelLobby(root, CnCNetSessionService.Instance.LobbyState);
         }

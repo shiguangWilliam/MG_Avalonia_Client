@@ -1,7 +1,8 @@
 using System;
+using ClientCore;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>
 /// Stable IRC USER ident fragment (aligned with DXMainClient Connection.SetId / Startup.cs registry Ident).

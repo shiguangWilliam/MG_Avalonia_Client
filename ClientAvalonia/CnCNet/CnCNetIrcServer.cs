@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>IRC server entry from NetworkDefinitions.ini [IRCServers] (host|name|ports).</summary>
 public readonly struct CnCNetIrcServer

@@ -1,7 +1,7 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Rendering;
 using ClientCore;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.Services;

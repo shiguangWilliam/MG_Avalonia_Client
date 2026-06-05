@@ -1,9 +1,10 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Parsed CTCP GAME broadcast (CnCNet lobby game list entry).</summary>
 public sealed class CnCNetHostedGameSummary
@@ -39,8 +40,8 @@ public sealed class CnCNetHostedGameSummary
     public int SkillLevel { get; init; }
 
     public string DisplayLine => Locked
-        ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€” {HostName} [locked]"
-        : $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€” {HostName}";
+        ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€?{HostName} [locked]"
+        : $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€?{HostName}";
 }
 
 public static class CnCNetGameMessageParser

@@ -1,9 +1,10 @@
+using System.Threading;
 using Avalonia.Threading;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.Services;
 
-/// <summary>Avalonia controller: marshals <see cref="CnCNetSession"/> state to UI thread and <see cref="MultiplayerLobbyState"/>.</summary>
+/// <summary>Avalonia controller: marshals <see cref="CnCNetSession"/> (ClientAvalonia.CnCNet) to UI thread.</summary>
 public sealed class CnCNetSessionService : IDisposable
 {
     public static CnCNetSessionService Instance { get; } = new();
@@ -13,6 +14,8 @@ public sealed class CnCNetSessionService : IDisposable
     public event Action? StateChanged;
 
     public event Action<CnCNetActiveGameRoom>? GameRoomJoined;
+
+    public event Action<string>? GameRoomJoinFailed;
 
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
@@ -30,11 +33,22 @@ public sealed class CnCNetSessionService : IDisposable
 
     public CnCNetGameRoomSession? GameRoom => _session.GameRoom;
 
+    public bool IsGameRoomJoinPending => _session.IsGameRoomJoinPending;
+
+    private int _uiUpdateScheduled;
+
     private CnCNetSessionService()
     {
         _session.StateChanged += OnCoreStateChanged;
         _session.GameRoomJoined += room => Dispatcher.UIThread.Post(() => GameRoomJoined?.Invoke(room));
         _session.GameStarting += info => Dispatcher.UIThread.Post(() => GameStarting?.Invoke(info));
+        _session.GameRoomJoinFailed += msg => Dispatcher.UIThread.Post(() => GameRoomJoinFailed?.Invoke(msg));
+    }
+
+    /// <summary>Pull latest session lobby state (call when opening CnCNetLobby).</summary>
+    public void SyncLobbyStateFromCore()
+    {
+        LobbyState.SyncFrom(_session.LobbyState);
     }
 
     public void EnsureStarted()
@@ -62,10 +76,24 @@ public sealed class CnCNetSessionService : IDisposable
         => _session.GameRoom?.UpdateHostListing(mapName, gameModeName, mapSha1);
 
     public bool TryCreateGame(out string message)
-        => CnCNetLobbyOperations.TryCreateGame(_session, out message);
+    {
+        if (_session.IsGameRoomJoinPending)
+        {
+            message = "Already joining a game room — please wait.";
+            return false;
+        }
+
+        return CnCNetLobbyOperations.TryCreateGame(_session, out message);
+    }
 
     public bool TryJoinSelectedGame(out string message)
     {
+        if (_session.IsGameRoomJoinPending)
+        {
+            message = "Already joining a game room — please wait.";
+            return false;
+        }
+
         CnCNetHostedGameSummary? game = LobbyState.GetSelectedGame();
         if (game == null)
         {
@@ -86,10 +114,18 @@ public sealed class CnCNetSessionService : IDisposable
 
     private void OnCoreStateChanged()
     {
-        Dispatcher.UIThread.Post(() =>
-        {
-            LobbyState.SyncFrom(_session.LobbyState);
-            StateChanged?.Invoke();
-        });
+        if (Interlocked.Exchange(ref _uiUpdateScheduled, 1) == 1)
+            return;
+
+        Dispatcher.UIThread.Post(ProcessPendingUiUpdate);
+    }
+
+    private void ProcessPendingUiUpdate()
+    {
+        LobbyState.SyncFrom(_session.LobbyState);
+        StateChanged?.Invoke();
+
+        if (Interlocked.Exchange(ref _uiUpdateScheduled, 0) == 1)
+            Dispatcher.UIThread.Post(ProcessPendingUiUpdate);
     }
 }

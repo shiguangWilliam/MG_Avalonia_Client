@@ -1,9 +1,10 @@
+using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using Rampastring.Tools;
 
-namespace ClientCore.Network;
+namespace ClientAvalonia.CnCNet;
 
 /// <summary>Chat / game-broadcast IRC channels for the local mod (GameCollectionConfig.ini).</summary>
 public sealed class CnCNetGameChannels

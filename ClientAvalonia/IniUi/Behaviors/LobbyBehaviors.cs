@@ -1,5 +1,5 @@
 using ClientAvalonia.Services;
-using ClientCore.Network;
+using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
