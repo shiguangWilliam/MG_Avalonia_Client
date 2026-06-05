@@ -52,6 +52,8 @@ public interface IUiNavigationHost
 
     void RefreshCnCNetGameRoomPlayers();
 
+    void TryJoinSelectedCnCNetGame();
+
     void SelectOptionsTab(int index);
 
     void CheckForUpdates();

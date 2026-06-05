@@ -293,41 +293,59 @@ public static class LobbyPlayerBindingApplier
 
             ddName.SetComboItems(LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState));
             ddName.IsEnabled = LobbyPlayerSlotUiRules.IsNameDropdownEnabled(slot, playerState);
-            ddName.SelectedIndex = LobbyPlayerSlotUiRules.ResolveNameSelectedIndex(ddName, state, playerState);
+            ddName.SetSelectedIndexSilent(ClampSelectedIndex(
+                ddName,
+                LobbyPlayerSlotUiRules.ResolveNameSelectedIndex(ddName, state, playerState)));
 
             bool optionsEnabled = LobbyPlayerSlotUiRules.ArePlayerOptionsEnabled(slot, playerState);
             if (ddSide != null)
             {
                 ddSide.IsEnabled = optionsEnabled;
-                ddSide.SelectedIndex = state.IsOccupied
-                    ? Math.Clamp(state.SideIndex, 0, Math.Max(0, ddSide.ComboItems.Count - 1))
-                    : 0;
+                ddSide.SetSelectedIndexSilent(ClampSelectedIndex(
+                    ddSide,
+                    state.IsOccupied
+                        ? Math.Clamp(state.SideIndex, 0, Math.Max(0, ddSide.ComboItems.Count - 1))
+                        : 0));
             }
 
             if (ddColor != null)
             {
                 ddColor.IsEnabled = optionsEnabled;
-                ddColor.SelectedIndex = state.IsOccupied
-                    ? Math.Clamp(state.ColorIndex, 0, Math.Max(0, ddColor.ComboItems.Count - 1))
-                    : 0;
+                ddColor.SetSelectedIndexSilent(ClampSelectedIndex(
+                    ddColor,
+                    state.IsOccupied
+                        ? Math.Clamp(state.ColorIndex, 0, Math.Max(0, ddColor.ComboItems.Count - 1))
+                        : 0));
             }
 
             if (ddTeam != null)
             {
                 ddTeam.IsEnabled = optionsEnabled;
-                ddTeam.SelectedIndex = state.IsOccupied
-                    ? Math.Clamp(state.TeamIndex, 0, Math.Max(0, ddTeam.ComboItems.Count - 1))
-                    : 0;
+                ddTeam.SetSelectedIndexSilent(ClampSelectedIndex(
+                    ddTeam,
+                    state.IsOccupied
+                        ? Math.Clamp(state.TeamIndex, 0, Math.Max(0, ddTeam.ComboItems.Count - 1))
+                        : 0));
             }
 
             if (ddStart != null)
             {
                 ddStart.IsEnabled = optionsEnabled && state.IsOccupied;
-                ddStart.SelectedIndex = state.IsOccupied
-                    ? Math.Clamp(state.StartIndex, 0, Math.Max(0, ddStart.ComboItems.Count - 1))
-                    : 0;
+                ddStart.SetSelectedIndexSilent(ClampSelectedIndex(
+                    ddStart,
+                    state.IsOccupied
+                        ? Math.Clamp(state.StartIndex, 0, Math.Max(0, ddStart.ComboItems.Count - 1))
+                        : 0));
             }
         }
+    }
+
+    private static int ClampSelectedIndex(UiNodeViewModel dropdown, int index)
+    {
+        if (dropdown.ComboItems.Count == 0)
+            return -1;
+
+        return Math.Clamp(index, 0, dropdown.ComboItems.Count - 1);
     }
 
     private static string ReadSelectedText(UiNodeViewModel dropdown)

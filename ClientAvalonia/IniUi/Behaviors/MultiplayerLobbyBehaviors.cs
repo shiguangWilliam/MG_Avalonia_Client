@@ -67,14 +67,7 @@ public static class MultiplayerLobbyBehaviors
             if (host.ActiveRoot != null)
                 GameDataBindingApplier.SyncChannelGameSelection(host.ActiveRoot, CnCNetSessionService.Instance.LobbyState);
 
-            if (!CnCNetSessionService.Instance.TryJoinSelectedGame(out string message))
-            {
-                host.ShowStatus(message);
-                return;
-            }
-
-            host.ShowStatus(message);
-            host.NavigateTo(gameLobbyWindow);
+            host.TryJoinSelectedCnCNetGame();
         });
 
         registry.Register("btnLogout", _ =>

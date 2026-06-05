@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Layout;
 
 namespace ClientAvalonia.Services;
 
@@ -23,6 +24,87 @@ public static class ClientDialogService
             dialog.Show();
     }
 
+    /// <summary>Password prompt for joining a password-protected CnCNet game (XNA PasswordRequestWindow).</summary>
+    public static async Task<string?> ShowPasswordPromptAsync(Window? owner, string gameRoomName)
+    {
+        var window = new Window
+        {
+            Title = "Game Password",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = owner != null ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
+            CanResize = false,
+        };
+
+        var passwordBox = new TextBox
+        {
+            PasswordChar = '*',
+            Watermark = "Password",
+            MinWidth = 320,
+        };
+
+        string? result = null;
+        bool confirmed = false;
+
+        var ok = new Button { Content = "OK", MinWidth = 80, IsDefault = true };
+        ok.Click += (_, _) =>
+        {
+            confirmed = true;
+            result = passwordBox.Text;
+            window.Close();
+        };
+
+        var cancel = new Button { Content = "Cancel", MinWidth = 80, IsCancel = true };
+        cancel.Click += (_, _) => window.Close();
+
+        window.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(20),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"Please enter the password for \"{gameRoomName}\" and click OK.",
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    MaxWidth = 380,
+                },
+                passwordBox,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Spacing = 12,
+                    Children = { ok, cancel },
+                },
+            },
+        };
+
+        passwordBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Enter)
+            {
+                confirmed = true;
+                result = passwordBox.Text;
+                window.Close();
+            }
+        };
+
+        if (owner != null)
+        {
+            await window.ShowDialog(owner);
+        }
+        else
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            window.Closed += (_, _) => tcs.TrySetResult(true);
+            window.Show();
+            await tcs.Task;
+        }
+
+        return confirmed ? result : null;
+    }
+
     private static Window CreateDialog(Window? owner, string title, string message)
     {
         var window = new Window
@@ -34,7 +116,7 @@ public static class ClientDialogService
             CanResize = false,
         };
 
-        var ok = new Button { Content = "OK", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, MinWidth = 80 };
+        var ok = new Button { Content = "OK", HorizontalAlignment = HorizontalAlignment.Center, MinWidth = 80 };
         ok.Click += (_, _) => window.Close();
 
         window.Content = new StackPanel

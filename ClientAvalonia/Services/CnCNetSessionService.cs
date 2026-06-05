@@ -1,4 +1,3 @@
-using System.Threading;
 using Avalonia.Threading;
 using ClientAvalonia.CnCNet;
 
@@ -38,8 +37,6 @@ public sealed class CnCNetSessionService : IDisposable
     public bool IsGameRoomJoinPending => _session.IsGameRoomJoinPending;
 
     public string LocalNick => _session.LocalNick;
-
-    private int _uiUpdateScheduled;
 
     private CnCNetSessionService()
     {
@@ -101,7 +98,7 @@ public sealed class CnCNetSessionService : IDisposable
         return CnCNetLobbyOperations.TryCreateGame(_session, out message);
     }
 
-    public bool TryJoinSelectedGame(out string message)
+    public bool TryJoinGame(CnCNetHostedGameSummary game, string? password, out string message)
     {
         if (_session.IsGameRoomJoinPending)
         {
@@ -109,6 +106,11 @@ public sealed class CnCNetSessionService : IDisposable
             return false;
         }
 
+        return CnCNetLobbyOperations.TryJoinGame(_session, game, password, out message);
+    }
+
+    public bool TryJoinSelectedGame(out string message)
+    {
         CnCNetHostedGameSummary? game = LobbyState.GetSelectedGame();
         if (game == null)
         {
@@ -116,7 +118,13 @@ public sealed class CnCNetSessionService : IDisposable
             return false;
         }
 
-        return CnCNetLobbyOperations.TryJoinGame(_session, game, password: null, out message);
+        return TryJoinGame(game, password: null, out message);
+    }
+
+    public bool SelectedGameRequiresPassword()
+    {
+        CnCNetHostedGameSummary? game = LobbyState.GetSelectedGame();
+        return game is { CustomPassword: true };
     }
 
     public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);
@@ -130,19 +138,9 @@ public sealed class CnCNetSessionService : IDisposable
     public void Dispose() => _session.Dispose();
 
     private void OnCoreStateChanged()
-    {
-        if (Interlocked.Exchange(ref _uiUpdateScheduled, 1) == 1)
-            return;
-
-        Dispatcher.UIThread.Post(ProcessPendingUiUpdate);
-    }
-
-    private void ProcessPendingUiUpdate()
-    {
-        LobbyState.SyncFrom(_session.LobbyState);
-        StateChanged?.Invoke();
-
-        if (Interlocked.Exchange(ref _uiUpdateScheduled, 0) == 1)
-            Dispatcher.UIThread.Post(ProcessPendingUiUpdate);
-    }
+        => Dispatcher.UIThread.Post(() =>
+        {
+            LobbyState.SyncFrom(_session.LobbyState);
+            StateChanged?.Invoke();
+        });
 }

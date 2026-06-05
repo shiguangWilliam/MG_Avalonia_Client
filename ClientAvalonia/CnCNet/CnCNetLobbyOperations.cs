@@ -103,7 +103,7 @@ public static class CnCNetLobbyOperations
 
         if (game.CustomPassword && string.IsNullOrWhiteSpace(password))
         {
-            message = "This game requires a password (custom password UI pending).";
+            message = "This game requires a password.";
             return false;
         }
 

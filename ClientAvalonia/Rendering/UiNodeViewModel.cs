@@ -138,16 +138,22 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     public int SelectedIndex
     {
         get => _selectedIndex;
-        set
-        {
-            if (_selectedIndex == value)
-                return;
+        set => SetSelectedIndex(value, notify: true);
+    }
 
-            _selectedIndex = value;
-            Node.Props["SelectedIndex"] = value;
-            OnPropertyChanged();
+    public void SetSelectedIndexSilent(int value) => SetSelectedIndex(value, notify: false);
+
+    private void SetSelectedIndex(int value, bool notify)
+    {
+        if (_selectedIndex == value)
+            return;
+
+        _selectedIndex = value;
+        Node.Props["SelectedIndex"] = value;
+        OnPropertyChanged(nameof(SelectedIndex));
+
+        if (notify)
             SelectionChanged?.Invoke();
-        }
     }
 
     public string? Text => _displayTextOverride ?? GetString("Text");

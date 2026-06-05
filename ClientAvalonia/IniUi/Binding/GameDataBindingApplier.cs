@@ -29,7 +29,7 @@ public static class GameDataBindingApplier
             ddGameMode.SetComboItems(filterItems);
 
             int clamped = Math.Clamp(filterIndex, 0, Math.Max(0, filterItems.Count - 1));
-            ddGameMode.SelectedIndex = clamped;
+            ddGameMode.SetSelectedIndexSilent(clamped);
             session.FilterIndex = clamped;
         }
 
@@ -57,7 +57,7 @@ public static class GameDataBindingApplier
         if (lbMapList != null)
         {
             lbMapList.SetListItems(maps.Select(m => m.DisplayName));
-            lbMapList.SelectedIndex = selectedIndex;
+            lbMapList.SetSelectedIndexSilent(selectedIndex);
         }
 
         UpdateMapSelectionDisplay(root, maps, selectedIndex, resources);
@@ -87,8 +87,6 @@ public static class GameDataBindingApplier
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
     {
-        state.RefreshFromCore();
-
         UiNodeViewModel? lbPlayers = FindVm(root, "lbPlayerList");
         if (lbPlayers != null)
         {

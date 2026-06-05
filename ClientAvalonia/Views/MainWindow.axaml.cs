@@ -777,6 +777,54 @@ public partial class MainWindow : Window, IUiNavigationHost
             ApplyCnCNetGameRoomPlayers(_activeRoot);
     }
 
+    public async void TryJoinSelectedCnCNetGame()
+    {
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+
+        if (session.IsGameRoomJoinPending)
+        {
+            ShowStatus("Joining game room — please wait...");
+            return;
+        }
+
+        if (session.ActiveGameRoom != null)
+        {
+            ShowStatus("Already in a game room.");
+            NavigateTo("CnCNetGameLobby");
+            return;
+        }
+
+        if (_activeRoot != null)
+            GameDataBindingApplier.SyncChannelGameSelection(_activeRoot, session.LobbyState);
+
+        CnCNetHostedGameSummary? game = session.LobbyState.GetSelectedGame();
+        if (game == null)
+        {
+            ShowStatus("Select a game from the list first.");
+            return;
+        }
+
+        string? password = null;
+        if (session.SelectedGameRequiresPassword())
+        {
+            password = await ClientDialogService.ShowPasswordPromptAsync(this, game.RoomName);
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                ShowStatus("Join cancelled.");
+                return;
+            }
+        }
+
+        if (!session.TryJoinGame(game, password, out string message))
+        {
+            ShowStatus(message);
+            return;
+        }
+
+        ShowStatus(message);
+        NavigateTo("CnCNetGameLobby");
+    }
+
     private List<string> GetCnCNetPlayerNames()
     {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;

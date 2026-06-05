@@ -631,19 +631,7 @@ public sealed class CnCNetSession : IDisposable
 
     private void RefreshHostedGames()
     {
-        string? broadcast = _currentGame?.GameBroadcastChannel;
-        IEnumerable<CnCNetHostedGameSummary> source = _games.Values;
-        if (!string.IsNullOrWhiteSpace(broadcast)
-            && _gamesByBroadcast.TryGetValue(NormalizeIrcChannel(broadcast), out Dictionary<string, CnCNetHostedGameSummary>? bucket))
-        {
-            source = bucket.Values;
-        }
-        else if (!string.IsNullOrWhiteSpace(broadcast))
-        {
-            source = [];
-        }
-
-        var list = source
+        var list = _games.Values
             .OrderBy(g => g.RoomName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         LobbyState.SetHostedGames(list);
