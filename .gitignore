@@ -425,3 +425,5 @@ Directory.Build.Game.*.props
 
 # Local notes (restored from history, not tracked)
 note/
+
+/Dist
