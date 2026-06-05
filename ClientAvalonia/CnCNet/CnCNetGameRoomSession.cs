@@ -188,7 +188,7 @@ public sealed class CnCNetGameRoomSession
         SendCtcp($"R {(ready ? 1 : 0)}");
         lock (_sync)
         {
-            CnCNetGameRoomPlayer? local = FindPlayerLocked(ProgramConstants.PLAYERNAME);
+            CnCNetGameRoomPlayer? local = FindPlayerLocked(_localNick);
             if (local != null)
                 local.Ready = ready;
         }
@@ -261,7 +261,7 @@ public sealed class CnCNetGameRoomSession
                 SendCtcp(sb.ToString());
             }
 
-            int localPort = FindPlayerLocked(ProgramConstants.PLAYERNAME)?.Port ?? 0;
+            int localPort = FindPlayerLocked(_localNick)?.Port ?? 0;
             GameStarting?.Invoke(new CnCNetStartGameInfo
             {
                 UniqueGameId = _uniqueGameId,
@@ -303,7 +303,7 @@ public sealed class CnCNetGameRoomSession
             if (ipPort.Length < 2 || !int.TryParse(ipPort[1], out int port))
                 return;
 
-            if (playerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
+            if (playerName.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
                 localPort = port;
         }
 
@@ -343,7 +343,7 @@ public sealed class CnCNetGameRoomSession
 
     private void ApplyPlayerOptions(string sender, string message)
     {
-        if (IsHost && !sender.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
+        if (IsHost && !sender.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
             return;
 
         if (!IsHost && !string.IsNullOrEmpty(HostName) && !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))

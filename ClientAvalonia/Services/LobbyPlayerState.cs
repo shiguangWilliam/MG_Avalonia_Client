@@ -4,6 +4,12 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.Services;
 
+public enum LobbyPlayerMode
+{
+    Skirmish,
+    Multiplayer,
+}
+
 /// <summary>Skirmish / in-game lobby player slots (8 rows), aligned with GameLobbyBase.</summary>
 public sealed class LobbyPlayerState
 {
@@ -21,13 +27,28 @@ public sealed class LobbyPlayerState
 
     public IReadOnlyList<string> TeamNames { get; private set; } = [];
 
-    public void LoadDefaults(bool includeSpectator = true)
+    public LobbyPlayerMode Mode { get; set; } = LobbyPlayerMode.Skirmish;
+
+    public bool AllowHostPlayerOptions { get; set; } = true;
+
+    public string LocalPlayerName { get; set; } = ProgramConstants.PLAYERNAME;
+
+    public void LoadCatalogs(bool includeSpectator = true)
     {
         SideEntries = LobbySideCatalog.Load(includeSpectator);
         SideNames = SideEntries.Select(s => s.DisplayName).ToList();
         AiNames = ProgramConstants.AI_PLAYER_NAMES.ToList();
         TeamNames = ProgramConstants.TEAMS.ToList();
+    }
 
+    public void LoadDefaults(bool includeSpectator = true)
+    {
+        LoadCatalogs(includeSpectator);
+        LoadDefaultSkirmishSlots();
+    }
+
+    public void LoadDefaultSkirmishSlots()
+    {
         ClearSlots();
         Slots[0].Name = ProgramConstants.PLAYERNAME;
         Slots[0].IsHumanLocal = true;
@@ -35,6 +56,9 @@ public sealed class LobbyPlayerState
         Slots[0].ColorIndex = 0;
         Slots[0].TeamIndex = 0;
         Slots[0].StartIndex = 0;
+
+        if (AiNames.Count == 0)
+            return;
 
         Slots[1].Name = AiNames[0];
         Slots[1].IsAi = true;
@@ -44,6 +68,19 @@ public sealed class LobbyPlayerState
         Slots[1].TeamIndex = 0;
         Slots[1].StartIndex = 0;
     }
+
+    public int FirstEmptySlotIndex()
+    {
+        for (int i = 0; i < Slots.Length; i++)
+        {
+            if (!Slots[i].IsOccupied)
+                return i;
+        }
+
+        return -1;
+    }
+
+    public int OccupiedSlotCount => Slots.Count(s => s.IsOccupied);
 
     public void ClearSlots()
     {

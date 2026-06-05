@@ -22,4 +22,29 @@ public sealed class LobbyPlayerSlot
     public bool IsOccupied => !string.IsNullOrWhiteSpace(Name);
 
     public bool IsHumanLocal { get; set; }
+
+    public void Clear()
+    {
+        Name = string.Empty;
+        IsAi = false;
+        IsHumanLocal = false;
+        SideIndex = 0;
+        ColorIndex = 0;
+        StartIndex = 0;
+        TeamIndex = 0;
+        AiLevel = 0;
+    }
+
+    public LobbyPlayerSlot Clone()
+        => new()
+        {
+            Name = Name,
+            SideIndex = SideIndex,
+            ColorIndex = ColorIndex,
+            StartIndex = StartIndex,
+            TeamIndex = TeamIndex,
+            AiLevel = AiLevel,
+            IsAi = IsAi,
+            IsHumanLocal = IsHumanLocal,
+        };
 }

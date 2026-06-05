@@ -6,7 +6,6 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
-using ClientCore;
 
 namespace ClientAvalonia.IniUi.Binding;
 
@@ -44,7 +43,6 @@ public static class LobbyPlayerBindingApplier
         }
 
         PlayerOptionLayout layout = ReadLayout(root);
-        var nameItems = BuildNameItems(playerState);
         var sideItems = BuildSideItems(playerState, resources);
         var teamItems = BuildTeamItems(playerState);
         var colorItems = BuildColorItems(resources);
@@ -60,6 +58,7 @@ public static class LobbyPlayerBindingApplier
             double y = layout.LocationY + (DropDownHeight + layout.VerticalMargin) * slot;
             double x = layout.LocationX;
 
+            string[] nameItems = LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState);
             UiNodeViewModel ddName = CreateDropdown(
                 $"ddPlayerName{slot}", x, y, layout.NameWidth, DropDownHeight, resources, behaviors, nameItems);
             x += layout.NameWidth + layout.HorizontalMargin;
@@ -80,7 +79,7 @@ public static class LobbyPlayerBindingApplier
             x += layout.TeamWidth + layout.HorizontalMargin;
             firstTeam ??= ddTeam;
 
-            WireSlot(slot, playerState, ddName, ddSide, ddColor, ddTeam);
+            WireSlot(slot, playerState, panel, ddName, ddSide, ddColor, ddTeam);
 
             panel.Children.Add(ddName);
             panel.Children.Add(ddSide);
@@ -223,9 +222,16 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel? ddStart)
     {
         string name = ReadSelectedText(ddName);
+        if (string.IsNullOrWhiteSpace(name) || name == "-")
+        {
+            slot.Clear();
+            return;
+        }
+
         slot.Name = name;
-        slot.IsHumanLocal = name == ProgramConstants.PLAYERNAME;
-        slot.IsAi = !slot.IsHumanLocal && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+        slot.IsHumanLocal = name.Equals(playerState.LocalPlayerName, StringComparison.OrdinalIgnoreCase);
+        slot.IsAi = !slot.IsHumanLocal
+            && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
         slot.AiLevel = slot.IsAi ? Math.Max(0, IndexOfAiName(playerState.AiNames, name)) : 0;
         slot.SideIndex = ddSide?.SelectedIndex ?? 0;
         slot.ColorIndex = ddColor?.SelectedIndex ?? 0;
@@ -236,6 +242,7 @@ public static class LobbyPlayerBindingApplier
     private static void WireSlot(
         int slotIndex,
         LobbyPlayerState playerState,
+        UiNodeViewModel panel,
         UiNodeViewModel ddName,
         UiNodeViewModel ddSide,
         UiNodeViewModel ddColor,
@@ -251,6 +258,7 @@ public static class LobbyPlayerBindingApplier
                 ddColor,
                 ddTeam,
                 null);
+            SyncUiFromState(panel, playerState);
         }
 
         ddName.SelectionChanged += SyncFromUi;
@@ -283,26 +291,42 @@ public static class LobbyPlayerBindingApplier
             if (ddName == null)
                 continue;
 
-            if (state.IsOccupied)
+            ddName.SetComboItems(LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState));
+            ddName.IsEnabled = LobbyPlayerSlotUiRules.IsNameDropdownEnabled(slot, playerState);
+            ddName.SelectedIndex = LobbyPlayerSlotUiRules.ResolveNameSelectedIndex(ddName, state, playerState);
+
+            bool optionsEnabled = LobbyPlayerSlotUiRules.ArePlayerOptionsEnabled(slot, playerState);
+            if (ddSide != null)
             {
-                int nameIndex = IndexOfItem(ddName, state.Name);
-                if (nameIndex < 0 && state.IsHumanLocal)
-                    nameIndex = IndexOfItem(ddName, ProgramConstants.PLAYERNAME);
-                ddName.SelectedIndex = nameIndex >= 0 ? nameIndex : 0;
-            }
-            else
-            {
-                ddName.SelectedIndex = 0;
+                ddSide.IsEnabled = optionsEnabled;
+                ddSide.SelectedIndex = state.IsOccupied
+                    ? Math.Clamp(state.SideIndex, 0, Math.Max(0, ddSide.ComboItems.Count - 1))
+                    : 0;
             }
 
-            if (ddSide != null)
-                ddSide.SelectedIndex = Math.Clamp(state.SideIndex, 0, Math.Max(0, ddSide.ComboItems.Count - 1));
             if (ddColor != null)
-                ddColor.SelectedIndex = Math.Clamp(state.ColorIndex, 0, Math.Max(0, ddColor.ComboItems.Count - 1));
+            {
+                ddColor.IsEnabled = optionsEnabled;
+                ddColor.SelectedIndex = state.IsOccupied
+                    ? Math.Clamp(state.ColorIndex, 0, Math.Max(0, ddColor.ComboItems.Count - 1))
+                    : 0;
+            }
+
             if (ddTeam != null)
-                ddTeam.SelectedIndex = Math.Clamp(state.TeamIndex, 0, Math.Max(0, ddTeam.ComboItems.Count - 1));
+            {
+                ddTeam.IsEnabled = optionsEnabled;
+                ddTeam.SelectedIndex = state.IsOccupied
+                    ? Math.Clamp(state.TeamIndex, 0, Math.Max(0, ddTeam.ComboItems.Count - 1))
+                    : 0;
+            }
+
             if (ddStart != null)
-                ddStart.SelectedIndex = Math.Clamp(state.StartIndex, 0, Math.Max(0, ddStart.ComboItems.Count - 1));
+            {
+                ddStart.IsEnabled = optionsEnabled && state.IsOccupied;
+                ddStart.SelectedIndex = state.IsOccupied
+                    ? Math.Clamp(state.StartIndex, 0, Math.Max(0, ddStart.ComboItems.Count - 1))
+                    : 0;
+            }
         }
     }
 
@@ -312,24 +336,6 @@ public static class LobbyPlayerBindingApplier
             return string.Empty;
 
         return dropdown.ComboItems[dropdown.SelectedIndex];
-    }
-
-    private static int IndexOfItem(UiNodeViewModel dropdown, string text)
-    {
-        for (int i = 0; i < dropdown.ComboItems.Count; i++)
-        {
-            if (dropdown.ComboItems[i].Equals(text, StringComparison.OrdinalIgnoreCase))
-                return i;
-        }
-
-        return -1;
-    }
-
-    private static string[] BuildNameItems(LobbyPlayerState playerState)
-    {
-        var items = new List<string> { string.Empty, ProgramConstants.PLAYERNAME };
-        items.AddRange(playerState.AiNames);
-        return items.ToArray();
     }
 
     private static IReadOnlyList<ComboItemViewModel> BuildSideItems(LobbyPlayerState playerState, ResourceResolver resources)

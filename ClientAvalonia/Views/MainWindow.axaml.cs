@@ -655,9 +655,22 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (IsGameLobbyWindow(windowName))
         {
             _lobbySession.MapSearchText = string.Empty;
-            _lobbySession.PlayerState.LoadDefaults();
-            if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
-                _lobbySession.PlayerState.LoadDefaults();
+            _lobbySession.PlayerState.LoadCatalogs();
+
+            if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            {
+                string localNick = CnCNetSessionService.Instance.LocalNick;
+                LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
+                    _lobbySession.PlayerState,
+                    localNick,
+                    CnCNetSessionService.Instance.ActiveGameRoom?.IsHost == true);
+            }
+            else
+            {
+                LobbyPlayerSlotUiRules.ConfigureForSkirmish(_lobbySession.PlayerState);
+                if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
+                    _lobbySession.PlayerState.LoadDefaultSkirmishSlots();
+            }
 
             LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
 
@@ -897,6 +910,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         string localNick = CnCNetSessionService.Instance.LocalNick;
         IReadOnlyList<CnCNetGameRoomPlayer> players = gameRoom.Players;
 
+        LobbyPlayerSlotUiRules.ConfigureForMultiplayer(_lobbySession.PlayerState, localNick, room.IsHost);
+
+        LobbyPlayerSlot[] hostAiSlots = room.IsHost
+            ? _lobbySession.PlayerState.Slots.Where(s => s.IsAi).Select(s => s.Clone()).ToArray()
+            : [];
+
         _lobbySession.PlayerState.ClearSlots();
 
         if (players.Count == 0 && room.IsHost)
@@ -919,6 +938,24 @@ public partial class MainWindow : Window, IUiNavigationHost
                 slot.ColorIndex = player.ColorId;
                 slot.TeamIndex = player.TeamId;
                 slot.StartIndex = Math.Max(0, player.StartingLocation - 1);
+            }
+        }
+
+        if (room.IsHost)
+        {
+            int insertAt = 0;
+            while (insertAt < LobbyPlayerSlot.MaxSlots && _lobbySession.PlayerState.Slots[insertAt].IsOccupied)
+                insertAt++;
+
+            foreach (LobbyPlayerSlot ai in hostAiSlots)
+            {
+                if (insertAt >= LobbyPlayerSlot.MaxSlots)
+                    break;
+
+                _lobbySession.PlayerState.Slots[insertAt] = ai;
+                insertAt++;
+                while (insertAt < LobbyPlayerSlot.MaxSlots && _lobbySession.PlayerState.Slots[insertAt].IsOccupied)
+                    insertAt++;
             }
         }
 
