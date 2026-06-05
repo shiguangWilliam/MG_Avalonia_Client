@@ -120,7 +120,7 @@ public sealed class CnCNetSession : IDisposable
             _currentGame = _gameCollection.GetLocalGame();
             if (_currentGame == null)
             {
-                LogActivity("No game collection entry for LocalGame ù IRC connect skipped.");
+                LogActivity("No game collection entry for LocalGame ? IRC connect skipped.");
                 LobbyState.SetConnectionStatus("No chat channels configured.");
                 StateChanged?.Invoke();
                 return;
@@ -331,7 +331,7 @@ public sealed class CnCNetSession : IDisposable
         }
 
         string normalized = channelName.StartsWith('#') ? channelName : "#" + channelName;
-        // XNA: JOIN channelName password ù preserve exact channel name (no lower-case).
+        // XNA: JOIN channelName password ? preserve exact channel name (no lower-case).
         _connection.SendInstant($"JOIN {normalized} {password}");
         LogActivity($"? JOIN game channel {normalized}", notifyUi: false);
     }
@@ -356,8 +356,8 @@ public sealed class CnCNetSession : IDisposable
 
         string message = code switch
         {
-            473 => "Cannot join ù game room is locked.",
-            471 => "Cannot join ù game room is full.",
+            473 => "Cannot join ? game room is locked.",
+            471 => "Cannot join ? game room is full.",
             475 => "Incorrect game room password.",
             474 => "You are banned from this game room.",
             _ => string.IsNullOrWhiteSpace(detail)
@@ -424,7 +424,7 @@ public sealed class CnCNetSession : IDisposable
     private void OnWelcomeReceived(string welcomeLine)
     {
         ApplyPlayerNameFromUserSettings();
-        LobbyState.SetConnectionStatus("Connected ù?joining channels...");
+        LobbyState.SetConnectionStatus("Connected ??joining channels...");
         LogActivity($"IRC welcome: {welcomeLine}");
         StateChanged?.Invoke();
 
@@ -599,15 +599,8 @@ public sealed class CnCNetSession : IDisposable
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(sender, ctcp, Tunnels, out string? rejectReason);
         if (game == null)
         {
-            if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
-            {
-                int fieldCount = ctcp[5..].Split(';').Length;
-                LogActivity(
-                    $"GAME CTCP from {sender} ({fieldCount} fields, rev={ctcp[5..].Split(';')[0]})",
-                    notifyUi: false);
-                if (!string.IsNullOrWhiteSpace(rejectReason))
-                    LogActivity($"GAME from {sender} ignored: {rejectReason}");
-            }
+            if (ctcp.StartsWith("GAME ", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(rejectReason))
+                Logger.Log($"CnCNet: GAME from {sender} ignored: {rejectReason}");
 
             return;
         }
@@ -682,10 +675,11 @@ public sealed class CnCNetSession : IDisposable
         return normalized.ToLowerInvariant();
     }
 
-    private void LogActivity(string message, bool notifyUi = true)
+    private void LogActivity(string message, bool notifyUi = true, bool connectionLog = true)
     {
         Logger.Log(message.StartsWith("CnCNet", StringComparison.Ordinal) ? message : $"CnCNet: {message}");
-        LobbyState.AppendConnectionLog(message);
+        if (connectionLog)
+            LobbyState.AppendConnectionLog(message);
         if (notifyUi)
             StateChanged?.Invoke();
     }

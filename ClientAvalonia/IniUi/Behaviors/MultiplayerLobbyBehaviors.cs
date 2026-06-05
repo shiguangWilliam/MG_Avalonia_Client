@@ -79,6 +79,13 @@ public static class MultiplayerLobbyBehaviors
 
         registry.Register("btnLogout", _ =>
         {
+            if (host.IsFloatingOverlayOpen)
+            {
+                host.CloseFloatingOverlay();
+                host.ShowStatus("Create game cancelled.");
+                return;
+            }
+
             if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
                 CnCNetSessionService.Instance.Disconnect();
 

@@ -40,8 +40,8 @@ public sealed class CnCNetHostedGameSummary
     public int SkillLevel { get; init; }
 
     public string DisplayLine => Locked
-        ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€?{HostName} [locked]"
-        : $"{RoomName} ({PlayerCount}/{MaxPlayers}) â€?{HostName}";
+        ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
+        : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
 }
 
 public static class CnCNetGameMessageParser

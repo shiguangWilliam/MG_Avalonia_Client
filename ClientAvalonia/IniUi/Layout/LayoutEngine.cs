@@ -77,6 +77,9 @@ public sealed class LayoutEngine
         if (IsChannelLobbyWindow(windowSectionName))
             ChannelLobbyLayout.Apply(tree, _context, windowSectionName);
 
+        if (windowSectionName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase))
+            MultiplayerGameLobbyLayout.Apply(tree);
+
         return tree;
     }
 

@@ -40,6 +40,9 @@ public static class MultiplayerColorCatalog
             {
                 Name = key.L10N($"INI:Colors:{key}"),
                 GameColorIndex = gameIndex,
+                R = (byte)Math.Clamp(r, 0, 255),
+                G = (byte)Math.Clamp(g, 0, 255),
+                B = (byte)Math.Clamp(b, 0, 255),
             });
         }
 
@@ -47,10 +50,31 @@ public static class MultiplayerColorCatalog
         return _cache;
     }
 
+    /// <summary>RandomColor from GameOptions.ini [General] (XNA GameLobbyBase color dropdown index 0).</summary>
+    public static (byte R, byte G, byte B) LoadRandomColorRgb()
+    {
+        string path = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        var ini = new IniFile(path);
+        string[] values = ini.GetStringListValue("General", "RandomColor", "255,255,255");
+        if (values.Length < 3)
+            return (255, 255, 255);
+
+        return (
+            (byte)Math.Clamp(int.TryParse(values[0], out int r) ? r : 255, 0, 255),
+            (byte)Math.Clamp(int.TryParse(values[1], out int g) ? g : 255, 0, 255),
+            (byte)Math.Clamp(int.TryParse(values[2], out int b) ? b : 255, 0, 255));
+    }
+
     public sealed class MultiplayerColorEntry
     {
         public required string Name { get; init; }
 
         public int GameColorIndex { get; init; }
+
+        public byte R { get; init; }
+
+        public byte G { get; init; }
+
+        public byte B { get; init; }
     }
 }

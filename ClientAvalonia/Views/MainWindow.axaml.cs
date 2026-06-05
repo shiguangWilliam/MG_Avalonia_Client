@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Threading;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
@@ -50,6 +51,10 @@ public partial class MainWindow : Window, IUiNavigationHost
         => IsFloatingOverlayOpen
            && _floatingOverlayWindow?.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase) == true;
 
+    public bool IsGameCreationOverlayOpen
+        => IsFloatingOverlayOpen
+           && _floatingOverlayWindow?.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase) == true;
+
     public UiNodeViewModel? ActiveRoot => _activeRoot;
 
     public UiNodeViewModel? OverlayRoot => _overlayRoot;
@@ -94,21 +99,33 @@ public partial class MainWindow : Window, IUiNavigationHost
             _navStack.Push(CurrentWindow);
         }
 
-        string? iniPath = _environment.ResolveWindowIni(windowName);
-        if (iniPath == null)
+        string? iniPath;
+        string iniSection;
+        if (_environment.ResolveWindowLoadTarget(windowName) is { } target)
         {
-            ShowStatus($"INI not found for window: {windowName}");
-            return;
+            iniPath = target.IniPath;
+            iniSection = target.SectionName;
+        }
+        else
+        {
+            iniPath = _environment.ResolveWindowIni(windowName);
+            if (iniPath == null)
+            {
+                ShowStatus($"INI not found for window: {windowName}");
+                return;
+            }
+
+            iniSection = windowName;
         }
 
         try
         {
             UiBehaviorCatalog.RegisterForWindow(_mainBehaviors, windowName, this);
 
-            _mainEngine = LayoutEngine.CreateForWindow(_environment, iniPath, windowName);
+            _mainEngine = LayoutEngine.CreateForWindow(_environment, iniPath, iniSection);
             _mainViewModelFactory = new UiViewModelFactory(_mainEngine.Resources, _mainBehaviors);
 
-            UiNodeTree tree = _mainEngine.LoadWindow(iniPath, windowName);
+            UiNodeTree tree = _mainEngine.LoadWindow(iniPath, iniSection);
             UiNodeViewModel vm = _mainViewModelFactory.CreateTree(tree);
             IniBehaviorApplier.Apply(vm, _mainBehaviors, this);
 
@@ -119,16 +136,24 @@ public partial class MainWindow : Window, IUiNavigationHost
             _activeRoot = vm;
             PART_RootView.Content = vm;
             ApplyViewportSize(_mainEngine.Context.Width, _mainEngine.Context.Height);
-
-            if (windowName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
-            {
-                ApplyLobbyData(vm, windowName);
-                UpdateLaunchButtonState(vm);
-            }
-
             CurrentWindow = windowName;
-            Title = $"ClientAvalonia — {windowName} ({_environment.ThemeFolderPath.TrimEnd('/')}) {_mainEngine.Context.Width}×{_mainEngine.Context.Height}";
-            ShowStatus($"{windowName}: {tree.Root.Children.Count} root controls, {tree.AllNodes().Count()} nodes");
+
+            try
+            {
+                if (windowName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyLobbyData(vm, windowName);
+                    UpdateLaunchButtonState(vm);
+                }
+
+                Title = $"ClientAvalonia — {windowName} ({_environment.ThemeFolderPath.TrimEnd('/')}) {_mainEngine.Context.Width}×{_mainEngine.Context.Height}";
+                ShowStatus($"{windowName}: {tree.Root.Children.Count} root controls, {tree.AllNodes().Count()} nodes");
+            }
+            catch (Exception bindEx)
+            {
+                Title = $"ClientAvalonia — {windowName} (binding warning)";
+                ShowStatus($"{windowName} binding: {bindEx.Message}");
+            }
         }
         catch (Exception ex)
         {
@@ -174,6 +199,9 @@ public partial class MainWindow : Window, IUiNavigationHost
             PART_OverlayPanel.Height = height;
             PART_OverlayView.Width = width;
             PART_OverlayView.Height = height;
+            PART_OverlayRawView.IsVisible = false;
+            PART_OverlayRawView.Content = null;
+            PART_OverlayView.IsVisible = true;
             PART_OverlayView.Content = _overlayRoot;
             PART_FloatingOverlay.IsVisible = true;
             PART_FloatingOverlay.IsHitTestVisible = true;
@@ -193,20 +221,13 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void CloseFloatingOverlay()
     {
-        if (_floatingOverlayWindow?.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase) == true)
+        if (_floatingOverlayWindow?.Equals(GameCreationOverlayHost.WindowName, StringComparison.OrdinalIgnoreCase) == true)
         {
             CloseGameCreationOverlay();
             return;
         }
 
-        PART_FloatingOverlay.IsVisible = false;
-        PART_FloatingOverlay.IsHitTestVisible = false;
-        PART_OverlayView.Content = null;
-        PART_RootView.IsHitTestVisible = true;
-        _overlayRoot = null;
-        _overlayEngine = null;
-        _overlayBehaviors.Clear();
-        _floatingOverlayWindow = null;
+        CloseFloatingOverlayCore(restoreIniOverlayView: true);
     }
 
     public void OpenGameCreationOverlay()
@@ -214,7 +235,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (IsFloatingOverlayOpen)
             return;
 
-        if (!CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
+        if (!IsCnCNetLobbyActive())
         {
             ShowStatus("Create game is only available from the CnCNet lobby.");
             return;
@@ -227,36 +248,105 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        (Control root, GameCreationOverlayContext context) = GameCreationOverlayBuilder.Build(tunnels);
+        GameCreationOverlayHost.OpenResult layout = GameCreationOverlayHost.TryResolveLayout(_environment);
+        _overlayBehaviors.Clear();
+
+        UiNodeViewModel? iniRoot = GameCreationOverlayHost.TryBuildIniOverlay(
+            _environment,
+            _overlayBehaviors,
+            this,
+            out _,
+            out string? iniFailure);
+
+        if (iniRoot != null)
+        {
+            ShowGameCreationOverlay(iniRoot, layout.Width, layout.Height, $"INI ({layout.Source})");
+            return;
+        }
+
+        (Control root, GameCreationOverlayContext context, Size preferredSize) = GameCreationOverlayBuilder.Build(tunnels);
         _gameCreationOverlay = context;
         GameCreationOverlayBehaviors.Wire(context, this, "CnCNetGameLobby");
 
-        double overlayWidth = double.IsNaN(root.Width) || root.Width <= 0 ? 490 : root.Width;
-        double overlayHeight = double.IsNaN(root.Height) || root.Height <= 0 ? 220 : root.Height;
-        PART_OverlayPanel.Width = overlayWidth;
-        PART_OverlayPanel.Height = overlayHeight;
-        PART_OverlayView.Width = overlayWidth;
-        PART_OverlayView.Height = overlayHeight;
-        PART_OverlayView.Content = root;
+        string fallbackNote = string.IsNullOrWhiteSpace(iniFailure) ? "programmatic UI" : $"programmatic UI ({iniFailure})";
+        ShowGameCreationOverlay(root, preferredSize.Width, preferredSize.Height, fallbackNote);
+    }
+
+    private void ShowGameCreationOverlay(object content, double width, double height, string sourceNote)
+    {
+        PART_OverlayPanel.Width = width + 16;
+        PART_OverlayPanel.Height = height + 16;
+        PART_OverlayPanel.Padding = new Thickness(8);
+        PART_OverlayPanel.Background = Brushes.Transparent;
+        PART_OverlayPanel.BorderBrush = new SolidColorBrush(Color.FromRgb(255, 140, 50));
+        PART_OverlayPanel.BorderThickness = new Thickness(2);
+
+        if (content is UiNodeViewModel iniRoot)
+        {
+            _overlayRoot = iniRoot;
+            PART_OverlayRawView.IsVisible = false;
+            PART_OverlayRawView.Content = null;
+            PART_OverlayView.Width = width;
+            PART_OverlayView.Height = height;
+            PART_OverlayView.IsVisible = true;
+            PART_OverlayView.Content = iniRoot;
+        }
+        else
+        {
+            _overlayRoot = null;
+            PART_OverlayView.IsVisible = false;
+            PART_OverlayView.Content = null;
+            PART_OverlayRawView.ContentTemplate = null;
+            PART_OverlayRawView.Width = width;
+            PART_OverlayRawView.Height = height;
+            PART_OverlayRawView.Content = content;
+            PART_OverlayRawView.IsVisible = true;
+        }
+
         PART_FloatingOverlay.IsVisible = true;
         PART_FloatingOverlay.IsHitTestVisible = true;
         PART_RootView.IsHitTestVisible = false;
-        _floatingOverlayWindow = "GameCreationWindow";
-        ShowStatus("Configure game room settings.");
+        _floatingOverlayWindow = GameCreationOverlayHost.WindowName;
+        ShowStatus($"Create game ({sourceNote}).");
     }
 
     public void CloseGameCreationOverlay()
     {
-        if (_floatingOverlayWindow?.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase) != true)
+        if (_floatingOverlayWindow?.Equals(GameCreationOverlayHost.WindowName, StringComparison.OrdinalIgnoreCase) != true)
             return;
 
+        ResetOverlayPanelChrome();
+        CloseFloatingOverlayCore(restoreIniOverlayView: true);
+        _gameCreationOverlay = null;
+    }
+
+    private void ResetOverlayPanelChrome()
+    {
+        PART_OverlayPanel.Padding = new Thickness(0);
+        PART_OverlayPanel.Background = new SolidColorBrush(Color.FromArgb(204, 20, 16, 12));
+        PART_OverlayPanel.BorderBrush = new SolidColorBrush(Color.FromArgb(85, 255, 140, 50));
+        PART_OverlayPanel.BorderThickness = new Thickness(1);
+    }
+
+    private void CloseFloatingOverlayCore(bool restoreIniOverlayView)
+    {
         PART_FloatingOverlay.IsVisible = false;
         PART_FloatingOverlay.IsHitTestVisible = false;
         PART_OverlayView.Content = null;
+        PART_OverlayRawView.Content = null;
+        PART_OverlayRawView.IsVisible = false;
+        if (restoreIniOverlayView)
+            PART_OverlayView.IsVisible = true;
         PART_RootView.IsHitTestVisible = true;
-        _gameCreationOverlay = null;
+        _overlayRoot = null;
+        _overlayEngine = null;
+        _overlayBehaviors.Clear();
         _floatingOverlayWindow = null;
     }
+
+    private bool IsCnCNetLobbyActive()
+        => IsChannelLobbyWindow(CurrentWindow)
+           || (_activeRoot != null && FindVm(_activeRoot, "ddCurrentChannel") != null);
 
     public void OpenOptionsOverlay() => OpenFloatingOverlay("OptionsWindow");
 
@@ -783,10 +873,11 @@ public partial class MainWindow : Window, IUiNavigationHost
         int count = CnCNetSessionService.Instance.OnlinePlayerCount;
         _bindingSession.State.SetOnlinePlayerCount(count);
 
-        if (_activeRoot != null && IsChannelLobbyWindow(CurrentWindow))
+        if (_activeRoot != null && IsCnCNetLobbyActive())
         {
             GameDataBindingApplier.ApplyChannelLobby(_activeRoot, CnCNetSessionService.Instance.LobbyState);
-            ShowStatus($"CnCNet: {CnCNetSessionService.Instance.LobbyState.ConnectionStatus}");
+            if (!IsFloatingOverlayOpen)
+                ShowStatus($"CnCNet: {CnCNetSessionService.Instance.LobbyState.ConnectionStatus}");
         }
 
         if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))

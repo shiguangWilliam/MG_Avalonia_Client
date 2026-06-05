@@ -147,6 +147,10 @@
     <ctrl:DxThemeCheckBox DataContext="{Binding}" />
   </DataTemplate>
 
+  <DataTemplate x:Key="DxLobbyToolbarCheckBox" DataType="vm:UiNodeViewModel">
+    <ctrl:DxLobbyToolbarCheckBox DataContext="{Binding}" />
+  </DataTemplate>
+
   <DataTemplate x:Key="DxComboBox" DataType="vm:UiNodeViewModel">
     <ComboBox MinWidth="{Binding Width}"
               MinHeight="{Binding Height}"
@@ -214,6 +218,14 @@
                      Source="{Binding Icon}"
                      IsVisible="{Binding HasIcon}"
                      VerticalAlignment="Center" />
+              <Border Width="16"
+                      Height="16"
+                      Background="{Binding SwatchBrush}"
+                      BorderBrush="#6B4E2E"
+                      BorderThickness="1"
+                      CornerRadius="2"
+                      IsVisible="{Binding HasSwatch}"
+                      VerticalAlignment="Center" />
               <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
             </StackPanel>
           </DataTemplate>

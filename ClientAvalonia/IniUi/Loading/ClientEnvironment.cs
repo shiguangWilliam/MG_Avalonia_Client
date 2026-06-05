@@ -236,6 +236,85 @@ public sealed class ClientEnvironment
     public string? ResolveWindowIni(string windowName)
         => ResolveWindowIniPath(GameRoot, ThemeFolderPath, windowName);
 
+    /// <summary>GenericWindow.ini in theme / Resources / DTA.</summary>
+    public string? ResolveGenericWindowIni()
+        => ResolveNamedIni("GenericWindow.ini");
+
+    /// <summary>Dedicated window INI, else [windowName] inside GenericWindow.ini.</summary>
+    public (string IniPath, string Section)? TryResolveOverlaySection(string windowName, string genericSectionName)
+    {
+        string? dedicated = ResolveWindowIni(windowName);
+        if (dedicated != null)
+            return (dedicated, windowName);
+
+        string? generic = ResolveGenericWindowIni();
+        if (generic == null)
+            return null;
+
+        if (!File.Exists(generic))
+            return null;
+
+        IniDocument doc = IniDocument.Load(generic);
+        if (doc.GetSection(genericSectionName) == null)
+            return null;
+
+        return (generic, genericSectionName);
+    }
+
+    /// <summary>Resolves INI path and section for LayoutEngine (CnCNetGameLobby.ini uses [MultiplayerGameLobby]).</summary>
+    public (string IniPath, string SectionName)? ResolveWindowLoadTarget(string windowName)
+    {
+        string? iniPath = ResolveWindowIni(windowName);
+        if (iniPath == null && IsGameLobbyWindowName(windowName))
+        {
+            iniPath = ResolveWindowIni("MultiplayerGameLobby")
+                ?? ResolveWindowIni("SkirmishLobby");
+        }
+
+        if (iniPath == null)
+            return null;
+
+        string? section = ResolveSectionName(iniPath, windowName)
+            ?? ResolveSectionName(iniPath, "MultiplayerGameLobby")
+            ?? ResolveSectionName(iniPath, "SkirmishLobby");
+
+        return section == null ? null : (iniPath, section);
+    }
+
+    private static bool IsGameLobbyWindowName(string windowName)
+        => windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ResolveSectionName(string iniPath, string sectionName)
+    {
+        if (!File.Exists(iniPath))
+            return null;
+
+        IniDocument doc = IniDocument.Load(iniPath);
+        return doc.GetSection(sectionName) != null ? sectionName : null;
+    }
+
+    private string? ResolveNamedIni(string fileName)
+    {
+        string resourcesDirectory = Path.Combine(GameRoot, "Resources");
+        string themeResourceDirectory = Path.Combine(resourcesDirectory, ThemeFolderPath.TrimEnd('/', '\\'));
+        string[] candidates =
+        [
+            Path.Combine(themeResourceDirectory, fileName),
+            Path.Combine(resourcesDirectory, fileName),
+            Path.Combine(resourcesDirectory, "DTA", fileName),
+        ];
+
+        foreach (string path in candidates)
+        {
+            if (File.Exists(path))
+                return path;
+        }
+
+        return null;
+    }
+
     private static string? ResolveWindowIniPath(string gameRoot, string themeFolderPath, string windowName)
     {
         string resourcesDirectory = Path.Combine(gameRoot, "Resources");

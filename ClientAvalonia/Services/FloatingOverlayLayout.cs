@@ -10,10 +10,12 @@ public static class FloatingOverlayLayout
         {
             ["OptionsWindow"] = (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height),
             ["CampaignSelector"] = (800, 600),
+            ["GameCreationWindow"] = (520, 580),
         };
 
     public static bool IsOverlayWindow(string windowSectionName)
-        => FallbackSizes.ContainsKey(windowSectionName);
+        => FallbackSizes.ContainsKey(windowSectionName)
+           || windowSectionName.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase);
 
     public static (int Width, int Height) ResolveOverlaySize(string iniPath, string windowSectionName)
     {

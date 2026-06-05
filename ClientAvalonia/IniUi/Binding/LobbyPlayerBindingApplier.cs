@@ -1,3 +1,4 @@
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Behaviors;
@@ -46,8 +47,7 @@ public static class LobbyPlayerBindingApplier
         var nameItems = BuildNameItems(playerState);
         var sideItems = BuildSideItems(playerState, resources);
         var teamItems = BuildTeamItems(playerState);
-        var colorItems = new List<string> { "Random" };
-        colorItems.AddRange(MultiplayerColorCatalog.Load().Select(c => c.Name));
+        var colorItems = BuildColorItems(resources);
         var startItems = Enumerable.Range(1, 8).Select(i => i.ToString()).ToArray();
 
         UiNodeViewModel? firstName = null;
@@ -70,7 +70,7 @@ public static class LobbyPlayerBindingApplier
             x += layout.SideWidth + layout.HorizontalMargin;
             firstSide ??= ddSide;
 
-            UiNodeViewModel ddColor = CreateDropdown(
+            UiNodeViewModel ddColor = CreateColorDropdown(
                 $"ddPlayerColor{slot}", x, y, layout.ColorWidth, DropDownHeight, resources, behaviors, colorItems);
             x += layout.ColorWidth + layout.HorizontalMargin;
             firstColor ??= ddColor;
@@ -381,6 +381,42 @@ public static class LobbyPlayerBindingApplier
         string? raw = root.GetIniString(key);
         return int.TryParse(raw, out int value) ? value : fallback;
     }
+
+    private static IReadOnlyList<ComboItemViewModel> BuildColorItems(ResourceResolver resources)
+    {
+        var items = new List<ComboItemViewModel>
+        {
+            new ComboItemViewModel
+            {
+                Text = "Random",
+                Tag = "Random",
+                Icon = resources.LoadFirstBitmap(["randomicon.png"]),
+            },
+        };
+
+        foreach (MultiplayerColorCatalog.MultiplayerColorEntry color in MultiplayerColorCatalog.Load())
+        {
+            items.Add(new ComboItemViewModel
+            {
+                Text = color.Name,
+                Tag = color.GameColorIndex.ToString(),
+                SwatchBrush = new SolidColorBrush(Color.FromRgb(color.R, color.G, color.B)),
+            });
+        }
+
+        return items;
+    }
+
+    private static UiNodeViewModel CreateColorDropdown(
+        string id,
+        double x,
+        double y,
+        double width,
+        double height,
+        ResourceResolver resources,
+        BehaviorRegistry behaviors,
+        IReadOnlyList<ComboItemViewModel> items)
+        => CreateSideDropdown(id, x, y, width, height, resources, behaviors, items);
 
     private static UiNodeViewModel CreateSideDropdown(
         string id,

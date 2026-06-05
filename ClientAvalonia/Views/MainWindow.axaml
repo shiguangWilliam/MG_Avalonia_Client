@@ -21,8 +21,10 @@
           </ContentControl.ContentTemplate>
         </ContentControl>
 
-        <!-- Floating INI panels (Options, Campaign, …) over MainMenu at their own Size= -->
+        <!-- Floating INI panels (Options, Campaign, Create Game, …) -->
         <Grid x:Name="PART_FloatingOverlay"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
               IsVisible="False"
               IsHitTestVisible="False"
               ZIndex="100">
@@ -38,14 +40,23 @@
                   BorderBrush="#55FF8C32"
                   BorderThickness="1"
                   BoxShadow="0 12 40 0 #90000000"
-                  ClipToBounds="True"
-                  Background="#01000000">
-            <ContentControl x:Name="PART_OverlayView"
-                            IsHitTestVisible="True">
-              <ContentControl.ContentTemplate>
-                <views:DxNodeTemplateSelector />
-              </ContentControl.ContentTemplate>
-            </ContentControl>
+                  ClipToBounds="False"
+                  Background="#CC14100C">
+            <Grid>
+              <ContentControl x:Name="PART_OverlayView"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              IsHitTestVisible="True">
+                <ContentControl.ContentTemplate>
+                  <views:DxNodeTemplateSelector />
+                </ContentControl.ContentTemplate>
+              </ContentControl>
+              <ContentControl x:Name="PART_OverlayRawView"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              IsVisible="False"
+                              IsHitTestVisible="True" />
+            </Grid>
           </Border>
         </Grid>
       </Grid>
