@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClientAvalonia.Views.StartupLoadingView"
+             Background="#FF000000">
+  <Grid HorizontalAlignment="Stretch"
+        VerticalAlignment="Stretch">
+    <Image x:Name="PART_LoadingImage"
+           Stretch="UniformToFill"
+           HorizontalAlignment="Stretch"
+           VerticalAlignment="Stretch"
+           Opacity="0.96" />
+    <Border Background="#99000000"
+            Height="5"
+            VerticalAlignment="Bottom"
+            HorizontalAlignment="Stretch">
+      <Border x:Name="PART_ProgressTrack"
+              Margin="24,0"
+              Height="5"
+              VerticalAlignment="Center">
+        <Border x:Name="PART_ProgressFill"
+                Background="#FFCC6600"
+                HorizontalAlignment="Left"
+                Width="40"
+                Height="5" />
+      </Border>
+    </Border>
+    <TextBlock x:Name="PART_Status"
+               Text="Loading..."
+               Foreground="#FFCC9933"
+               FontSize="13"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Bottom"
+               Margin="0,0,0,18" />
+  </Grid>
+</UserControl>

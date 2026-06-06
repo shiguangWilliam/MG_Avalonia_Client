@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using ClientAvalonia.Core;
@@ -77,8 +78,30 @@ public partial class MainWindow : Window, IUiNavigationHost
         CnCNetSessionService.Instance.EnsureStarted();
         InitializeComponent();
         KeyDown += OnKeyDown;
-        NavigateTo("MainMenu");
+        Loaded += OnWindowLoaded;
+        PART_TopBarHost.Bar.BindNavigation(NavigateTo);
         _updateService.RefreshInitialStatus();
+    }
+
+    private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
+    {
+        Loaded -= OnWindowLoaded;
+
+        var resources = new ResourceResolver();
+        resources.ConfigureForGame(_environment);
+
+        PART_StartupLoading.IsVisible = true;
+        await StartupLoadingView.RunStartupSequenceAsync(
+            PART_StartupLoading,
+            resources,
+            () =>
+            {
+                _gameResources.EnsureLoaded();
+                return Task.CompletedTask;
+            }).ConfigureAwait(true);
+
+        PART_StartupLoading.IsVisible = false;
+        NavigateTo("MainMenu");
     }
 
     public void NavigateTo(string windowName) => NavigateTo(windowName, fromBack: false);
@@ -149,6 +172,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
                 Title = $"ClientAvalonia — {windowName} ({_environment.ThemeFolderPath.TrimEnd('/')}) {_mainEngine.Context.Width}×{_mainEngine.Context.Height}";
                 ShowStatus($"{windowName}: {tree.Root.Children.Count} root controls, {tree.AllNodes().Count()} nodes");
+                UpdateTopBar();
             }
             catch (Exception bindEx)
             {
@@ -898,9 +922,13 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase) && cncRoom != null)
         {
+            UiNodeViewModel? btnManualReady = FindVm(root, "btnManualReady");
+
             if (cncRoom.IsHost)
             {
                 btnLaunch?.SetDisplayText("Launch Game");
+                btnManualReady?.IsVisible = false;
+                btnLaunch?.IsVisible = true;
             }
             else
             {
@@ -909,22 +937,62 @@ public partial class MainWindow : Window, IUiNavigationHost
                 if (chkAutoReady != null)
                     chkAutoReady.IsEnabled = true;
 
-                CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
-                    .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
-                btnLaunch?.SetDisplayText(local is { Ready: true } ? "Not Ready" : "I'm Ready");
+                if (btnManualReady != null)
+                {
+                    btnManualReady.IsVisible = true;
+                    btnManualReady.IsEnabled = !autoReady;
+                    CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: true);
+                    btnLaunch?.IsVisible = false;
+                }
+                else
+                {
+                    CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
+                        .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+                    btnLaunch?.SetDisplayText(local is { Ready: true } ? "Not Ready" : "I'm Ready");
+                    btnLaunch?.IsVisible = true;
+                }
             }
 
             if (cncRoom.IsHost && chkAutoReady != null)
             {
                 chkAutoReady.IsEnabled = false;
                 chkAutoReady.IsChecked = false;
+                chkAutoReady.IsVisible = false;
             }
         }
 
         _bindingSession.State.SetCanLaunchGame(canLaunch);
-        if (btnLaunch != null)
+        if (btnLaunch != null && btnLaunch.IsVisible)
             btnLaunch.IsEnabled = canLaunch;
     }
+
+    private void UpdateTopBar()
+    {
+        bool show = ShouldShowTopBar();
+        if (!show)
+        {
+            PART_TopBarHost.Deactivate();
+            return;
+        }
+
+        if (!PART_TopBarHost.IsVisible)
+            PART_TopBarHost.IsVisible = true;
+
+        PART_TopBarHost.Activate(this);
+
+        var lobby = CnCNetSessionService.Instance.LobbyState;
+        string status = lobby.ConnectionStatus;
+        if (string.IsNullOrWhiteSpace(status))
+            status = CnCNetSessionService.Instance.Connection?.IsConnected == true ? "已连接" : "Offline";
+
+        PART_TopBarHost.Bar.UpdateState(status, CnCNetSessionService.Instance.OnlinePlayerCount);
+    }
+
+    private bool ShouldShowTopBar()
+        => CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
+           || CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+           || CurrentWindow.Equals("LANLobby", StringComparison.OrdinalIgnoreCase)
+           || CurrentWindow.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGameLobbyWindow(string windowName)
         => windowName.Equals("SkirmishLobby", StringComparison.OrdinalIgnoreCase)
@@ -993,6 +1061,8 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase) && _activeRoot != null)
             StateBindingApplier.Apply(_activeRoot, _bindingSession.State, "MainMenu");
+
+        UpdateTopBar();
     }
 
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
@@ -1026,6 +1096,19 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
         LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+
+        bool locked = gameRoom?.Locked ?? false;
+        LobbyPlayerStatusApplier.Apply(
+            root,
+            _lobbySession.PlayerState,
+            resources,
+            _mainBehaviors,
+            entries,
+            locked,
+            room.IsHost);
+
+        CnCNetGameLobbyUiHelper.ApplyJoinerToolbar(root, resources, _mainBehaviors, isJoiner: !room.IsHost);
+        CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: !room.IsHost);
         UpdateLaunchButtonState(root);
 
         if (room.IsHost)
@@ -1062,6 +1145,37 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Key == Key.F2 && !IsFloatingOverlayOpen)
+        {
+            NavigateTo("MainMenu");
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.F3 && !IsFloatingOverlayOpen)
+        {
+            NavigateTo("CnCNetLobby");
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.F12 && !IsFloatingOverlayOpen)
+        {
+            if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
+                OpenOptionsOverlay();
+            else
+                ShowStatus("Settings overlay opens from Main Menu (F2).");
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter && IsCnCNetLobbyActive() && !IsFloatingOverlayOpen)
+        {
+            TrySendChannelChat();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape)
         {
             if (IsFloatingOverlayOpen)
@@ -1096,6 +1210,20 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (tab != null)
             SelectOptionsTab(tab.Value);
+    }
+
+    private void TrySendChannelChat()
+    {
+        if (_activeRoot == null)
+            return;
+
+        UiNodeViewModel? tbChat = FindVm(_activeRoot, "tbChatInput");
+        if (tbChat == null || string.IsNullOrWhiteSpace(tbChat.InputText))
+            return;
+
+        string message = tbChat.InputText.Trim();
+        CnCNetSessionService.Instance.SendChatMessage(message);
+        tbChat.InputText = string.Empty;
     }
 
     private void ApplyViewportSize(int width, int height)

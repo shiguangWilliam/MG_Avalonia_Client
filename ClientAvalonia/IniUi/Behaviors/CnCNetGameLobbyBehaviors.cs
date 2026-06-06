@@ -38,6 +38,25 @@ public static class CnCNetGameLobbyBehaviors
                 CnCNetSessionService.Instance.SetGameRoomReady(false, autoReady: false);
                 host.ShowStatus("Auto ready disabled.");
             }
+
+            host.RefreshCnCNetGameRoomPlayers();
         });
+
+        registry.Register("btnManualReady", _ => ToggleJoinerReady(host));
+    }
+
+    private static void ToggleJoinerReady(IUiNavigationHost host)
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room == null || room.IsHost)
+            return;
+
+        CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
+            .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+
+        bool ready = !(local?.Ready ?? false);
+        CnCNetSessionService.Instance.SetGameRoomReady(ready, autoReady: false);
+        host.ShowStatus(ready ? "Ready — waiting for host to launch." : "Not ready.");
+        host.RefreshCnCNetGameRoomPlayers();
     }
 }

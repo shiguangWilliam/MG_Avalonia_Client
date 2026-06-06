@@ -1,10 +1,12 @@
 using Avalonia.Media.Imaging;
+using Avalonia.Media;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientCore;
 using ClientAvalonia.CnCNet;
+using ClientCore.Settings;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.IniUi.Binding;
@@ -170,17 +172,93 @@ public static class GameDataBindingApplier
 
         FindVm(root, "lblColor")?.SetDisplayText("聊天文字颜色：");
 
-        UiNodeViewModel? lbChat = FindVm(root, "lbChatMessages");
-        if (lbChat != null)
-        {
-            var logLines = state.ConnectionLog.Count > 0
-                ? state.ConnectionLog.ToList()
-                : new List<string> { "CnCNet connection log will appear here..." };
-            lbChat.SetListItems(logLines);
-            lbChat.SelectedIndex = logLines.Count > 0 ? logLines.Count - 1 : -1;
-        }
+        WireChatColorDropdown(root, state);
+        WireChatMessages(root, state);
+        WireChatInput(root);
 
         ApplyChannelLobbyButtonLabels(root);
+    }
+
+    private static void WireChatColorDropdown(UiNodeViewModel root, MultiplayerLobbyState state)
+    {
+        UiNodeViewModel? ddColor = FindVm(root, "ddColor");
+        if (ddColor == null)
+            return;
+
+        var colors = CnCNetChatColorCatalog.LoadSelectable();
+        ddColor.SetComboItemEntries(colors.Select(c => new ComboItemViewModel
+        {
+            Text = c.Name,
+            SwatchBrush = new SolidColorBrush(c.DisplayColor),
+        }));
+        int saved = state.SelectedChatColorIndex >= 0
+            ? state.SelectedChatColorIndex
+            : CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
+        int selectableIndex = MapToSelectableIndex(saved, colors);
+        ddColor.SetSelectedIndexSilent(Math.Clamp(selectableIndex, 0, Math.Max(0, ddColor.ComboItemEntries.Count - 1)));
+
+        if (!ddColor.Node.Props.ContainsKey("ChatColorWired"))
+        {
+            ddColor.Node.Props["ChatColorWired"] = true;
+            ddColor.SelectionChanged += () =>
+            {
+                int idx = ddColor.SelectedIndex;
+                if (idx < 0 || idx >= ddColor.ComboItemEntries.Count)
+                    return;
+
+                string name = ddColor.ComboItemEntries[idx].Text;
+                IReadOnlyList<CnCNetChatColorEntry> all = CnCNetChatColorCatalog.LoadAll();
+                for (int i = 0; i < all.Count; i++)
+                {
+                    if (all[i].Name == name)
+                    {
+                        CnCNetSessionService.Instance.SetChatColorIndex(i);
+                        break;
+                    }
+                }
+            };
+        }
+    }
+
+    private static int MapToSelectableIndex(int catalogIndex, IReadOnlyList<CnCNetChatColorEntry> selectable)
+    {
+        IReadOnlyList<CnCNetChatColorEntry> all = CnCNetChatColorCatalog.LoadAll();
+        if (catalogIndex < 0 || catalogIndex >= all.Count)
+            return 0;
+
+        string name = all[catalogIndex].Name;
+        for (int i = 0; i < selectable.Count; i++)
+        {
+            if (selectable[i].Name == name)
+                return i;
+        }
+
+        return 0;
+    }
+
+    private static void WireChatMessages(UiNodeViewModel root, MultiplayerLobbyState state)
+    {
+        UiNodeViewModel? lbChat = FindVm(root, "lbChatMessages");
+        if (lbChat == null)
+            return;
+
+        var lines = state.ChatLines.Count > 0
+            ? state.ChatLines.Select(c => c.DisplayText).ToList()
+            : state.ConnectionLog.Count > 0
+                ? state.ConnectionLog.ToList()
+                : new List<string> { "CnCNet connection log will appear here..." };
+
+        lbChat.SetListItems(lines);
+        lbChat.SelectedIndex = lines.Count > 0 ? lines.Count - 1 : -1;
+    }
+
+    private static void WireChatInput(UiNodeViewModel root)
+    {
+        UiNodeViewModel? tbChat = FindVm(root, "tbChatInput");
+        if (tbChat == null)
+            return;
+
+        tbChat.IsEnabled = CnCNetSessionService.Instance.Connection?.IsConnected == true;
     }
 
     public static void SyncChannelGameSelection(UiNodeViewModel root, MultiplayerLobbyState state)

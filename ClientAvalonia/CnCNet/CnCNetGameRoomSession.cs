@@ -92,6 +92,8 @@ public sealed class CnCNetGameRoomSession
         }
 
         LogNotice(IsHost ? $"Hosting \"{Room.RoomName}\"." : $"Joined \"{Room.RoomName}\".");
+        if (!IsHost)
+            BroadcastLocalTunnelPingLocked();
         StateChanged?.Invoke();
     }
 
@@ -173,6 +175,12 @@ public sealed class CnCNetGameRoomSession
         if (ctcp.StartsWith("OR ", StringComparison.Ordinal) && IsHost)
         {
             ApplyOptionsRequest(sender, ctcp[3..].Trim());
+            return;
+        }
+
+        if (ctcp.StartsWith("TNLPNG ", StringComparison.Ordinal))
+        {
+            HandleTunnelPing(sender, ctcp[7..].Trim());
             return;
         }
 
@@ -421,6 +429,36 @@ public sealed class CnCNetGameRoomSession
             LocalPlayerPort = localPort,
             IsHost = false,
         });
+    }
+
+    private void HandleTunnelPing(string sender, string payload)
+    {
+        if (!int.TryParse(payload, out int ping))
+            return;
+
+        lock (_sync)
+        {
+            CnCNetGameRoomPlayer? player = FindPlayerLocked(sender);
+            if (player == null || player.IsAi)
+                return;
+
+            player.Ping = ping;
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    private void BroadcastLocalTunnelPingLocked()
+    {
+        if (_connection == null)
+            return;
+
+        int ping = 0;
+        SendCtcp($"TNLPNG {ping}");
+
+        CnCNetGameRoomPlayer? local = FindPlayerLocked(_localNick);
+        if (local != null)
+            local.Ping = ping;
     }
 
     private void HandleReadyRequest(string sender, string payload)

@@ -151,23 +151,61 @@
     <ctrl:DxLobbyToolbarCheckBox DataContext="{Binding}" />
   </DataTemplate>
 
+  <DataTemplate x:Key="DxReadyActionButton" DataType="vm:UiNodeViewModel">
+    <ctrl:DxReadyActionButton DataContext="{Binding}" />
+  </DataTemplate>
+
   <DataTemplate x:Key="DxComboBox" DataType="vm:UiNodeViewModel">
-    <ComboBox MinWidth="{Binding Width}"
-              MinHeight="{Binding Height}"
-              MaxWidth="{Binding ContentMaxWidth}"
-              Background="#CC14100C"
-              BorderBrush="#6B4E2E"
-              Foreground="{StaticResource DxTextPrimaryBrush}"
-              FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
-              FontSize="12.5"
-              Padding="10,6"
-              CornerRadius="6"
-              ItemsSource="{Binding ComboItems}"
-              SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
-              IsEnabled="{Binding IsEnabled}"
-              IsVisible="{Binding IsVisible}"
-              PlaceholderText="{Binding Text}"
-              ToolTip.Tip="{Binding ToolTip}" />
+    <Panel MinWidth="{Binding Width}" MinHeight="{Binding Height}">
+      <ComboBox MinWidth="{Binding Width}"
+                MinHeight="{Binding Height}"
+                MaxWidth="{Binding ContentMaxWidth}"
+                Background="#CC14100C"
+                BorderBrush="#6B4E2E"
+                Foreground="{StaticResource DxTextPrimaryBrush}"
+                FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                FontSize="12.5"
+                Padding="10,6"
+                CornerRadius="6"
+                ItemsSource="{Binding ComboItems}"
+                SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                IsEnabled="{Binding IsEnabled}"
+                IsVisible="{Binding UseComboItemIcons, Converter={x:Static BoolConverters.Not}}"
+                PlaceholderText="{Binding Text}"
+                ToolTip.Tip="{Binding ToolTip}" />
+      <ComboBox MinWidth="{Binding Width}"
+                MinHeight="{Binding Height}"
+                MaxWidth="{Binding ContentMaxWidth}"
+                Background="#CC14100C"
+                BorderBrush="#6B4E2E"
+                Foreground="{StaticResource DxTextPrimaryBrush}"
+                FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                FontSize="12.5"
+                Padding="6,4"
+                CornerRadius="6"
+                ItemsSource="{Binding ComboItemEntries}"
+                SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                IsEnabled="{Binding IsEnabled}"
+                IsVisible="{Binding UseComboItemIcons}"
+                PlaceholderText="{Binding Text}"
+                ToolTip.Tip="{Binding ToolTip}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate DataType="vm:ComboItemViewModel">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Border Width="14"
+                      Height="14"
+                      Background="{Binding SwatchBrush}"
+                      BorderBrush="#6B4E2E"
+                      BorderThickness="1"
+                      CornerRadius="2"
+                      IsVisible="{Binding HasSwatch}"
+                      VerticalAlignment="Center" />
+              <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
+            </StackPanel>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Panel>
   </DataTemplate>
 
   <DataTemplate x:Key="DxLobbyComboBox" DataType="vm:UiNodeViewModel">
@@ -346,10 +384,11 @@
   </DataTemplate>
 
   <DataTemplate x:Key="DxIndicator" DataType="vm:UiNodeViewModel">
-    <StackPanel Orientation="Horizontal" Spacing="4">
-      <Border Width="16" Height="16" Background="#444" />
-      <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
-    </StackPanel>
+    <Image Source="{Binding PreviewImage}"
+           Width="{Binding Width}"
+           Height="{Binding Height}"
+           Stretch="Uniform"
+           IsVisible="{Binding HasPreviewImage}" />
   </DataTemplate>
 
   <!-- Leaf presenter used inside canvas item template -->

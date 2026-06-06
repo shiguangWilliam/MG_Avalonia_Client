@@ -127,6 +127,7 @@ internal static class ChannelLobbyLayout
         UiNode? ddColor = tree.FindNode("ddColor");
         if (ddColor != null)
         {
+            ddColor.TemplateKey = "DxLobbyComboBox";
             ddColor.Props["CanvasLeft"] = (double)(chatX + 95);
             ddColor.Props["CanvasTop"] = (double)(HeaderY - 2);
             ddColor.Props["Width"] = (double)ColorDropdownWidth;

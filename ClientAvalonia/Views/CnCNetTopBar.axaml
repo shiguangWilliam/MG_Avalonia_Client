@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClientAvalonia.Views.CnCNetTopBar"
+             Height="36"
+             Background="#E0121010"
+             BorderBrush="#55FF8C32"
+             BorderThickness="0,0,0,1">
+  <Grid Margin="8,4">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
+    <Button x:Name="BtnMainMenu" Grid.Column="0" Content="主菜单 (F2)" Margin="0,0,6,0" Padding="8,2" />
+    <Button x:Name="BtnCnCNetLobby" Grid.Column="1" Content="CnCNet 大厅 (F3)" Margin="0,0,6,0" Padding="8,2" />
+    <Button x:Name="BtnPrivateMessages" Grid.Column="2" Content="私信 (F4)" Margin="0,0,6,0" Padding="8,2" IsEnabled="False" />
+    <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
+      <TextBlock x:Name="LblConnectionStatus" Foreground="#FFCC9933" VerticalAlignment="Center" Text="Offline" />
+      <TextBlock Foreground="#AAAAAA" VerticalAlignment="Center" Text="MG PLAYERS ONLINE:" />
+      <TextBlock x:Name="LblOnlineCount" Foreground="White" VerticalAlignment="Center" Text="—" />
+    </StackPanel>
+    <Button x:Name="BtnSettings" Grid.Column="4" Content="设置 (F12)" Margin="6,0,6,0" Padding="8,2" />
+    <Button x:Name="BtnLogout" Grid.Column="5" Content="Log Out" Margin="0,0,6,0" Padding="8,2" />
+    <TextBlock x:Name="LblClock" Grid.Column="6" Foreground="#AAAAAA" VerticalAlignment="Center" />
+  </Grid>
+</UserControl>

@@ -16,6 +16,8 @@ internal static class MultiplayerGameLobbyLayout
         if (launch == null)
             return;
 
+        EnsureManualReadyNode(tree, launch);
+
         int barY = launch.GetIntProp("CanvasTop");
         int barHeight = Math.Max(launch.GetIntProp("Height"), 34);
         int leftX = launch.GetIntProp("CanvasLeft");
@@ -27,7 +29,7 @@ internal static class MultiplayerGameLobbyLayout
         if (sideMargin <= 0)
             sideMargin = 22;
 
-        foreach (string id in new[] { "btnLaunchGame", "btnLockGame", "chkAutoSave", "chkAutoReady" })
+        foreach (string id in new[] { "btnManualReady", "btnLaunchGame", "btnLockGame", "chkAutoSave" })
         {
             UiNode? node = tree.FindNode(id);
             if (node == null || !IsVisible(node))
@@ -39,7 +41,7 @@ internal static class MultiplayerGameLobbyLayout
                 node.Props["Height"] = (double)barHeight;
             }
 
-            int width = id is "btnLaunchGame" or "btnLockGame"
+            int width = id is "btnManualReady" or "btnLaunchGame" or "btnLockGame"
                 ? Math.Max(node.GetIntProp("Width"), 133)
                 : EstimateCheckboxWidth(node);
 
@@ -66,6 +68,47 @@ internal static class MultiplayerGameLobbyLayout
             node.Props["Height"] = (double)barHeight;
             cursor -= ToolbarSpacing;
         }
+    }
+
+    private static void EnsureManualReadyNode(UiNodeTree tree, UiNode launch)
+    {
+        if (tree.FindNode("btnManualReady") != null)
+            return;
+
+        UiNode? parent = FindParentNode(tree.Root, launch.Id);
+        if (parent == null)
+            return;
+
+        var node = new UiNode
+        {
+            Id = "btnManualReady",
+            ControlType = launch.ControlType,
+            TemplateKey = "DxReadyActionButton",
+        };
+
+        node.Props["CanvasLeft"] = launch.Props.TryGetValue("CanvasLeft", out object? left) ? left : 0d;
+        node.Props["CanvasTop"] = launch.Props.TryGetValue("CanvasTop", out object? top) ? top : 0d;
+        node.Props["Width"] = launch.Props.TryGetValue("Width", out object? width) ? width : 133d;
+        node.Props["Height"] = launch.Props.TryGetValue("Height", out object? height) ? height : 34d;
+        node.Props["IsVisible"] = false;
+        node.Props["Text"] = "I'm Ready";
+
+        parent.Children.Add(node);
+    }
+
+    private static UiNode? FindParentNode(UiNode root, string childId)
+    {
+        foreach (UiNode child in root.Children)
+        {
+            if (child.Id.Equals(childId, StringComparison.OrdinalIgnoreCase))
+                return root;
+
+            UiNode? found = FindParentNode(child, childId);
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
     private static bool IsVisible(UiNode node)

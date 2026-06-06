@@ -311,6 +311,36 @@ public sealed class CnCNetSession : IDisposable
 
     public void SetGameRoomLocked(bool locked) => _gameRoom?.SetLocked(locked);
 
+    public void SendChatMessage(string message)
+    {
+        if (_connection == null || !_connection.IsConnected || _currentGame == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        int colorIndex = LobbyState.SelectedChatColorIndex;
+        if (colorIndex < 0)
+            colorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
+
+        CnCNetChatColorEntry color = CnCNetChatColorCatalog.GetEntry(colorIndex);
+        _connection.SendChatMessage(_currentGame.ChatChannel, message, color.IrcColorId);
+
+        LobbyState.AddChatLine(new CnCNetChatLine
+        {
+            Sender = LocalNick,
+            DisplayText = FormatChatLine(LocalNick, message, DateTime.Now),
+        });
+        StateChanged?.Invoke();
+    }
+
+    public void SetChatColorIndex(int index)
+    {
+        LobbyState.SelectedChatColorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(index);
+        UserINISettings.Instance.ChatColor.Value = LobbyState.SelectedChatColorIndex;
+        UserINISettings.Instance.SaveSettings();
+    }
+
     public void UpdateHostedGameListing(
         string mapName,
         string gameModeName,
@@ -395,6 +425,7 @@ public sealed class CnCNetSession : IDisposable
         connection.UserLeft += OnUserLeft;
         connection.GameBroadcastReceived += OnGameBroadcast;
         connection.ChannelCtcpReceived += OnChannelCtcp;
+        connection.ChatMessageReceived += OnChatMessageReceived;
         connection.ChannelNamesComplete += OnChannelNamesComplete;
         connection.ChannelJoinFailed += OnChannelJoinFailed;
         connection.ActivityLogged += msg => LogActivity(msg, notifyUi: false);
@@ -440,6 +471,7 @@ public sealed class CnCNetSession : IDisposable
         _connection.RequestChannelNames(_currentGame.ChatChannel);
 
         LobbyState.SetConnectionStatus("Connected");
+        LobbyState.SelectedChatColorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
         _reconnectAttempts = 0;
         LogActivity($"JOIN {chatChannel}, #cncnet + broadcast channels; NAMES requested.");
         StateChanged?.Invoke();
@@ -593,6 +625,38 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnChannelCtcp(string channel, string sender, string ctcp)
         => _gameRoom?.OnChannelCtcp(channel, sender, ctcp);
+
+    private void OnChatMessageReceived(string channel, string sender, string message)
+    {
+        if (_currentGame == null || !IsChatChannel(channel))
+            return;
+
+        string text = ParseIncomingChatText(message);
+        LobbyState.AddChatLine(new CnCNetChatLine
+        {
+            Sender = sender,
+            DisplayText = FormatChatLine(sender, text, DateTime.Now),
+        });
+        StateChanged?.Invoke();
+    }
+
+    private static string ParseIncomingChatText(string message)
+    {
+        if (message.Contains('\u0003') && message.Length >= 3)
+        {
+            string colorString = message.Substring(1, 2);
+            if (int.TryParse(colorString, out _))
+                message = message.Length > 3 ? message[3..] : string.Empty;
+        }
+
+        if (message.Length > 0 && message[^1] == '\u001f')
+            message = message[..^1];
+
+        return message.Replace('\r', ' ').Trim();
+    }
+
+    private static string FormatChatLine(string sender, string message, DateTime time)
+        => $"[{time:HH:mm}] {sender}: {message}";
 
     private void OnGameBroadcast(string channel, string sender, string ctcp)
     {

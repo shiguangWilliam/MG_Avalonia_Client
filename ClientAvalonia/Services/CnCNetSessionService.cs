@@ -136,6 +136,10 @@ public sealed class CnCNetSessionService : IDisposable
 
     public void SetGameRoomLocked(bool locked) => _session.SetGameRoomLocked(locked);
 
+    public void SendChatMessage(string message) => _session.SendChatMessage(message);
+
+    public void SetChatColorIndex(int index) => _session.SetChatColorIndex(index);
+
     public void Dispose() => _session.Dispose();
 
     private void OnCoreStateChanged()

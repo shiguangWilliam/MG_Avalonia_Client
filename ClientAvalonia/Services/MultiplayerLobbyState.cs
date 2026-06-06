@@ -28,6 +28,10 @@ public sealed class MultiplayerLobbyState
 
     public IReadOnlyList<string> ConnectionLog { get; private set; } = [];
 
+    public IReadOnlyList<CnCNetChatLine> ChatLines { get; private set; } = [];
+
+    public int SelectedChatColorIndex { get; set; } = -1;
+
     public CnCNetHostedGameSummary? GetSelectedGame()
     {
         if (SelectedGameIndex < 0 || SelectedGameIndex >= HostedGameDetails.Count)
@@ -48,6 +52,8 @@ public sealed class MultiplayerLobbyState
         HostedGames = core.HostedGames;
         OnlinePlayerCount = core.OnlinePlayerCount;
         ConnectionLog = core.ConnectionLog;
+        ChatLines = core.ChatLines;
+        SelectedChatColorIndex = core.SelectedChatColorIndex;
 
         if (SelectedGameIndex >= HostedGameDetails.Count)
             SelectedGameIndex = HostedGameDetails.Count > 0 ? 0 : -1;

@@ -31,6 +31,12 @@ public sealed class CnCNetLobbyState
 
     public IReadOnlyList<string> ConnectionLog => _connectionLog;
 
+    private readonly List<CnCNetChatLine> _chatLines = [];
+
+    public IReadOnlyList<CnCNetChatLine> ChatLines => _chatLines;
+
+    public int SelectedChatColorIndex { get; set; } = -1;
+
     public void RefreshFromCore(string? localName = null)
     {
         LocalPlayerName = string.IsNullOrWhiteSpace(localName)
@@ -71,4 +77,13 @@ public sealed class CnCNetLobbyState
         if (_connectionLog.Count > MaxConnectionLogLines)
             _connectionLog.RemoveAt(0);
     }
+
+    public void AddChatLine(CnCNetChatLine line)
+    {
+        _chatLines.Add(line);
+        if (_chatLines.Count > MaxConnectionLogLines)
+            _chatLines.RemoveAt(0);
+    }
+
+    public void ClearChatLines() => _chatLines.Clear();
 }

@@ -21,6 +21,18 @@
           </ContentControl.ContentTemplate>
         </ContentControl>
 
+        <views:CnCNetTopBarHost x:Name="PART_TopBarHost"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Stretch"
+                                IsVisible="False"
+                                ZIndex="50" />
+
+        <views:StartupLoadingView x:Name="PART_StartupLoading"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    IsVisible="False"
+                                    ZIndex="200" />
+
         <!-- Floating INI panels (Options, Campaign, Create Game, …) -->
         <Grid x:Name="PART_FloatingOverlay"
               HorizontalAlignment="Stretch"

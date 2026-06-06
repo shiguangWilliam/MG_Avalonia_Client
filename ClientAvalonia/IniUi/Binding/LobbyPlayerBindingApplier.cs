@@ -24,6 +24,12 @@ public static class LobbyPlayerBindingApplier
     private const int DefaultColorWidth = 79;
     private const int DefaultTeamWidth = 46;
     private const int DefaultStartWidth = 49;
+    private const int MinStartColumnWidth = 56;
+    private const int MinTeamColumnWidth = 48;
+    private const int MaxPlayerNameWidth = 102;
+    private const int MinSideColumnWidth = 90;
+    private const int MinColorColumnWidth = 66;
+    private const int PanelRightReserve = 12;
 
     public static void Apply(
         UiNodeViewModel root,
@@ -39,6 +45,7 @@ public static class LobbyPlayerBindingApplier
 
         if (panel.Node.Props.ContainsKey("LobbyPlayerSlotsBuilt"))
         {
+            RelayoutPlayerColumns(root, panel, resources, behaviors);
             SyncUiFromState(panel, playerState);
             return;
         }
@@ -104,6 +111,75 @@ public static class LobbyPlayerBindingApplier
 
         panel.Node.Props["LobbyPlayerSlotsBuilt"] = true;
         SyncUiFromState(panel, playerState);
+    }
+
+    private static void RelayoutPlayerColumns(
+        UiNodeViewModel root,
+        UiNodeViewModel panel,
+        ResourceResolver resources,
+        BehaviorRegistry behaviors)
+    {
+        PlayerOptionLayout layout = ReadLayout(root);
+        UiNodeViewModel? firstName = null;
+        UiNodeViewModel? firstSide = null;
+        UiNodeViewModel? firstColor = null;
+        UiNodeViewModel? firstTeam = null;
+        UiNodeViewModel? firstStart = null;
+
+        for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
+        {
+            double y = layout.LocationY + (DropDownHeight + layout.VerticalMargin) * slot;
+            double x = layout.LocationX;
+
+            UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
+            if (ddName == null)
+                continue;
+
+            ApplyColumnGeometry(ddName, x, y, layout.NameWidth);
+            x += layout.NameWidth + layout.HorizontalMargin;
+            firstName ??= ddName;
+
+            UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
+            if (ddSide != null)
+            {
+                ApplyColumnGeometry(ddSide, x, y, layout.SideWidth);
+                x += layout.SideWidth + layout.HorizontalMargin;
+                firstSide ??= ddSide;
+            }
+
+            UiNodeViewModel? ddColor = FindVm(panel, $"ddPlayerColor{slot}");
+            if (ddColor != null)
+            {
+                ApplyColumnGeometry(ddColor, x, y, layout.ColorWidth);
+                x += layout.ColorWidth + layout.HorizontalMargin;
+                firstColor ??= ddColor;
+            }
+
+            UiNodeViewModel? ddTeam = FindVm(panel, $"ddPlayerTeam{slot}");
+            if (ddTeam != null)
+            {
+                ApplyColumnGeometry(ddTeam, x, y, layout.TeamWidth);
+                x += layout.TeamWidth + layout.HorizontalMargin;
+                firstTeam ??= ddTeam;
+            }
+
+            UiNodeViewModel? ddStart = FindVm(panel, $"ddPlayerStart{slot}");
+            if (ddStart != null && layout.StartWidth > 0)
+            {
+                ApplyColumnGeometry(ddStart, x, y, layout.StartWidth);
+                firstStart ??= ddStart;
+            }
+        }
+
+        if (firstName != null && firstSide != null && firstColor != null && firstTeam != null)
+            EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
+    }
+
+    private static void ApplyColumnGeometry(UiNodeViewModel vm, double x, double y, double width)
+    {
+        vm.SetCanvasPosition(x, y);
+        vm.Node.Props["Width"] = width;
+        vm.RefreshLayout();
     }
 
     private static void HideOrphanPlayerControls(UiNodeViewModel root, UiNodeViewModel panel)
@@ -459,7 +535,7 @@ public static class LobbyPlayerBindingApplier
 
     private static PlayerOptionLayout ReadLayout(UiNodeViewModel root)
     {
-        return new PlayerOptionLayout
+        var layout = new PlayerOptionLayout
         {
             LocationX = ReadInt(root, "PlayerOptionLocationX", DefaultLocationX),
             LocationY = ReadInt(root, "PlayerOptionLocationY", DefaultLocationY),
@@ -472,6 +548,62 @@ public static class LobbyPlayerBindingApplier
             TeamWidth = ReadInt(root, "TeamWidth", DefaultTeamWidth),
             StartWidth = ReadInt(root, "StartWidth", DefaultStartWidth),
         };
+
+        return NormalizeColumnWidths(layout, root);
+    }
+
+    /// <summary>MG theme INI uses wide name + narrow team/start; fit within PlayerOptionsPanel.</summary>
+    private static PlayerOptionLayout NormalizeColumnWidths(PlayerOptionLayout layout, UiNodeViewModel root)
+    {
+        if (layout.StartWidth <= 0)
+            return layout;
+
+        int name = Math.Min(layout.NameWidth, MaxPlayerNameWidth);
+        int side = layout.SideWidth;
+        int color = layout.ColorWidth;
+        int team = Math.Max(layout.TeamWidth, MinTeamColumnWidth);
+        int start = Math.Max(layout.StartWidth, MinStartColumnWidth);
+        int margin = layout.HorizontalMargin;
+
+        int available = ResolvePanelContentWidth(root, layout.LocationX);
+        int total = name + side + color + team + start + margin * 4;
+        if (total > available)
+        {
+            int overflow = total - available;
+            int takeName = Math.Min(overflow, Math.Max(0, name - 92));
+            overflow -= takeName;
+            name -= takeName;
+
+            int takeSide = Math.Min(overflow, Math.Max(0, side - MinSideColumnWidth));
+            overflow -= takeSide;
+            side -= takeSide;
+
+            int takeColor = Math.Min(overflow, Math.Max(0, color - MinColorColumnWidth));
+            color -= takeColor;
+        }
+
+        return new PlayerOptionLayout
+        {
+            LocationX = layout.LocationX,
+            LocationY = layout.LocationY,
+            VerticalMargin = layout.VerticalMargin,
+            HorizontalMargin = margin,
+            CaptionY = layout.CaptionY,
+            NameWidth = name,
+            SideWidth = side,
+            ColorWidth = color,
+            TeamWidth = team,
+            StartWidth = start,
+        };
+    }
+
+    private static int ResolvePanelContentWidth(UiNodeViewModel root, int locationX)
+    {
+        UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
+        if (panel != null && panel.Width > 0)
+            return Math.Max(400, (int)panel.Width - locationX - PanelRightReserve);
+
+        return 480;
     }
 
     private static int ReadInt(UiNodeViewModel root, string key, int fallback)

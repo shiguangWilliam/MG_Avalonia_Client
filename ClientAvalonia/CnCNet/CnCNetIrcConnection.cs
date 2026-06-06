@@ -58,7 +58,7 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     public event Action<int, string, string>? ChannelJoinFailed;
 
-    /// <summary>Fired after IRC numeric 001 ù?client may JOIN channels.</summary>
+    /// <summary>Fired after IRC numeric 001 ??client may JOIN channels.</summary>
     public event Action<string>? WelcomeReceived;
 
     public event Action<string>? ConnectionFailed;
@@ -80,6 +80,9 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     /// <summary>Any channel CTCP (game room PO/GO/START/etc.).</summary>
     public event Action<string, string, string>? ChannelCtcpReceived;
+
+    /// <summary>Regular channel PRIVMSG (chat).</summary>
+    public event Action<string, string, string>? ChatMessageReceived;
 
     /// <summary>User-facing connection progress (not raw RMP/SRM traffic).</summary>
     public event Action<string>? ActivityLogged;
@@ -114,7 +117,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             ? $"JOIN {normalized}"
             : $"JOIN {normalized} {key}";
         EnqueueSend(command);
-        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"ù?JOIN {normalized}" : $"ù?JOIN {normalized} (key)");
+        EmitActivity(string.IsNullOrWhiteSpace(key) ? $"??JOIN {normalized}" : $"??JOIN {normalized} (key)");
     }
 
     /// <summary>Immediate JOIN (welcome / create game). Bypasses SendSleep queue delay.</summary>
@@ -138,7 +141,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         SendImmediate(message);
-        EmitActivity($"ù?{message}");
+        EmitActivity($"??{message}");
     }
 
     /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage).</summary>
@@ -185,6 +188,16 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string normalized = channel.StartsWith('#') ? channel : "#" + channel;
         SendInstant($"KICK {normalized.ToLowerInvariant()} {userName}");
+    }
+
+    public void SendChatMessage(string channel, string message, int ircColorId)
+    {
+        if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(message))
+            return;
+
+        string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
+        string colorPrefix = $"{(char)3}{ircColorId:D2}";
+        SendImmediate($"PRIVMSG {normalized} :{colorPrefix}{message}");
     }
 
     public void Dispose()
@@ -258,13 +271,13 @@ public sealed class CnCNetIrcConnection : IDisposable
         EnqueueSend($"USER {localGame}.{_systemId} 0 * :{realname}");
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
         EmitActivity("Registering USER/NICK...");
-        EmitActivity("ù?NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void ChangeNickname()
     {
         EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
-        EmitActivity("ù?NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void OnNameAlreadyInUse()
@@ -331,7 +344,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             }
             catch (IOException)
             {
-                // ReadTimeout (1s) when idle ù?not a disconnect.
+                // ReadTimeout (1s) when idle ??not a disconnect.
                 continue;
             }
             catch (Exception ex)
@@ -572,7 +585,17 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         if (parameters[1][0] == '\u0001' && !parameters[1].Contains("ACTION", StringComparison.Ordinal))
+        {
             HandleCtcp(prefix, parameters[0], parameters[1]);
+            return;
+        }
+
+        int exclam = prefix.IndexOf('!');
+        if (exclam <= 0)
+            return;
+
+        string sender = prefix[..exclam];
+        ChatMessageReceived?.Invoke(parameters[0], sender, parameters[1]);
     }
 
     private void HandleCtcp(string prefix, string channel, string ctcpPayload)

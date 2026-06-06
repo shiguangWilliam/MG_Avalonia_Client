@@ -37,6 +37,8 @@ public sealed class CnCNetGameRoomPlayer
 
     public bool AutoReady { get; set; }
 
+    public int Ping { get; set; } = -1;
+
     public int Port { get; set; }
 
     public int SideId { get; set; }

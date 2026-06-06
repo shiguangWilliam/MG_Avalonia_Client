@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Controls.DxReadyActionButton"
+             x:DataType="vm:UiNodeViewModel"
+             Background="Transparent"
+             Width="{Binding Width}"
+             Height="{Binding Height}"
+             IsVisible="{Binding IsVisible}"
+             IsEnabled="{Binding IsEnabled}"
+             ToolTip.Tip="{Binding ToolTip}"
+             Cursor="Hand"
+             Tapped="OnTapped">
+  <Border x:Name="PART_Frame"
+          Background="#8814100C"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="10,0"
+          VerticalAlignment="Stretch">
+    <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center">
+      <Panel Grid.Column="0" Width="12" Height="12" Margin="0,0,8,0" VerticalAlignment="Center">
+        <Ellipse x:Name="PART_OuterRing"
+                 Width="12"
+                 Height="12"
+                 StrokeThickness="1.5"
+                 Fill="#2214100C" />
+        <Ellipse x:Name="PART_InnerDot"
+                 Width="6"
+                 Height="6"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center" />
+      </Panel>
+      <TextBlock x:Name="PART_Label"
+                 Grid.Column="1"
+                 Text="{Binding Text}"
+                 Foreground="#FFE8D4B0"
+                 FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                 FontSize="12"
+                 FontWeight="SemiBold"
+                 VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis" />
+    </Grid>
+  </Border>
+</UserControl>
