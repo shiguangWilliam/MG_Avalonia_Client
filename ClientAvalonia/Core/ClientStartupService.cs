@@ -45,6 +45,8 @@ public static class ClientStartupService
 
         ClientLogService.EnsureInitialized();
 
+        InstallationRegistry.TryUpdateInstallPath(gameRoot);
+
         CnCNetIdentity.EnsurePersisted();
 
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "version_u");

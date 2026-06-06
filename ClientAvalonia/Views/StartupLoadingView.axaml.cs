@@ -82,15 +82,25 @@ public partial class StartupLoadingView : UserControl
     public static async Task RunStartupSequenceAsync(
         StartupLoadingView view,
         ResourceResolver resources,
-        Func<Task> loadWork)
+        Func<Action<string>?, Task> loadWork)
     {
         view.SetBackground(resources.LoadFirstBitmap(["loadingscreen.png", "loadingScreen.png"]));
         view.StartAnimation();
         view.SetStatus("Loading resources...");
         view.SetProgress(0.12);
 
+        void ReportStatus(string text)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                view.SetStatus(text);
+                if (text.Contains("Verifying", StringComparison.OrdinalIgnoreCase))
+                    view.SetProgress(0.55);
+            });
+        }
+
         var elapsed = Stopwatch.StartNew();
-        await Task.Run(loadWork).ConfigureAwait(true);
+        await Task.Run(() => loadWork(ReportStatus)).ConfigureAwait(true);
 
         int remaining = MinDisplayMilliseconds - (int)elapsed.ElapsedMilliseconds;
         if (remaining > 0)

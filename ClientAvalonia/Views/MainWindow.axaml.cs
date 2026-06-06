@@ -91,16 +91,28 @@ public partial class MainWindow : Window, IUiNavigationHost
         resources.ConfigureForGame(_environment);
 
         PART_StartupLoading.IsVisible = true;
+        ClientFileIntegrityResult? integrityResult = null;
         await StartupLoadingView.RunStartupSequenceAsync(
             PART_StartupLoading,
             resources,
-            () =>
+            reportStatus =>
             {
+                integrityResult = ClientFileIntegrityService.Verify(reportStatus: reportStatus);
                 _gameResources.EnsureLoaded();
                 return Task.CompletedTask;
             }).ConfigureAwait(true);
 
         PART_StartupLoading.IsVisible = false;
+
+        if (integrityResult is { Success: false })
+        {
+            await ClientDialogService.ShowErrorAsync(
+                this,
+                "文件校验失败",
+                integrityResult.Message).ConfigureAwait(true);
+            return;
+        }
+
         NavigateTo("MainMenu");
     }
 
