@@ -848,18 +848,24 @@ public partial class MainWindow : Window, IUiNavigationHost
         UiNodeViewModel? lbMapList = FindVm(root, "lbMapList");
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
-        var playerNames = GetCnCNetPlayerNames();
-
-        CnCNetSessionService.Instance.UpdateHostedGameListing(
-            map?.UntranslatedName ?? string.Empty,
-            gameMode?.UntranslatedUIName ?? string.Empty,
-            map?.Sha1 ?? string.Empty,
-            playerNames);
 
         CnCNetSessionService.Instance.UpdateGameRoomListing(
             map?.UntranslatedName ?? string.Empty,
             gameMode?.UntranslatedUIName ?? string.Empty,
             map?.Sha1 ?? string.Empty);
+    }
+
+    private void PushCnCNetHostLobbyState()
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room is not { IsHost: true })
+            return;
+
+        if (_activeRoot != null)
+            LobbyPlayerBindingApplier.SyncFromUi(_activeRoot, _lobbySession.PlayerState);
+
+        CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
+        RefreshCnCNetGameListing();
     }
 
     public void RefreshCnCNetGameListing()
@@ -1151,7 +1157,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             ApplyCnCNetGameRoomPlayers(_activeRoot);
 
         if (room.IsHost)
-            CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
+            PushCnCNetHostLobbyState();
 
         ShowStatus($"Entered \"{room.RoomName}\".");
     }
@@ -1215,7 +1221,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         int count = CnCNetSessionService.Instance.OnlinePlayerCount;
         _bindingSession.State.SetOnlinePlayerCount(count);
 
-        if (_activeRoot != null && IsCnCNetLobbyActive())
+        if (_activeRoot != null && IsChannelLobbyWindow(CurrentWindow))
         {
             GameDataBindingApplier.ApplyChannelLobby(_activeRoot, CnCNetSessionService.Instance.LobbyState);
             if (!IsFloatingOverlayOpen)
@@ -1223,12 +1229,33 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
-            ApplyCnCNetGameRoomPlayers(_activeRoot);
+            RefreshCnCNetGameRoomUiFromSession(_activeRoot);
 
         if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase) && _activeRoot != null)
             StateBindingApplier.Apply(_activeRoot, _bindingSession.State, "MainMenu");
 
         UpdateTopBar();
+    }
+
+    /// <summary>Read session → UI only; never pushes PO/GAME/GO back to the network.</summary>
+    private void RefreshCnCNetGameRoomUiFromSession(UiNodeViewModel root)
+    {
+        if (_applyingCnCNetGameRoomPlayers)
+            return;
+
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room == null)
+            return;
+
+        _applyingCnCNetGameRoomPlayers = true;
+        try
+        {
+            ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: false);
+        }
+        finally
+        {
+            _applyingCnCNetGameRoomPlayers = false;
+        }
     }
 
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
@@ -1243,7 +1270,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         _applyingCnCNetGameRoomPlayers = true;
         try
         {
-            ApplyCnCNetGameRoomPlayersCore(root, room);
+            ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: true);
         }
         finally
         {
@@ -1251,7 +1278,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
     }
 
-    private void ApplyCnCNetGameRoomPlayersCore(UiNodeViewModel root, CnCNetActiveGameRoom room)
+    private void ApplyCnCNetGameRoomPlayersCore(UiNodeViewModel root, CnCNetActiveGameRoom room, bool updateStatus)
     {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
         string localNick = CnCNetSessionService.Instance.LocalNick;
@@ -1293,15 +1320,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: !room.IsHost);
         UpdateLaunchButtonState(root);
 
-        if (room.IsHost)
+        if (updateStatus)
         {
-            CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
-            RefreshCnCNetGameListing();
+            ShowStatus(room.IsHost
+                ? $"Hosting \"{room.RoomName}\" — waiting for players."
+                : $"Joined \"{room.RoomName}\" — waiting for host.");
         }
-
-        ShowStatus(room.IsHost
-            ? $"Hosting \"{room.RoomName}\" — waiting for players."
-            : $"Joined \"{room.RoomName}\" — waiting for host.");
     }
 
     private void OnGameResourcesLoaded()

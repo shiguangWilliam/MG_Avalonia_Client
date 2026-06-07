@@ -462,15 +462,15 @@ public sealed class CnCNetGameRoomSession
         if (!IsHost)
             return;
 
+        List<CnCNetGameRoomPlayer> entries;
         lock (_sync)
         {
-            List<CnCNetGameRoomPlayer> entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
+            entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
             AppendChannelJoinersLocked(entries, hostName);
 
             var readyByName = _players.Where(p => !p.IsAi)
                 .ToDictionary(p => p.Name, p => (p.Ready, p.AutoReady), StringComparer.OrdinalIgnoreCase);
 
-            _players.Clear();
             foreach (CnCNetGameRoomPlayer entry in entries)
             {
                 if (entry.IsAi)
@@ -485,9 +485,14 @@ public sealed class CnCNetGameRoomSession
 
                 if (entry.IsHost || (!entry.IsAi && entry.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost))
                     entry.Ready = true;
-
-                _players.Add(entry);
             }
+
+            if (PlayerListsEquivalent(_players, entries))
+                return;
+
+            _players.Clear();
+            foreach (CnCNetGameRoomPlayer entry in entries)
+                _players.Add(entry);
 
             BroadcastPlayerOptionsLocked();
         }
@@ -771,57 +776,64 @@ public sealed class CnCNetGameRoomSession
             HostName = sender;
 
         string[] parts = message.Split(';', StringSplitOptions.RemoveEmptyEntries);
-        lock (_sync)
+        var parsed = new List<CnCNetGameRoomPlayer>();
+        for (int i = 0; i < parts.Length;)
         {
-            _players.Clear();
-            for (int i = 0; i < parts.Length;)
+            string nameOrLevel = parts[i++];
+            if (i >= parts.Length)
+                break;
+
+            if (!int.TryParse(parts[i++], out int packed))
+                break;
+
+            UnpackOptions(packed, out int team, out int start, out int color, out int side);
+
+            if (int.TryParse(nameOrLevel, out int aiLevel) && aiLevel >= 0)
             {
-                string nameOrLevel = parts[i++];
-                if (i >= parts.Length)
-                    break;
-
-                if (!int.TryParse(parts[i++], out int packed))
-                    break;
-
-                UnpackOptions(packed, out int team, out int start, out int color, out int side);
-
-                if (int.TryParse(nameOrLevel, out int aiLevel) && aiLevel >= 0)
+                parsed.Add(new CnCNetGameRoomPlayer
                 {
-                    _players.Add(new CnCNetGameRoomPlayer
-                    {
-                        IsAi = true,
-                        AiLevel = aiLevel,
-                        Name = AiLevelToName(aiLevel),
-                        Ready = true,
-                        TeamId = team,
-                        StartingLocation = start,
-                        ColorId = color,
-                        SideId = side,
-                    });
-                    continue;
-                }
-
-                bool ready = false;
-                bool autoReady = false;
-                if (i < parts.Length && int.TryParse(parts[i], out int readyState))
-                {
-                    ready = readyState > 0;
-                    autoReady = readyState > 1;
-                    i++;
-                }
-
-                _players.Add(new CnCNetGameRoomPlayer
-                {
-                    Name = nameOrLevel,
-                    IsHost = nameOrLevel.Equals(HostName, StringComparison.OrdinalIgnoreCase),
-                    Ready = ready,
-                    AutoReady = autoReady,
+                    IsAi = true,
+                    AiLevel = aiLevel,
+                    Name = AiLevelToName(aiLevel),
+                    Ready = true,
                     TeamId = team,
                     StartingLocation = start,
                     ColorId = color,
                     SideId = side,
                 });
+                continue;
             }
+
+            bool ready = false;
+            bool autoReady = false;
+            if (i < parts.Length && int.TryParse(parts[i], out int readyState))
+            {
+                ready = readyState > 0;
+                autoReady = readyState > 1;
+                i++;
+            }
+
+            parsed.Add(new CnCNetGameRoomPlayer
+            {
+                Name = nameOrLevel,
+                IsHost = nameOrLevel.Equals(HostName, StringComparison.OrdinalIgnoreCase),
+                Ready = ready,
+                AutoReady = autoReady,
+                TeamId = team,
+                StartingLocation = start,
+                ColorId = color,
+                SideId = side,
+            });
+        }
+
+        lock (_sync)
+        {
+            if (PlayerListsEquivalent(_players, parsed))
+                return;
+
+            _players.Clear();
+            foreach (CnCNetGameRoomPlayer player in parsed)
+                _players.Add(player);
         }
 
         StateChanged?.Invoke();
@@ -1161,5 +1173,32 @@ public sealed class CnCNetGameRoomSession
         start = bytes[1];
         color = bytes[2];
         side = bytes[3];
+    }
+
+    private static bool PlayerListsEquivalent(
+        IReadOnlyList<CnCNetGameRoomPlayer> current,
+        IReadOnlyList<CnCNetGameRoomPlayer> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        for (int i = 0; i < current.Count; i++)
+        {
+            CnCNetGameRoomPlayer a = current[i];
+            CnCNetGameRoomPlayer b = next[i];
+            if (a.IsAi != b.IsAi
+                || a.AiLevel != b.AiLevel
+                || a.Ready != b.Ready
+                || a.AutoReady != b.AutoReady
+                || a.IsHost != b.IsHost
+                || a.TeamId != b.TeamId
+                || a.StartingLocation != b.StartingLocation
+                || a.ColorId != b.ColorId
+                || a.SideId != b.SideId
+                || !a.Name.Equals(b.Name, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
     }
 }

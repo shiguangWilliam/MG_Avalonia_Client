@@ -25,6 +25,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     private string _gameModeName = string.Empty;
     private string _mapSha1 = string.Empty;
     private IReadOnlyList<string> _playerNames = [];
+    private string _lastImmediatePayload = string.Empty;
 
     public void ConfigureHostChannel(CnCNetIrcConnection connection, CnCNetActiveGameRoom room)
     {
@@ -50,6 +51,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             _room = room;
             _locked = false;
             _closed = false;
+            _lastImmediatePayload = string.Empty;
             if (_playerNames.Count == 0)
                 _playerNames = [ProgramConstants.PLAYERNAME];
 
@@ -80,7 +82,9 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             if (_connection == null || _channels == null || _room == null || !_room.IsHost || _closed)
                 return;
 
-            SendGameMessageLocked(_closed);
+            if (!TrySendGameMessageLocked(_closed, force: false))
+                return;
+
             RestartTimerLocked(TimeSpan.FromSeconds(BroadcastAccelerationSeconds));
         }
     }
@@ -93,7 +97,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
                 return;
 
             _closed = true;
-            SendGameMessageLocked(closed: true);
+            TrySendGameMessageLocked(closed: true, force: true);
             StopTimerLocked();
         }
     }
@@ -105,10 +109,11 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             if (_room != null && _connection != null && _channels != null && !_closed)
             {
                 _closed = true;
-                SendGameMessageLocked(closed: true);
+                TrySendGameMessageLocked(closed: true, force: true);
             }
 
             StopTimerLocked();
+            _lastImmediatePayload = string.Empty;
             _connection = null;
             _channels = null;
             _room = null;
@@ -124,22 +129,27 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             if (_connection == null || _channels == null || _room == null || !_room.IsHost)
                 return;
 
-            SendGameMessageLocked(_closed);
+            TrySendGameMessageLocked(_closed, force: true);
         }
     }
 
-    private void SendGameMessageLocked(bool closed)
+    private bool TrySendGameMessageLocked(bool closed, bool force)
     {
         if (_connection == null || _channels == null || _room == null)
-            return;
+            return false;
 
         string broadcastChannel = NormalizeChannel(_channels.GameBroadcastChannel);
         if (ProgramConstants.IsInGame && _connection.GetChannelUserCount(broadcastChannel) > 500)
-            return;
+            return false;
 
         string payload = BuildGamePayload(closed);
+        if (!force && payload.Equals(_lastImmediatePayload, StringComparison.Ordinal))
+            return false;
+
+        _lastImmediatePayload = payload;
         _connection.SendCtcpNotice(broadcastChannel, payload);
         Logger.Log($"CnCNetGameBroadcastService: GAME -> {broadcastChannel} ({_room.RoomName}, closed={closed})");
+        return true;
     }
 
     private string BuildGamePayload(bool closed)
