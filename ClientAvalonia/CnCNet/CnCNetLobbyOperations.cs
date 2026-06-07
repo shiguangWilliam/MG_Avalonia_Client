@@ -8,6 +8,40 @@ namespace ClientAvalonia.CnCNet;
 /// <summary>Create / join game room flows (XNA CnCNetLobby + GameCreationWindow subset).</summary>
 public static class CnCNetLobbyOperations
 {
+    /// <summary>Default IRC channel key (XNA CnCNetLobby.JoinGame when !Passworded).</summary>
+    public static string GetDefaultChannelPassword(string channelName)
+    {
+        string channel = CnCNetIrcChannelNames.Preserve(channelName);
+        return Utilities.CalculateSHA1ForString(channel)[..10];
+    }
+
+    /// <summary>Maps DXMain Passworded / CustomPassword to the IRC JOIN key.</summary>
+    public static bool TryResolveJoinPassword(
+        CnCNetHostedGameSummary game,
+        string? userPassword,
+        out string joinPassword,
+        out string? error)
+    {
+        joinPassword = string.Empty;
+        error = null;
+
+        if (game.CustomPassword)
+        {
+            if (string.IsNullOrWhiteSpace(userPassword))
+            {
+                error = "This game requires a password.";
+                return false;
+            }
+
+            joinPassword = userPassword.Trim();
+            return true;
+        }
+
+        // XNA: always derive from channel name; ignore any stale user input.
+        joinPassword = GetDefaultChannelPassword(game.ChannelName);
+        return true;
+    }
+
     public static bool TryCreateGame(CnCNetSession session, CnCNetGameCreationRequest request, out string message)
     {
         if (session.Connection is not { IsConnected: true })
@@ -22,21 +56,19 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        string roomName = request.RoomName.Trim();
-        if (string.IsNullOrWhiteSpace(roomName))
+        string roomName = NameValidator.GetSanitizedGameName(request.RoomName);
+        NameValidationError validationError = NameValidator.IsGameNameValid(roomName, out string? errorMessage);
+        if (validationError != NameValidationError.None)
         {
-            message = "Game room name is required.";
+            message = errorMessage ?? "Game room name is invalid.";
             return false;
         }
 
-        if (roomName.Length > 23)
-            roomName = roomName[..23];
-
-        string channelName = GenerateUniqueGameChannel(session.Channels.ChatChannel);
+        string channelName = GenerateUniqueGameChannel(session, session.Channels.ChatChannel);
         bool customPassword = !string.IsNullOrWhiteSpace(request.Password);
         string password = customPassword
             ? request.Password.Trim()
-            : Utilities.CalculateSHA1ForString(channelName)[..10];
+            : GetDefaultChannelPassword(channelName);
 
         string hostName = string.IsNullOrWhiteSpace(session.LocalNick)
             ? ProgramConstants.PLAYERNAME
@@ -123,15 +155,11 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        if (game.CustomPassword && string.IsNullOrWhiteSpace(password))
+        if (!TryResolveJoinPassword(game, password, out string joinPassword, out string? passwordError))
         {
-            message = "This game requires a password.";
+            message = passwordError ?? "This game requires a password.";
             return false;
         }
-
-        string joinPassword = !string.IsNullOrWhiteSpace(password)
-            ? password
-            : Utilities.CalculateSHA1ForString(game.ChannelName)[..10];
 
         CnCNetTunnelEntry? tunnel = session.Tunnels.FirstOrDefault(t =>
             t.Address.Equals(game.TunnelAddress, StringComparison.OrdinalIgnoreCase)
@@ -168,14 +196,21 @@ public static class CnCNetLobbyOperations
         return true;
     }
 
-    private static string GenerateUniqueGameChannel(string chatChannel)
+    private static string GenerateUniqueGameChannel(CnCNetSession session, string chatChannel)
     {
-        // XNA CnCNetLobby.RandomizeChannelName; MG mod uses localized suffix.
         string baseName = chatChannel.StartsWith('#') ? chatChannel : "#" + chatChannel;
-        int suffix = Random.Shared.Next(1_000_000, 9_999_999);
-        string channelSuffix = ClientConfiguration.Instance.LocalGame.Equals("MG", StringComparison.OrdinalIgnoreCase)
-            ? "-游戏" + suffix
-            : "-game" + suffix;
-        return baseName + channelSuffix;
+        const int maxTries = 10000;
+
+        for (int i = 0; i < maxTries; i++)
+        {
+            string channelName = baseName + "-game" + Random.Shared.Next(1_000_000, 9_999_999);
+            bool exists = session.LobbyState.HostedGameDetails.Any(g =>
+                g.ChannelName.Equals(channelName, StringComparison.OrdinalIgnoreCase));
+
+            if (!exists)
+                return channelName;
+        }
+
+        throw new InvalidOperationException($"Could not find a random channel name after {maxTries} retries.");
     }
 }

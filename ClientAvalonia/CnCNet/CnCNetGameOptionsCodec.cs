@@ -2,7 +2,6 @@ using ClientCore;
 using Rampastring.Tools;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 namespace ClientAvalonia.CnCNet;
@@ -11,13 +10,25 @@ namespace ClientAvalonia.CnCNet;
 public static class CnCNetGameOptionsCodec
 {
     public static string BuildBody(CnCNetGameOptionsState state)
-    {
-        int checkBoxCount = state.CheckBoxValues.Count;
-        int checkBoxIntegerCount = (checkBoxCount / 32) + 1;
+        => BuildBody(state, state.CheckBoxValues.Count, state.DropDownIndices.Count);
 
-        bool[] optionValues = state.CheckBoxValues.ToArray();
-        List<byte> byteList = Conversions.BoolArrayIntoBytes(optionValues).ToList();
-        while (byteList.Count % 4 != 0)
+    /// <summary>
+    /// Builds GO body with explicit control counts so joiners (DXMain ApplyGameOptions) can index
+    /// <c>parts[checkBoxIntegerCount + dropDownCount + 8]</c> without IndexOutOfRangeException.
+    /// </summary>
+    public static string BuildBody(CnCNetGameOptionsState state, int checkBoxCount, int dropDownCount)
+    {
+        int checkBoxIntegerCount = checkBoxCount > 0 ? (checkBoxCount / 32) + 1 : 0;
+
+        var checkBoxValues = new bool[checkBoxCount];
+        for (int i = 0; i < checkBoxCount; i++)
+            checkBoxValues[i] = i < state.CheckBoxValues.Count && state.CheckBoxValues[i];
+
+        List<byte> byteList = checkBoxCount > 0
+            ? Conversions.BoolArrayIntoBytes(checkBoxValues).ToList()
+            : [];
+
+        while (byteList.Count < checkBoxIntegerCount * 4)
             byteList.Add(0);
 
         byte[] byteArray = byteList.ToArray();
@@ -31,10 +42,11 @@ public static class CnCNetGameOptionsCodec
             sb.Append(BitConverter.ToInt32(byteArray, i * 4));
         }
 
-        foreach (int dropDownIndex in state.DropDownIndices)
+        for (int d = 0; d < dropDownCount; d++)
         {
+            int index = d < state.DropDownIndices.Count ? state.DropDownIndices[d] : 0;
             sb.Append(';');
-            sb.Append(dropDownIndex);
+            sb.Append(index);
         }
 
         sb.Append(';').Append(Convert.ToInt32(state.MapOfficial));
@@ -61,12 +73,12 @@ public static class CnCNetGameOptionsCodec
         error = null;
 
         string[] parts = message.Split(';');
-        int checkBoxIntegerCount = (checkBoxCount / 32) + 1;
+        int checkBoxIntegerCount = checkBoxCount > 0 ? (checkBoxCount / 32) + 1 : 0;
         int partIndex = checkBoxIntegerCount + dropDownCount;
 
-        if (parts.Length < partIndex + 6)
+        if (parts.Length < partIndex + 9)
         {
-            error = "invalid game options message length";
+            error = $"invalid game options message length ({parts.Length}, need {partIndex + 9})";
             return false;
         }
 
@@ -114,14 +126,12 @@ public static class CnCNetGameOptionsCodec
         int maxAhead = Conversions.IntFromString(parts[partIndex + 4], ClientConfiguration.Instance.DefaultMaxAhead);
         int protocolVersion = Conversions.IntFromString(parts[partIndex + 5], ClientConfiguration.Instance.DefaultProtocolVersion);
 
-        int randomSeed = partIndex + 6 < parts.Length && int.TryParse(parts[partIndex + 6], out int parsedSeed)
+        int randomSeed = int.TryParse(parts[partIndex + 6], out int parsedSeed)
             ? parsedSeed
             : 0;
 
-        bool removeStartingLocations = partIndex + 7 < parts.Length
-            && Convert.ToBoolean(Conversions.IntFromString(parts[partIndex + 7], 0));
-
-        string mapName = partIndex + 8 < parts.Length ? parts[partIndex + 8] : string.Empty;
+        bool removeStartingLocations = Convert.ToBoolean(Conversions.IntFromString(parts[partIndex + 7], 0));
+        string mapName = parts[partIndex + 8];
 
         state = new CnCNetGameOptionsState
         {

@@ -68,7 +68,7 @@ namespace DTAClient.Domain.Multiplayer.CnCNet
                 throw;
             }
         }
-
+        // Protocol 
         public string Address { get; private set; }
         public int Port { get; private set; }
         public string Country { get; private set; }

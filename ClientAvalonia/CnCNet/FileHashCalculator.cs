@@ -91,7 +91,6 @@ namespace ClientAvalonia.CnCNet;
             {
                 ClientDefinitionsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.CLIENT_DEFS)),
                 GameOptionsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.BASE_RESOURCE_PATH, ClientConfiguration.GAME_OPTIONS)),
-                ClientAvaloniaHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "ClientAvalonia.exe")),
                 ClientDXHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientdx.exe")),
                 ClientXNAHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientxna.exe")),
                 ClientOGLHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientogl.exe")),
@@ -104,7 +103,7 @@ namespace ClientAvalonia.CnCNet;
                     : string.Empty,
                 LauncherExeHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.GameLauncherExecutableName)),
                 MPMapsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath)),
-                FHCConfigHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.BASE_RESOURCE_PATH, CONFIGNAME)),
+                FHCConfigHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME)),
             };
 
             Logger.Log($"Hash for {ProgramConstants.BASE_RESOURCE_PATH}\\{ClientConfiguration.CLIENT_DEFS}: {fh.ClientDefinitionsHash}");
@@ -244,7 +243,6 @@ namespace ClientAvalonia.CnCNet;
         {
             public string ClientDefinitionsHash;
             public string GameOptionsHash;
-            public string ClientAvaloniaHash;
             public string ClientDXHash;
             public string ClientXNAHash;
             public string ClientOGLHash;
@@ -283,7 +281,6 @@ namespace ClientAvalonia.CnCNet;
                 var sb = new StringBuilder();
                 sb.Append(ClientDefinitionsHash);
                 sb.Append(GameOptionsHash);
-                sb.Append(ClientAvaloniaHash);
                 sb.Append(ClientDXHash);
                 sb.Append(ClientXNAHash);
                 sb.Append(ClientOGLHash);

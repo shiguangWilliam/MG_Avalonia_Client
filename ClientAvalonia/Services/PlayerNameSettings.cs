@@ -1,4 +1,5 @@
 using ClientCore;
+using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.Services;
 
@@ -39,11 +40,6 @@ public static class PlayerNameSettings
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 
-        string trimmed = name.Trim();
-        int max = ClientConfiguration.Instance.MaxNameLength;
-        if (max > 0 && trimmed.Length > max)
-            trimmed = trimmed[..max];
-
-        return trimmed;
+        return NameValidator.GetValidOfflineName(name);
     }
 }

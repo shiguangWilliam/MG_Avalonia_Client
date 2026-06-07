@@ -29,7 +29,8 @@ public sealed class CnCNetGameBroadcastService : IDisposable
 
     public void ConfigureHostChannel(CnCNetIrcConnection connection, CnCNetActiveGameRoom room)
     {
-        string channel = NormalizeChannel(room.ChannelName);
+        // XNA CnCNetGameLobby.OnJoined: MODE/TOPIC use channel.ChannelName (original casing).
+        string channel = CnCNetIrcChannelNames.Preserve(room.ChannelName);
         string localGame = ClientConfiguration.Instance.LocalGame.ToLowerInvariant();
         connection.SendInstant($"MODE {channel} +klnNs {room.Password} {room.MaxPlayers}");
         connection.SendInstant($"TOPIC {channel} :{ProgramConstants.CNCNET_PROTOCOL_REVISION};{localGame}");
@@ -58,6 +59,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             if (configureChannel)
                 ConfigureHostChannel(connection, room);
 
+            TrySendGameMessageLocked(_closed, force: true);
             RestartTimerLocked(TimeSpan.FromSeconds(InitialDelaySeconds));
         }
     }
@@ -138,7 +140,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         if (_connection == null || _channels == null || _room == null)
             return false;
 
-        string broadcastChannel = NormalizeChannel(_channels.GameBroadcastChannel);
+        string broadcastChannel = CnCNetIrcChannelNames.Normalize(_channels.GameBroadcastChannel);
         if (ProgramConstants.IsInGame && _connection.GetChannelUserCount(broadcastChannel) > 500)
             return false;
 
@@ -168,7 +170,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         sb.Append(';');
         sb.Append(room.MaxPlayers);
         sb.Append(';');
-        sb.Append(NormalizeChannel(room.ChannelName));
+        sb.Append(CnCNetIrcChannelNames.Preserve(room.ChannelName));
         sb.Append(';');
         sb.Append(room.RoomName);
         sb.Append(';');
@@ -186,6 +188,8 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         sb.Append(';');
         sb.Append('0');
 
+        // MEMORY: R10/UsesLegacyCnCNetGameBroadcast MUST stop at 11 fields — see clientavalonia-cncnet.mdc.
+        // Do not always append skillLevel/mapSha1; legacy MG clients ignore 13-field GAME broadcasts.
         if (!ProgramConstants.UsesLegacyCnCNetGameBroadcast)
         {
             sb.Append(';');
@@ -209,6 +213,4 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         _timer = null;
     }
 
-    private static string NormalizeChannel(string channel)
-        => channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
 }

@@ -76,11 +76,7 @@ public static class MultiplayerLobbyBehaviors
                 return;
             }
 
-            if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
-                CnCNetSessionService.Instance.Disconnect();
-
-            host.ShowStatus("Logged out.");
-            host.NavigateBack();
+            host.LogoutToMainMenu();
         });
     }
 }

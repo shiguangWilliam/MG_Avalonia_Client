@@ -8,6 +8,7 @@ public partial class CnCNetTopBar : UserControl
 {
     private readonly DispatcherTimer _clockTimer;
     private Action<string>? _navigate;
+    private Action? _logout;
 
     public CnCNetTopBar()
     {
@@ -20,14 +21,14 @@ public partial class CnCNetTopBar : UserControl
         BtnMainMenu.Click += (_, _) => _navigate?.Invoke("MainMenu");
         BtnCnCNetLobby.Click += (_, _) => _navigate?.Invoke("CnCNetLobby");
         BtnSettings.Click += (_, _) => _navigate?.Invoke("OptionsWindow");
-        BtnLogout.Click += (_, _) =>
-        {
-            CnCNetSessionService.Instance.Disconnect();
-            _navigate?.Invoke("MainMenu");
-        };
+        BtnLogout.Click += (_, _) => _logout?.Invoke();
     }
 
-    public void BindNavigation(Action<string> navigate) => _navigate = navigate;
+    public void BindNavigation(Action<string> navigate, Action? logout = null)
+    {
+        _navigate = navigate;
+        _logout = logout;
+    }
 
     public void UpdateState(string connectionStatus, int onlineCount)
     {

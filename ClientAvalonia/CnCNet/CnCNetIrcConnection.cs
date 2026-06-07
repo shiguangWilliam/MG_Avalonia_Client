@@ -94,6 +94,9 @@ public sealed class CnCNetIrcConnection : IDisposable
     /// <summary>Regular channel PRIVMSG (chat).</summary>
     public event Action<string, string, string>? ChatMessageReceived;
 
+    /// <summary>IRC 442/404 — attempted to send to a channel we are not on.</summary>
+    public event Action<string>? NotOnChannel;
+
     /// <summary>User-facing connection progress (not raw RMP/SRM traffic).</summary>
     public event Action<string>? ActivityLogged;
 
@@ -595,6 +598,13 @@ public sealed class CnCNetIrcConnection : IDisposable
                 break;
             case 433:
                 OnNameAlreadyInUse();
+                break;
+            case 404:
+            case 442:
+                if (parameters.Count > 1 && parameters[1].StartsWith('#'))
+                    NotOnChannel?.Invoke(NormalizeChannelParameter(parameters[1]));
+                if (parameters.Count > 2)
+                    ServerMessage?.Invoke(string.Join(' ', parameters.Skip(2)));
                 break;
             case 471:
             case 473:

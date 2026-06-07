@@ -18,6 +18,9 @@ public interface IUiNavigationHost
 
     void NavigateBack();
 
+    /// <summary>Log out of CnCNet (if applicable) and return to MainMenu (XNA topBar.SwitchToPrimary).</summary>
+    void LogoutToMainMenu();
+
     void OpenFloatingOverlay(string windowName);
 
     void CloseFloatingOverlay();

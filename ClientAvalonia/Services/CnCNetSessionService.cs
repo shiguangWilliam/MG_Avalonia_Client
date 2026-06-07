@@ -1,5 +1,6 @@
 using Avalonia.Threading;
 using ClientAvalonia.CnCNet;
+using System.Linq;
 
 namespace ClientAvalonia.Services;
 
@@ -85,6 +86,11 @@ public sealed class CnCNetSessionService : IDisposable
 
     public void LeaveGameRoom() => _session.LeaveGameRoom();
 
+    public void LeaveGameRoom(bool restoreBroadcastChannels)
+        => _session.LeaveGameRoom(restoreBroadcastChannels);
+
+    public void EnsureGameBroadcastChannelsJoined() => _session.EnsureGameBroadcastChannelsJoined();
+
     public void UpdateHostedGameListing(
         string mapName,
         string gameModeName,
@@ -132,7 +138,7 @@ public sealed class CnCNetSessionService : IDisposable
 
     public bool TryJoinSelectedGame(out string message)
     {
-        CnCNetHostedGameSummary? game = LobbyState.GetSelectedGame();
+        CnCNetHostedGameSummary? game = ResolveSelectedGameForJoin();
         if (game == null)
         {
             message = "Select a game from the list first.";
@@ -142,9 +148,23 @@ public sealed class CnCNetSessionService : IDisposable
         return TryJoinGame(game, password: null, out message);
     }
 
+    /// <summary>Re-read the selected entry from core lobby state (avoids stale CustomPassword flags).</summary>
+    public CnCNetHostedGameSummary? ResolveSelectedGameForJoin()
+    {
+        CnCNetHostedGameSummary? selected = LobbyState.GetSelectedGame();
+        if (selected == null)
+            return null;
+
+        SyncLobbyStateFromCore();
+        CnCNetHostedGameSummary? fresh = _session.LobbyState.HostedGameDetails
+            .FirstOrDefault(g => g.ChannelName.Equals(selected.ChannelName, StringComparison.OrdinalIgnoreCase));
+
+        return fresh ?? selected;
+    }
+
     public bool SelectedGameRequiresPassword()
     {
-        CnCNetHostedGameSummary? game = LobbyState.GetSelectedGame();
+        CnCNetHostedGameSummary? game = ResolveSelectedGameForJoin();
         return game is { CustomPassword: true };
     }
 

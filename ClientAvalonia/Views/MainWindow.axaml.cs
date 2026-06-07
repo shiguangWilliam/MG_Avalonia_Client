@@ -81,7 +81,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         InitializeComponent();
         KeyDown += OnKeyDown;
         Loaded += OnWindowLoaded;
-        PART_TopBarHost.Bar.BindNavigation(NavigateTo);
+        PART_TopBarHost.Bar.BindNavigation(NavigateTo, LogoutToMainMenu);
         _updateService.RefreshInitialStatus();
     }
 
@@ -416,6 +416,23 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         NavigateTo("MainMenu", fromBack: true);
+    }
+
+    public void LogoutToMainMenu()
+    {
+        CloseFloatingOverlaySilently();
+
+        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+            || CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
+            || CnCNetSessionService.Instance.ActiveGameRoom != null
+            || CnCNetSessionService.Instance.Connection is { IsConnected: true })
+        {
+            CnCNetSessionService.Instance.Disconnect();
+        }
+
+        _navStack.Clear();
+        NavigateTo("MainMenu", fromBack: true);
+        ShowStatus("Logged out.");
     }
 
     public void ShowStatus(string message) => PART_Status.Text = message;
@@ -782,8 +799,10 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
             {
-                CnCNetSessionService.Instance.ConnectIfNeeded();
-                CnCNetSessionService.Instance.SyncLobbyStateFromCore();
+                CnCNetSessionService session = CnCNetSessionService.Instance;
+                session.ConnectIfNeeded();
+                session.EnsureGameBroadcastChannelsJoined();
+                session.SyncLobbyStateFromCore();
             }
 
             GameDataBindingApplier.ApplyChannelLobby(root, CnCNetSessionService.Instance.LobbyState);
@@ -841,7 +860,11 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void UpdateCnCNetGameBroadcastListing(UiNodeViewModel root)
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+        if (session.IsGameRoomJoinPending)
+            return;
+
+        CnCNetActiveGameRoom? room = session.ActiveGameRoom;
         if (room is not { IsHost: true })
             return;
 
@@ -857,7 +880,11 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void PushCnCNetHostLobbyState()
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+        if (session.IsGameRoomJoinPending)
+            return;
+
+        CnCNetActiveGameRoom? room = session.ActiveGameRoom;
         if (room is not { IsHost: true })
             return;
 
@@ -900,7 +927,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (_activeRoot != null)
             GameDataBindingApplier.SyncChannelGameSelection(_activeRoot, session.LobbyState);
 
-        CnCNetHostedGameSummary? game = session.LobbyState.GetSelectedGame();
+        CnCNetHostedGameSummary? game = session.ResolveSelectedGameForJoin();
         if (game == null)
         {
             ShowStatus("Select a game from the list first.");
@@ -908,7 +935,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         string? password = null;
-        if (session.SelectedGameRequiresPassword())
+        if (game.CustomPassword)
         {
             password = await ClientDialogService.ShowPasswordPromptAsync(this, game.RoomName);
             if (string.IsNullOrWhiteSpace(password))
@@ -1154,7 +1181,10 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             NavigateTo("CnCNetGameLobby");
         else if (_activeRoot != null)
+        {
+            WireCnCNetGameOptionsBridge();
             ApplyCnCNetGameRoomPlayers(_activeRoot);
+        }
 
         if (room.IsHost)
             PushCnCNetHostLobbyState();
@@ -1173,6 +1203,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     {
         ClearCnCNetGameOptionsBridge();
         ShowStatus("The game host has abandoned the game.");
+        CnCNetSessionService.Instance.EnsureGameBroadcastChannelsJoined();
         NavigateTo("CnCNetLobby");
     }
 

@@ -207,9 +207,6 @@ public static class GameCreationOverlayBuilder
             return null;
         }
 
-        if (roomName.Length > 23)
-            roomName = roomName[..23];
-
         if (context.MaxPlayersBox.SelectedItem is not string maxText || !int.TryParse(maxText, out int maxPlayers))
             maxPlayers = 8;
 

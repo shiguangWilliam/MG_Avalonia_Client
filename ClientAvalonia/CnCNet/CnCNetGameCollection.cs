@@ -31,16 +31,21 @@ public sealed class CnCNetGameCollection
             Entry("ss", "Sole Survivor", "#cncnet-ss", "#cncnet-ss-games", "ssicon.png", supported: false),
         ];
 
+        CnCNetGameEntry[] otherGames =
+        [
+            new CnCNetGameEntry
+            {
+                InternalName = "cncnet",
+                UiName = "General CnCNet Chat",
+                ChatChannel = "#cncnet",
+                AlwaysEnabled = true,
+                IconFileName = "cncneticon.png",
+            },
+        ];
+
         games.AddRange(defaultGames);
-        games.AddRange(LoadCustomGames(defaultGames));
-        games.Add(new CnCNetGameEntry
-        {
-            InternalName = "cncnet",
-            UiName = "General CnCNet Chat",
-            ChatChannel = "#cncnet",
-            AlwaysEnabled = true,
-            IconFileName = "cncneticon.png",
-        });
+        games.AddRange(LoadCustomGames(defaultGames.Concat(otherGames).ToList()));
+        games.AddRange(otherGames);
 
         Games = games;
 
@@ -138,13 +143,17 @@ public sealed class CnCNetGameCollection
                 continue;
 
             string id = ini.GetStringValue(section, "InternalName", string.Empty).ToLowerInvariant();
-            if (string.IsNullOrEmpty(id) || knownIds.Contains(id))
-                continue;
+            if (string.IsNullOrEmpty(id))
+                throw new InvalidOperationException($"InternalName for game {section} is not defined or set to an empty value.");
 
-            string chat = NormalizeChannel(ini.GetStringValue(section, "ChatChannel", string.Empty));
-            string broadcast = NormalizeChannel(ini.GetStringValue(section, "GameBroadcastChannel", string.Empty));
-            if (string.IsNullOrEmpty(chat))
-                continue;
+            if (id.Length > ProgramConstants.GAME_ID_MAX_LENGTH)
+                throw new InvalidOperationException($"InternalName for game {section} exceeds {ProgramConstants.GAME_ID_MAX_LENGTH} characters.");
+
+            if (knownIds.Contains(id))
+                throw new InvalidOperationException($"Game with InternalName {id.ToUpperInvariant()} already exists in the game collection.");
+
+            string chat = GetIrcChannelNameFromIniFile(ini, section, "ChatChannel");
+            string broadcast = GetIrcChannelNameFromIniFile(ini, section, "GameBroadcastChannel");
 
             string icon = ini.GetStringValue(section, "IconFilename", id + "icon.png");
             customGames.Add(new CnCNetGameEntry
@@ -152,13 +161,26 @@ public sealed class CnCNetGameCollection
                 InternalName = id,
                 UiName = ini.GetStringValue(section, "UIName", id.ToUpperInvariant()),
                 ChatChannel = chat,
-                GameBroadcastChannel = string.IsNullOrEmpty(broadcast) ? null : broadcast,
+                GameBroadcastChannel = broadcast,
                 IconFileName = icon,
             });
             knownIds.Add(id);
         }
 
         return customGames;
+    }
+
+    private static string GetIrcChannelNameFromIniFile(IniFile ini, string section, string key)
+    {
+        string channel = ini.GetStringValue(section, key, string.Empty);
+
+        if (string.IsNullOrEmpty(channel))
+            throw new InvalidOperationException($"{key} for game {section} is not defined or set to an empty value.");
+
+        if (channel.Contains(' ') || channel.Contains(',') || channel.Contains((char)7))
+            throw new InvalidOperationException($"{key} for game {section} contains characters not allowed on IRC channel names.");
+
+        return NormalizeChannel(channel);
     }
 
     private static string? ResolveConfigPath()

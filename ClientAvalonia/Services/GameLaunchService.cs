@@ -98,24 +98,38 @@ public sealed class GameLaunchService
         }
 
         OSVersion osVersion = ClientConfiguration.Instance.GetOperatingSystemVersion();
-        string gameExecutableName;
+        string gameExecutableName = ClientConfiguration.Instance.GetGameExecutableName();
+        if (string.IsNullOrWhiteSpace(gameExecutableName))
+        {
+            message = "Game executable is not configured (GameExecutableNames in ClientDefinitions.ini).";
+            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
+            return false;
+        }
+
+        string launcherExecutableName = string.Empty;
+        if (osVersion != OSVersion.UNIX)
+            launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName;
+
+        string launchExecutableName;
         string additionalExecutableName = string.Empty;
 
         if (osVersion == OSVersion.UNIX)
-            gameExecutableName = ClientConfiguration.Instance.UnixGameExecutableName;
+        {
+            launchExecutableName = ClientConfiguration.Instance.UnixGameExecutableName;
+            if (string.IsNullOrWhiteSpace(launchExecutableName))
+                launchExecutableName = gameExecutableName;
+        }
+        else if (string.IsNullOrEmpty(launcherExecutableName))
+        {
+            launchExecutableName = gameExecutableName;
+        }
         else
         {
-            string launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName;
-            if (string.IsNullOrEmpty(launcherExecutableName))
-                gameExecutableName = ClientConfiguration.Instance.GetGameExecutableName();
-            else
-            {
-                gameExecutableName = launcherExecutableName;
-                additionalExecutableName = "\"" + ClientConfiguration.Instance.GetGameExecutableName() + "\" ";
-            }
+            launchExecutableName = launcherExecutableName;
+            additionalExecutableName = "\"" + gameExecutableName + "\" ";
         }
 
-        string extraCommandLine = ClientConfiguration.Instance.ExtraExeCommandLineParameters;
+        string extraCommandLine = ClientConfiguration.Instance.ExtraExeCommandLineParameters?.Trim() ?? string.Empty;
 
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "DTA.LOG");
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TI.LOG");
@@ -123,9 +137,15 @@ public sealed class GameLaunchService
 
         string arguments = string.IsNullOrWhiteSpace(extraCommandLine)
             ? additionalExecutableName + "-SPAWN"
-            : " " + additionalExecutableName + "-SPAWN " + extraCommandLine;
+            : additionalExecutableName + "-SPAWN " + extraCommandLine;
 
-        FileInfo gameFileInfo = SafePath.GetFile(ProgramConstants.GamePath, gameExecutableName);
+        FileInfo gameFileInfo = SafePath.GetFile(ProgramConstants.GamePath, launchExecutableName);
+        if (!gameFileInfo.Exists)
+        {
+            message = $"Launch executable not found: {gameFileInfo.FullName}";
+            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
+            return false;
+        }
 
         try
         {
@@ -149,7 +169,7 @@ public sealed class GameLaunchService
             GameProcessStarting?.Invoke();
             GameProcessStarted?.Invoke();
 
-            message = $"Launched {gameExecutableName}";
+            message = $"Launched {launchExecutableName}";
             StatusChanged?.Invoke(message);
             return true;
         }

@@ -15,9 +15,13 @@ public sealed class CnCNetHostedGameSummary
 
     public required string ChannelName { get; init; }
 
+    public string Revision { get; init; } = string.Empty;
+
     public int MaxPlayers { get; init; }
 
     public int PlayerCount { get; init; }
+
+    public IReadOnlyList<string> Players { get; init; } = [];
 
     public bool IsClosed { get; init; }
 
@@ -26,6 +30,8 @@ public sealed class CnCNetHostedGameSummary
     public bool CustomPassword { get; init; }
 
     public bool IsLoadedGame { get; init; }
+
+    public bool IsLadder { get; init; }
 
     public string GameVersion { get; init; } = string.Empty;
 
@@ -36,6 +42,10 @@ public sealed class CnCNetHostedGameSummary
     public string MapName { get; init; } = string.Empty;
 
     public string GameMode { get; init; } = string.Empty;
+
+    public string MapHash { get; init; } = string.Empty;
+
+    public string LoadedGameId { get; init; } = string.Empty;
 
     public int SkillLevel { get; init; }
 
@@ -51,6 +61,10 @@ public sealed class CnCNetHostedGameSummary
         : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
 }
 
+/// <summary>
+/// Parses inbound GAME CTCP. Field count is NOT always 13 — see .cursor/rules/clientavalonia-cncnet.mdc
+/// 「重点：GAME CTCP 字段数」. R10 legacy = 11 fields; R13 = 13; accept both when revision is legacy.
+/// </summary>
 public static class CnCNetGameMessageParser
 {
     public static CnCNetHostedGameSummary? TryParse(
@@ -81,16 +95,19 @@ public static class CnCNetGameMessageParser
             return null;
         }
 
+        // MEMORY: do not require parts.Length==13 only — R10 peers send 11 fields (see clientavalonia-cncnet.mdc).
         int expectedFields = IsLegacyRevision(revision) ? 11 : 13;
-        if (parts.Length != expectedFields)
+        if (parts.Length != expectedFields && parts.Length != 13)
         {
-            rejectReason = $"field count {parts.Length} for {revision} (expected {expectedFields})";
+            rejectReason = $"field count {parts.Length} for {revision} (expected {expectedFields} or 13)";
             Logger.Log($"CnCNetGameMessageParser: ignoring GAME from {hostName}: {rejectReason}.");
             return null;
         }
 
+        bool legacyLayout = parts.Length == 11;
+
         string flags = parts[5];
-        if (flags.Length < 3)
+        if (flags.Length < 5)
         {
             rejectReason = "invalid flags field";
             return null;
@@ -100,6 +117,7 @@ public static class CnCNetGameMessageParser
         bool customPassword = flags.Length > 1 && flags[1] == '1';
         bool isClosed = flags.Length > 2 && flags[2] == '1';
         bool isLoadedGame = flags.Length > 3 && flags[3] == '1';
+        bool isLadder = flags.Length > 4 && flags[4] == '1';
 
         string[] tunnelParts = parts[9].Split(':');
         if (tunnelParts.Length < 2 || !int.TryParse(tunnelParts[1], out int tunnelPort))
@@ -109,8 +127,15 @@ public static class CnCNetGameMessageParser
         }
 
         string tunnelAddress = tunnelParts[0];
-        if (tunnels != null && tunnels.Count > 0)
+        if (tunnels != null)
         {
+            if (tunnels.Count == 0)
+            {
+                rejectReason = "no available tunnels";
+                Logger.Log($"CnCNetGameMessageParser: {rejectReason} (from {hostName}).");
+                return null;
+            }
+
             bool tunnelOk = tunnels.Any(t =>
                 t.Address.Equals(tunnelAddress, StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
             if (!tunnelOk)
@@ -122,9 +147,7 @@ public static class CnCNetGameMessageParser
         }
 
         string[] players = parts[6].Split(',', StringSplitOptions.RemoveEmptyEntries);
-        int skillLevel = 0;
-        if (parts.Length == 13 && int.TryParse(parts[11], out int parsedSkill))
-            skillLevel = parsedSkill;
+        int skillLevel = !legacyLayout && int.TryParse(parts[11], out int parsedSkill) ? parsedSkill : 0;
 
         string localGameId = ClientConfiguration.Instance.LocalGame;
         bool incompatible = !string.IsNullOrWhiteSpace(sourceGameId)
@@ -136,19 +159,24 @@ public static class CnCNetGameMessageParser
             HostName = hostName,
             RoomName = parts[4],
             ChannelName = parts[3],
+            Revision = revision,
             MaxPlayers = int.TryParse(parts[2], out int parsedMax) ? parsedMax : 0,
             PlayerCount = players.Length,
+            Players = players,
             IsClosed = isClosed,
             Locked = locked,
             CustomPassword = customPassword,
             IsLoadedGame = isLoadedGame,
+            IsLadder = isLadder,
             GameVersion = parts[1],
             Incompatible = incompatible,
             TunnelAddress = tunnelAddress,
             TunnelPort = tunnelPort,
             MapName = parts[7],
             GameMode = parts[8],
+            LoadedGameId = parts[10],
             SkillLevel = skillLevel,
+            MapHash = legacyLayout ? string.Empty : parts[12],
             SourceGameId = sourceGameId,
             LastRefreshUtc = DateTime.UtcNow,
         };

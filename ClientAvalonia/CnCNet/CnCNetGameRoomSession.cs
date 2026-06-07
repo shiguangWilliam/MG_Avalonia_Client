@@ -25,8 +25,11 @@ public sealed class CnCNetGameRoomSession
     private int _randomSeed;
     private bool _removeStartingLocations;
     private bool _tunnelErrorMode;
+    private bool _localJoined;
 
     public bool TunnelErrorMode => _tunnelErrorMode;
+
+    public bool IsLocalJoined => _localJoined;
 
     public Func<CnCNetGameOptionsState>? GameOptionsProvider { get; set; }
 
@@ -81,6 +84,7 @@ public sealed class CnCNetGameRoomSession
         _connection = connection;
         _gameBroadcast = gameBroadcast;
         _channels = channels;
+        _localJoined = false;
         _localNick = connection.CurrentNick;
         if (IsHost)
         {
@@ -92,6 +96,8 @@ public sealed class CnCNetGameRoomSession
 
     public void OnLocalJoined()
     {
+        _localJoined = true;
+
         var fhc = new FileHashCalculator();
         fhc.CalculateHashes();
         _gameFilesHash = fhc.GetCompleteHash();
@@ -351,7 +357,7 @@ public sealed class CnCNetGameRoomSession
 
     public void UpdateHostListing(string mapName, string gameModeName, string mapSha1)
     {
-        if (!IsHost)
+        if (!IsHost || !_localJoined)
             return;
 
         _gameBroadcastListingMapName = mapName;
@@ -361,6 +367,17 @@ public sealed class CnCNetGameRoomSession
         var names = GetHumanPlayerNamesLocked();
         _gameBroadcast?.UpdateListing(mapName, gameModeName, mapSha1, names, _locked, closed: false);
         BroadcastGameOptionsLocked();
+    }
+
+    public void BroadcastLocalTunnelPing()
+    {
+        if (!_localJoined)
+            return;
+
+        lock (_sync)
+            BroadcastLocalTunnelPingLocked();
+
+        StateChanged?.Invoke();
     }
 
     public void UpdateGameLobbySettings(string roomName, int maxPlayers, int skillLevel, string? password)
@@ -385,7 +402,7 @@ public sealed class CnCNetGameRoomSession
         if (password != null)
         {
             string actualPassword = string.IsNullOrEmpty(password)
-                ? Utilities.CalculateSHA1ForString(Room.ChannelName)[..10]
+                ? CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName)
                 : password;
 
             Room.CustomPassword = !string.IsNullOrEmpty(password);
@@ -628,6 +645,7 @@ public sealed class CnCNetGameRoomSession
         string channel = NormalizeChannel(Room.ChannelName);
         _gameBroadcast?.Stop();
         _connection.PartChannel(channel);
+        _localJoined = false;
         _connection = null;
     }
 
@@ -690,7 +708,7 @@ public sealed class CnCNetGameRoomSession
         if (_connection == null)
             return;
 
-        int ping = 0;
+        int ping = Room.Tunnel.PingInMs;
         SendCtcp($"TNLPNG {ping}");
 
         CnCNetGameRoomPlayer? local = FindPlayerLocked(_localNick);
@@ -898,6 +916,8 @@ public sealed class CnCNetGameRoomSession
         Room.MaxPlayers = newMaxPlayers;
         Room.SkillLevel = newSkillLevel;
         Room.CustomPassword = newCustomPassword;
+        if (!newCustomPassword)
+            Room.Password = CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName);
 
         if (nameChanged)
             LogNotice($"{sender} changed game room name to \"{newRoomName}\".");
@@ -925,6 +945,7 @@ public sealed class CnCNetGameRoomSession
         if (filesHash.Equals(_gameFilesHash, StringComparison.OrdinalIgnoreCase))
             return;
 
+        Logger.Log($"CnCNet FHSH mismatch from {sender}: joiner={filesHash} host={_gameFilesHash}");
         SendCtcp($"MM {sender}");
         HandleCheaterNotification(_localNick, sender);
     }
@@ -991,7 +1012,7 @@ public sealed class CnCNetGameRoomSession
 
     private void BroadcastPlayerOptionsLocked()
     {
-        if (!IsHost || _connection == null)
+        if (!IsHost || !_localJoined || _connection == null)
             return;
 
         if (_players.Count == 0)
@@ -1022,8 +1043,15 @@ public sealed class CnCNetGameRoomSession
 
     private void BroadcastGameOptionsLocked()
     {
-        if (!IsHost || _connection == null)
+        if (!IsHost || !_localJoined || _connection == null)
             return;
+
+        (int checkBoxCount, int dropDownCount) = GameOptionsControlCounts?.Invoke() ?? (0, 0);
+        if (checkBoxCount == 0 && dropDownCount == 0)
+        {
+            Logger.Log("CnCNet GO: skipping broadcast until lobby game-option controls are initialized.");
+            return;
+        }
 
         CnCNetGameOptionsState? state = GameOptionsProvider?.Invoke();
         if (state == null)
@@ -1049,7 +1077,7 @@ public sealed class CnCNetGameRoomSession
             _removeStartingLocations = state.RemoveStartingLocations;
         }
 
-        SendCtcp("GO " + CnCNetGameOptionsCodec.BuildBody(state));
+        SendCtcp("GO " + CnCNetGameOptionsCodec.BuildBody(state, checkBoxCount, dropDownCount));
     }
 
     private void AppendChannelJoinersLocked(List<CnCNetGameRoomPlayer> entries, string hostName)
@@ -1115,25 +1143,16 @@ public sealed class CnCNetGameRoomSession
 
     private void SendCtcp(string ctcpMessage)
     {
-        if (_connection == null)
+        if (_connection == null || !_localJoined)
             return;
 
-        _connection.SendCtcpNotice(NormalizeChannel(Room.ChannelName), ctcpMessage);
+        _connection.SendCtcpNotice(CnCNetIrcChannelNames.Preserve(Room.ChannelName), ctcpMessage);
     }
 
     private void LogNotice(string message) => NoticeLogged?.Invoke(message);
 
     private static string NormalizeChannel(string channel)
-    {
-        if (string.IsNullOrWhiteSpace(channel))
-            return string.Empty;
-
-        string normalized = channel.Trim();
-        if (!normalized.StartsWith('#'))
-            normalized = "#" + normalized;
-
-        return normalized.ToLowerInvariant();
-    }
+        => CnCNetIrcChannelNames.Normalize(channel);
 
     private static string StripPrefixes(string user)
     {

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text;
 using Rampastring.Tools;
 
@@ -11,17 +13,37 @@ namespace ClientAvalonia.CnCNet;
 
 public sealed class CnCNetTunnelEntry
 {
-    public string Address { get; init; } = string.Empty;
+    private const int PingTimeoutMilliseconds = 1000;
 
-    public int Port { get; init; }
+    public string Address { get; set; } = string.Empty;
 
-    public string Name { get; init; } = string.Empty;
+    public int Port { get; set; }
 
-    public bool RequiresPassword { get; init; }
+    public string Country { get; set; } = string.Empty;
 
-    public bool Official { get; init; }
+    public string CountryCode { get; set; } = string.Empty;
 
-    public int Version { get; init; }
+    public string Name { get; set; } = string.Empty;
+
+    public bool RequiresPassword { get; set; }
+
+    public int Clients { get; set; }
+
+    public int MaxClients { get; set; }
+
+    public bool Official { get; set; }
+
+    public bool Recommended { get; set; }
+
+    public double Latitude { get; set; }
+
+    public double Longitude { get; set; }
+
+    public int Version { get; set; }
+
+    public double Distance { get; set; }
+
+    public int PingInMs { get; set; } = -1;
 
     /// <summary>Requests per-player NAT ports (XNA CnCNetTunnel.GetPlayerPortInfo).</summary>
     public IReadOnlyList<int> RequestPlayerPorts(int playerCount)
@@ -56,10 +78,44 @@ public sealed class CnCNetTunnelEntry
         }
     }
 
+    public void UpdateFrom(CnCNetTunnelEntry updatedTunnel)
+    {
+        Country = updatedTunnel.Country;
+        CountryCode = updatedTunnel.CountryCode;
+        Name = updatedTunnel.Name;
+        Clients = updatedTunnel.Clients;
+        MaxClients = updatedTunnel.MaxClients;
+        Official = updatedTunnel.Official;
+        Recommended = updatedTunnel.Recommended;
+        Version = updatedTunnel.Version;
+        RequiresPassword = updatedTunnel.RequiresPassword;
+        Latitude = updatedTunnel.Latitude;
+        Longitude = updatedTunnel.Longitude;
+        Distance = updatedTunnel.Distance;
+    }
+
+    public void UpdatePing()
+    {
+        PingInMs = -1;
+        using var ping = new Ping();
+
+        try
+        {
+            PingReply reply = ping.Send(IPAddress.Parse(Address), PingTimeoutMilliseconds);
+            if (reply.Status == IPStatus.Success)
+                PingInMs = Convert.ToInt32(reply.RoundtripTime);
+        }
+        catch (Exception ex) when (ex is PingException or FormatException)
+        {
+            Logger.Log($"CnCNetTunnelEntry.UpdatePing failed for {Name} ({Address}:{Port}): {ex.Message}");
+        }
+    }
+
     public static CnCNetTunnelEntry? Parse(string line)
     {
         try
         {
+            CultureInfo culture = CultureInfo.InvariantCulture;
             string[] parts = line.Split(';');
             string[] addressParts = parts[0].Split(':');
             int status = int.Parse(parts[7]);
@@ -67,15 +123,23 @@ public sealed class CnCNetTunnelEntry
             {
                 Address = addressParts[0],
                 Port = int.Parse(addressParts[1]),
+                Country = parts[1],
+                CountryCode = parts[2],
                 Name = parts[3],
                 RequiresPassword = parts[4] != "0",
+                Clients = int.Parse(parts[5]),
+                MaxClients = int.Parse(parts[6]),
                 Official = status == 2,
-                Version = int.Parse(parts[10], CultureInfo.InvariantCulture),
+                Recommended = status == 1,
+                Latitude = double.Parse(parts[8], culture),
+                Longitude = double.Parse(parts[9], culture),
+                Version = int.Parse(parts[10], culture),
+                Distance = double.Parse(parts[11], culture),
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is FormatException or OverflowException or IndexOutOfRangeException)
         {
-            Logger.Log($"CnCNetTunnelEntry.Parse failed: {ex.Message}");
+            Logger.Log($"CnCNetTunnelEntry.Parse failed: {ex.Message}{Environment.NewLine}Parsed string: {line}");
             return null;
         }
     }
