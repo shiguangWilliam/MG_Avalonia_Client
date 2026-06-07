@@ -18,6 +18,26 @@ public sealed class CnCNetSessionService : IDisposable
 
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
+    public event Action? GameRoomHostAbandoned;
+
+    public Func<CnCNetGameOptionsState>? GameOptionsProvider
+    {
+        get => _session.GameOptionsProvider;
+        set => _session.GameOptionsProvider = value;
+    }
+
+    public Action<CnCNetGameOptionsState>? GameOptionsReceiver
+    {
+        get => _session.GameOptionsReceiver;
+        set => _session.GameOptionsReceiver = value;
+    }
+
+    public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts
+    {
+        get => _session.GameOptionsControlCounts;
+        set => _session.GameOptionsControlCounts = value;
+    }
+
     public MultiplayerLobbyState LobbyState { get; } = new();
 
     public int OnlinePlayerCount => _session.OnlinePlayerCount;
@@ -44,6 +64,7 @@ public sealed class CnCNetSessionService : IDisposable
         _session.GameRoomJoined += room => Dispatcher.UIThread.Post(() => GameRoomJoined?.Invoke(room));
         _session.GameStarting += info => Dispatcher.UIThread.Post(() => GameStarting?.Invoke(info));
         _session.GameRoomJoinFailed += msg => Dispatcher.UIThread.Post(() => GameRoomJoinFailed?.Invoke(msg));
+        _session.GameRoomHostAbandoned += () => Dispatcher.UIThread.Post(() => GameRoomHostAbandoned?.Invoke());
     }
 
     /// <summary>Pull latest session lobby state (call when opening CnCNetLobby).</summary>
@@ -128,6 +149,19 @@ public sealed class CnCNetSessionService : IDisposable
     }
 
     public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);
+
+    public void SyncGameRoomFromLobby(LobbyPlayerState state)
+    {
+        CnCNetGameRoomSession? gameRoom = _session.GameRoom;
+        if (gameRoom == null || !gameRoom.IsHost)
+            return;
+
+        string hostName = string.IsNullOrWhiteSpace(state.HostPlayerName)
+            ? LocalNick
+            : state.HostPlayerName;
+
+        gameRoom.SyncPlayersFromLobby(state, hostName);
+    }
 
     public bool TryLaunchHostedGame(out string message) => _session.TryLaunchHostedGame(out message);
 

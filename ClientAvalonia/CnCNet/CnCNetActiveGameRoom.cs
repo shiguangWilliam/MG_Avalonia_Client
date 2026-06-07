@@ -3,23 +3,23 @@ namespace ClientAvalonia.CnCNet;
 /// <summary>Active CnCNet game room the client is hosting or joining (IRC game channel).</summary>
 public sealed class CnCNetActiveGameRoom
 {
-    public required string RoomName { get; init; }
+    public required string RoomName { get; set; }
 
     public required string ChannelName { get; init; }
 
-    public required string Password { get; init; }
+    public required string Password { get; set; }
 
-    public required CnCNetTunnelEntry Tunnel { get; init; }
+    public required CnCNetTunnelEntry Tunnel { get; set; }
 
-    public string HostName { get; init; } = string.Empty;
+    public string HostName { get; set; } = string.Empty;
 
     public bool IsHost { get; init; }
 
-    public int MaxPlayers { get; init; }
+    public int MaxPlayers { get; set; }
 
-    public int SkillLevel { get; init; }
+    public int SkillLevel { get; set; }
 
-    public bool CustomPassword { get; init; }
+    public bool CustomPassword { get; set; }
 }
 
 /// <summary>Player slot in an active CnCNet game room (XNA PlayerInfo subset).</summary>

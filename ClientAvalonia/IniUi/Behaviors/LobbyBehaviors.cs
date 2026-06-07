@@ -62,56 +62,14 @@ public static class LobbyBehaviors
 
     private static void TryLaunchCnCNet(IUiNavigationHost host)
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
-        if (room == null)
+        if (host.TryLaunchCnCNetGame(out string message))
         {
-            host.ShowStatus("Not in a CnCNet game room.");
-            return;
-        }
-
-        if (room.IsHost)
-        {
-            if (!CnCNetSessionService.Instance.TryLaunchHostedGame(out string message))
-            {
+            if (!string.IsNullOrWhiteSpace(message))
                 host.ShowStatus(message);
-                return;
-            }
-
-            host.ShowStatus(message);
             return;
         }
 
-        bool autoReady = host.ActiveRoot != null
-            && FindCheckBox(host.ActiveRoot, "chkAutoReady")?.IsChecked == true;
-
-        CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
-            .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
-
-        if (autoReady)
-        {
-            CnCNetSessionService.Instance.SetGameRoomReady(true, autoReady: true);
-            host.ShowStatus("Auto ready — waiting for host to launch.");
-            return;
-        }
-
-        bool ready = !(local?.Ready ?? false);
-        CnCNetSessionService.Instance.SetGameRoomReady(ready, autoReady: false);
-        host.ShowStatus(ready ? "Ready — waiting for host to launch." : "Not ready.");
-    }
-
-    private static UiNodeViewModel? FindCheckBox(UiNodeViewModel root, string id)
-    {
-        if (root.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
-            return root;
-
-        foreach (UiNodeViewModel child in root.Children)
-        {
-            UiNodeViewModel? found = FindCheckBox(child, id);
-            if (found != null)
-                return found;
-        }
-
-        return null;
+        host.ShowStatus(message);
     }
 
     private static void RefreshCnCNetListing(IUiNavigationHost host, string windowName)

@@ -16,15 +16,19 @@ public sealed class CnCNetIrcConnection : IDisposable
     private const int ReadBufferSize = 1024;
     private const int ConnectTimeoutMs = 3000;
     private const int MaxReadIdleErrors = 30;
+    private const int KeepAliveInitialMs = 30_000;
+    private const int KeepAliveIdlePeriodMs = 120_000;
+    private const int KeepAliveActivePeriodMs = 30_000;
 
     private readonly object _sendLock = new();
-    private readonly Queue<string> _sendQueue = new();
+    private readonly List<QueuedOutboundMessage> _sendQueue = [];
     private readonly StringBuilder _readBuffer = new();
     private readonly Encoding _encoding = Encoding.UTF8;
     private readonly string _systemId;
 
     private readonly HashSet<string> _pendingNamesUsers = new(StringComparer.OrdinalIgnoreCase);
     private string? _pendingNamesChannel;
+    private readonly Dictionary<string, int> _channelUserCounts = new(StringComparer.OrdinalIgnoreCase);
 
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -52,6 +56,12 @@ public sealed class CnCNetIrcConnection : IDisposable
     public bool IsLocalUser(string nick)
         => !string.IsNullOrWhiteSpace(nick)
            && nick.Equals(CurrentNick, StringComparison.OrdinalIgnoreCase);
+
+    public int GetChannelUserCount(string channel)
+    {
+        string normalized = NormalizeChannelParameter(channel);
+        return _channelUserCounts.GetValueOrDefault(normalized);
+    }
 
     /// <summary>Fired after TCP connect and USER/NICK registration sent.</summary>
     public event Action? Connected;
@@ -144,14 +154,17 @@ public sealed class CnCNetIrcConnection : IDisposable
         EmitActivity($"??{message}");
     }
 
-    /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage).</summary>
+    /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage — queued with priority, not instant flood).</summary>
     public void SendCtcpNotice(string channel, string ctcpMessage)
     {
         if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(ctcpMessage))
             return;
 
         string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
-        SendImmediate($"NOTICE {normalized} :\u0001{ctcpMessage}\u0001");
+        string wire = $"NOTICE {normalized} :\u0001{ctcpMessage}\u0001";
+        int priority = GetCtcpPriority(ctcpMessage);
+        string? dedupeKey = GetCtcpDedupeKey(ctcpMessage);
+        EnqueueSend(wire, priority, dedupeKey);
     }
 
     public void RequestChannelNames(string channel)
@@ -268,15 +281,15 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string localGame = ClientConfiguration.Instance.LocalGame;
         string realname = ProgramConstants.GAME_VERSION + " " + localGame + " CnCNet";
-        EnqueueSend($"USER {localGame}.{_systemId} 0 * :{realname}");
-        EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
+        SendImmediate($"USER {localGame}.{_systemId} 0 * :{realname}");
+        SendImmediate("NICK " + ProgramConstants.PLAYERNAME);
         EmitActivity("Registering USER/NICK...");
         EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
     }
 
     private void ChangeNickname()
     {
-        EnqueueSend("NICK " + ProgramConstants.PLAYERNAME);
+        SendImmediate("NICK " + ProgramConstants.PLAYERNAME);
         EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
     }
 
@@ -379,28 +392,48 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         while (!token.IsCancellationRequested && IsConnected)
         {
-            string? message = null;
+            QueuedOutboundMessage? outbound = null;
             lock (_sendLock)
             {
                 if (_sendQueue.Count > 0)
-                    message = _sendQueue.Dequeue();
+                {
+                    outbound = _sendQueue[0];
+                    _sendQueue.RemoveAt(0);
+                }
             }
 
-            if (message == null)
+            if (outbound == null)
             {
                 Thread.Sleep(25);
                 continue;
             }
 
-            SendImmediate(message);
+            SendImmediate(outbound.Value.Message);
             Thread.Sleep(sendDelay);
         }
     }
 
-    private void EnqueueSend(string message)
+    private void EnqueueSend(string message, int priority = 0, string? dedupeKey = null)
     {
         lock (_sendLock)
-            _sendQueue.Enqueue(message);
+        {
+            if (dedupeKey != null)
+            {
+                int existing = _sendQueue.FindIndex(m => dedupeKey.Equals(m.DedupeKey, StringComparison.Ordinal));
+                if (existing >= 0)
+                {
+                    _sendQueue[existing] = new QueuedOutboundMessage(message, priority, dedupeKey);
+                    return;
+                }
+            }
+
+            var entry = new QueuedOutboundMessage(message, priority, dedupeKey);
+            int insertAt = _sendQueue.FindIndex(m => m.Priority < priority);
+            if (insertAt < 0)
+                _sendQueue.Add(entry);
+            else
+                _sendQueue.Insert(insertAt, entry);
+        }
     }
 
     private void SendImmediate(string message)
@@ -439,6 +472,9 @@ public sealed class CnCNetIrcConnection : IDisposable
         _keepAliveTimer?.Dispose();
         _keepAliveTimer = null;
 
+        lock (_sendLock)
+            _sendQueue.Clear();
+
         try
         {
             _stream?.Close();
@@ -451,6 +487,7 @@ public sealed class CnCNetIrcConnection : IDisposable
         _stream = null;
         _client = null;
         ConnectedServer = null;
+        _channelUserCounts.Clear();
 
         EmitActivity(reason);
         Disconnected?.Invoke(reason);
@@ -471,12 +508,19 @@ public sealed class CnCNetIrcConnection : IDisposable
                 return;
 
             int tag = Random.Shared.Next(100000, 999999);
-            EnqueueSend($"PING LAG{tag}");
-        }, null, 30_000, 120_000);
+            SendImmediate($"PING LAG{tag}");
+        }, null, KeepAliveInitialMs, KeepAliveIdlePeriodMs);
+    }
+
+    private void ResetKeepAliveTimer()
+    {
+        _keepAliveTimer?.Change(KeepAliveInitialMs, KeepAliveActivePeriodMs);
     }
 
     private void HandleLine(string line)
     {
+        ResetKeepAliveTimer();
+
         ParseIrcMessage(line, out string prefix, out string command, out List<string> parameters);
 
         if (int.TryParse(command, out int numeric))
@@ -491,11 +535,20 @@ public sealed class CnCNetIrcConnection : IDisposable
             {
                 string pong = parameters.Count > 0 ? "PONG " + parameters[0] : "PONG";
                 SendImmediate(pong);
+                Logger.Log("CnCNet IRC PONG: " + pong);
+                break;
+            }
+            case "ERROR":
+            {
+                string errorText = parameters.Count > 0 ? string.Join(' ', parameters) : "Server error.";
+                Logger.Log("CnCNet IRC ERROR: " + errorText);
+                ServerMessage?.Invoke(errorText);
+                TearDown(errorText);
                 break;
             }
             case "CAP":
                 if (parameters.Count > 1 && parameters[1].Equals("LS", StringComparison.OrdinalIgnoreCase))
-                    EnqueueSend("CAP END");
+                    SendImmediate("CAP END");
                 break;
             case "NOTICE":
                 HandleNotice(prefix, parameters);
@@ -550,6 +603,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             case 476:
             case 477:
             case 405:
+            case 439:
                 if (parameters.Count > 1)
                 {
                     string detail = parameters.Count > 2 ? string.Join(' ', parameters.Skip(2)) : string.Empty;
@@ -626,6 +680,7 @@ public sealed class CnCNetIrcConnection : IDisposable
         string channel = NormalizeChannelParameter(parameters[0]);
         if (IsLocalUser(user))
             SetCurrentNick(user);
+        IncrementChannelUserCount(channel);
         UserJoined?.Invoke(channel, user);
     }
 
@@ -664,6 +719,7 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string user = prefix[..exclam];
         string channel = NormalizeChannelParameter(parameters[0]);
+        DecrementChannelUserCount(channel);
         UserLeft?.Invoke(channel, user);
     }
 
@@ -738,7 +794,25 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (users.Count > 0)
             ChannelUserListReceived?.Invoke(channel, users);
 
+        _channelUserCounts[channel] = users.Count;
         ChannelNamesComplete?.Invoke(channel);
+    }
+
+    private void IncrementChannelUserCount(string channel)
+    {
+        _channelUserCounts.TryGetValue(channel, out int count);
+        _channelUserCounts[channel] = count + 1;
+    }
+
+    private void DecrementChannelUserCount(string channel)
+    {
+        if (!_channelUserCounts.TryGetValue(channel, out int count))
+            return;
+
+        if (count <= 1)
+            _channelUserCounts.Remove(channel);
+        else
+            _channelUserCounts[channel] = count - 1;
     }
 
     private static string NormalizeChannelParameter(string channel)
@@ -786,4 +860,26 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (!string.IsNullOrEmpty(trailing))
             parameters.Add(trailing);
     }
+
+    private static int GetCtcpPriority(string ctcpMessage)
+    {
+        if (ctcpMessage.StartsWith("GAME ", StringComparison.Ordinal))
+            return 20;
+
+        if (ctcpMessage.StartsWith("PO ", StringComparison.Ordinal)
+            || ctcpMessage.StartsWith("GO ", StringComparison.Ordinal)
+            || ctcpMessage.StartsWith("GSETTINGS ", StringComparison.Ordinal))
+            return 11;
+
+        return 10;
+    }
+
+    private static string? GetCtcpDedupeKey(string ctcpMessage)
+    {
+        int space = ctcpMessage.IndexOf(' ');
+        string command = space > 0 ? ctcpMessage[..space] : ctcpMessage;
+        return command is "PO" or "GO" or "GAME" ? "CTCP:" + command : null;
+    }
+
+    private readonly record struct QueuedOutboundMessage(string Message, int Priority, string? DedupeKey);
 }

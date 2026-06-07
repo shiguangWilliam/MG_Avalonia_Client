@@ -12,6 +12,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
 {
     private const double BroadcastIntervalSeconds = 30;
     private const double InitialDelaySeconds = 10;
+    private const double BroadcastAccelerationSeconds = 10;
 
     private readonly object _sync = new();
     private Timer? _timer;
@@ -49,15 +50,13 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             _room = room;
             _locked = false;
             _closed = false;
-            _playerNames = [ProgramConstants.PLAYERNAME];
+            if (_playerNames.Count == 0)
+                _playerNames = [ProgramConstants.PLAYERNAME];
 
             if (configureChannel)
                 ConfigureHostChannel(connection, room);
 
-            BroadcastLocked();
-            _timer = new Timer(_ => BroadcastLocked(), null,
-                TimeSpan.FromSeconds(InitialDelaySeconds),
-                TimeSpan.FromSeconds(BroadcastIntervalSeconds));
+            RestartTimerLocked(TimeSpan.FromSeconds(InitialDelaySeconds));
         }
     }
 
@@ -77,6 +76,25 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             _playerNames = playerNames.Count > 0 ? playerNames : [ProgramConstants.PLAYERNAME];
             _locked = locked;
             _closed = closed;
+
+            if (_connection == null || _channels == null || _room == null || !_room.IsHost || _closed)
+                return;
+
+            SendGameMessageLocked(_closed);
+            RestartTimerLocked(TimeSpan.FromSeconds(BroadcastAccelerationSeconds));
+        }
+    }
+
+    public void MarkGameStarting()
+    {
+        lock (_sync)
+        {
+            if (_connection == null || _channels == null || _room == null || !_room.IsHost)
+                return;
+
+            _closed = true;
+            SendGameMessageLocked(closed: true);
+            StopTimerLocked();
         }
     }
 
@@ -116,9 +134,12 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             return;
 
         string broadcastChannel = NormalizeChannel(_channels.GameBroadcastChannel);
+        if (ProgramConstants.IsInGame && _connection.GetChannelUserCount(broadcastChannel) > 500)
+            return;
+
         string payload = BuildGamePayload(closed);
         _connection.SendCtcpNotice(broadcastChannel, payload);
-        Logger.Log($"CnCNetGameBroadcastService: GAME â†?{broadcastChannel} ({_room.RoomName}, closed={closed})");
+        Logger.Log($"CnCNetGameBroadcastService: GAME -> {broadcastChannel} ({_room.RoomName}, closed={closed})");
     }
 
     private string BuildGamePayload(bool closed)
@@ -164,6 +185,12 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         }
 
         return sb.ToString();
+    }
+
+    private void RestartTimerLocked(TimeSpan firstInterval)
+    {
+        StopTimerLocked();
+        _timer = new Timer(_ => BroadcastLocked(), null, firstInterval, TimeSpan.FromSeconds(BroadcastIntervalSeconds));
     }
 
     private void StopTimerLocked()

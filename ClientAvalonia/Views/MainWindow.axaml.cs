@@ -74,7 +74,9 @@ public partial class MainWindow : Window, IUiNavigationHost
         _gameResources.Loaded += OnGameResourcesLoaded;
         CnCNetSessionService.Instance.StateChanged += OnCnCNetStateChanged;
         CnCNetSessionService.Instance.GameRoomJoined += OnCnCNetGameRoomJoined;
+        CnCNetSessionService.Instance.GameRoomJoinFailed += OnCnCNetGameRoomJoinFailed;
         CnCNetSessionService.Instance.GameStarting += OnCnCNetGameStarting;
+        CnCNetSessionService.Instance.GameRoomHostAbandoned += OnCnCNetGameRoomHostAbandoned;
         CnCNetSessionService.Instance.EnsureStarted();
         InitializeComponent();
         KeyDown += OnKeyDown;
@@ -564,6 +566,58 @@ public partial class MainWindow : Window, IUiNavigationHost
         return launched;
     }
 
+    public bool TryLaunchCnCNetGame(out string message)
+    {
+        message = string.Empty;
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+
+        if (session.IsGameRoomJoinPending)
+        {
+            message = "Still joining the CnCNet game room — please wait.";
+            return false;
+        }
+
+        CnCNetActiveGameRoom? room = session.ActiveGameRoom ?? session.GameRoom?.Room;
+        if (room == null)
+        {
+            message = "Not in a CnCNet game room.";
+            return false;
+        }
+
+        if (_activeRoot != null)
+            LobbyPlayerBindingApplier.SyncFromUi(_activeRoot, _lobbySession.PlayerState);
+
+        if (room.IsHost)
+        {
+            session.SyncGameRoomFromLobby(_lobbySession.PlayerState);
+
+            if (!session.TryLaunchHostedGame(out message))
+                return false;
+
+            return true;
+        }
+
+        UiNodeViewModel? chkAutoReady = _activeRoot != null ? FindVm(_activeRoot, "chkAutoReady") : null;
+        bool autoReady = chkAutoReady?.IsChecked == true;
+
+        CnCNetGameRoomPlayer? local = session.GameRoom?.Players
+            .FirstOrDefault(p => p.Name.Equals(session.LocalNick, StringComparison.OrdinalIgnoreCase));
+
+        if (autoReady)
+        {
+            session.SetGameRoomReady(true, autoReady: true);
+            message = "Auto ready — waiting for host to launch.";
+            RefreshCnCNetGameRoomPlayers();
+            return true;
+        }
+
+        bool ready = !(local?.Ready ?? false);
+        session.SetGameRoomReady(ready, autoReady: false);
+        message = ready ? "Ready — waiting for host to launch." : "Not ready.";
+        RefreshCnCNetGameRoomPlayers();
+        return true;
+    }
+
     public void SelectOptionsTab(int index)
     {
         if (!IsOptionsOverlayOpen || _overlayRoot == null)
@@ -718,6 +772,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             {
+                WireCnCNetGameOptionsBridge();
                 ApplyCnCNetGameRoomPlayers(root);
                 UpdateCnCNetGameBroadcastListing(root);
             }
@@ -863,15 +918,53 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
+        EnterCnCNetGameLobbyConnecting();
         ShowStatus(message);
-        NavigateTo("CnCNetGameLobby");
+    }
+
+    public void EnterCnCNetGameLobbyConnecting()
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room == null)
+            return;
+
+        string localNick = CnCNetSessionService.Instance.LocalNick;
+        string hostName = string.IsNullOrWhiteSpace(room.HostName) ? localNick : room.HostName;
+
+        LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
+            _lobbySession.PlayerState,
+            localNick,
+            hostName,
+            room.IsHost,
+            resetSlots: true);
+
+        if (room.IsHost)
+            _lobbySession.PlayerState.EnsureHostAsFirstHuman(hostName, localNick);
+
+        if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            NavigateTo("CnCNetGameLobby");
+        else if (_activeRoot != null)
+            ApplyCnCNetGameLobbyConnectingState(_activeRoot, room);
+    }
+
+    private void ApplyCnCNetGameLobbyConnectingState(UiNodeViewModel root, CnCNetActiveGameRoom room)
+    {
+        ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
+        LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+        WireCnCNetGameOptionsBridge();
+        CnCNetGameLobbyUiHelper.ApplyToolbarRole(root, resources, _mainBehaviors, isJoiner: !room.IsHost);
+        UpdateLaunchButtonState(root);
     }
 
     private List<string> GetCnCNetPlayerNames()
     {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
-        if (gameRoom != null && gameRoom.Players.Count > 0)
-            return gameRoom.Players.Select(p => p.Name).ToList();
+        if (gameRoom != null)
+        {
+            IReadOnlyList<string> names = gameRoom.GetHumanPlayerNames();
+            if (names.Count > 0)
+                return names.ToList();
+        }
 
         return _lobbySession.PlayerState.Slots
             .Where(s => s.IsOccupied && !s.IsAi)
@@ -928,48 +1021,50 @@ public partial class MainWindow : Window, IUiNavigationHost
         bool canLaunch = _lobbySession.VisibleMaps.Count > 0
             && (lbMapList?.SelectedIndex ?? -1) >= 0;
 
-        CnCNetActiveGameRoom? cncRoom = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? cncRoom = CnCNetSessionService.Instance.ActiveGameRoom
+            ?? CnCNetSessionService.Instance.GameRoom?.Room;
         UiNodeViewModel? btnLaunch = FindVm(root, "btnLaunchGame");
         UiNodeViewModel? chkAutoReady = FindVm(root, "chkAutoReady");
 
-        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase) && cncRoom != null)
+        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
         {
-            UiNodeViewModel? btnManualReady = FindVm(root, "btnManualReady");
+            ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
+            CnCNetSessionService session = CnCNetSessionService.Instance;
 
-            if (cncRoom.IsHost)
+            if (cncRoom == null)
             {
                 btnLaunch?.SetDisplayText("Launch Game");
-                btnManualReady?.IsVisible = false;
-                btnLaunch?.IsVisible = true;
+                CnCNetGameLobbyUiHelper.ApplyHostToolbar(root);
+                canLaunch = false;
+                _bindingSession.State.SetCanLaunchGame(false);
+                btnLaunch?.IsEnabled = false;
+                return;
+            }
+
+            bool isJoiner = !cncRoom.IsHost;
+            bool connecting = session.IsGameRoomJoinPending;
+
+            CnCNetGameLobbyUiHelper.ApplyToolbarRole(root, resources, _mainBehaviors, isJoiner);
+
+            if (connecting)
+            {
+                canLaunch = false;
+                _bindingSession.State.SetCanLaunchGame(false);
+                btnLaunch?.IsEnabled = false;
+                CnCNetGameLobbyUiHelper.SetJoinerReadyEnabled(root, false);
+                return;
+            }
+
+            if (isJoiner)
+            {
+                bool autoReady = chkAutoReady?.IsChecked == true;
+                canLaunch = !autoReady;
+                CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: true);
+                CnCNetGameLobbyUiHelper.SetJoinerReadyEnabled(root, !autoReady);
             }
             else
             {
-                bool autoReady = chkAutoReady?.IsChecked == true;
-                canLaunch = canLaunch && !autoReady;
-                if (chkAutoReady != null)
-                    chkAutoReady.IsEnabled = true;
-
-                if (btnManualReady != null)
-                {
-                    btnManualReady.IsVisible = true;
-                    btnManualReady.IsEnabled = !autoReady;
-                    CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: true);
-                    btnLaunch?.IsVisible = false;
-                }
-                else
-                {
-                    CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
-                        .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
-                    btnLaunch?.SetDisplayText(local is { Ready: true } ? "Not Ready" : "I'm Ready");
-                    btnLaunch?.IsVisible = true;
-                }
-            }
-
-            if (cncRoom.IsHost && chkAutoReady != null)
-            {
-                chkAutoReady.IsEnabled = false;
-                chkAutoReady.IsChecked = false;
-                chkAutoReady.IsVisible = false;
+                btnLaunch?.SetDisplayText("Launch Game");
             }
         }
 
@@ -1046,6 +1141,8 @@ public partial class MainWindow : Window, IUiNavigationHost
         return null;
     }
 
+    private bool _applyingCnCNetGameRoomPlayers;
+
     private void OnCnCNetGameRoomJoined(CnCNetActiveGameRoom room)
     {
         if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
@@ -1053,7 +1150,64 @@ public partial class MainWindow : Window, IUiNavigationHost
         else if (_activeRoot != null)
             ApplyCnCNetGameRoomPlayers(_activeRoot);
 
+        if (room.IsHost)
+            CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
+
         ShowStatus($"Entered \"{room.RoomName}\".");
+    }
+
+    private void OnCnCNetGameRoomJoinFailed(string message)
+    {
+        ShowStatus(message);
+        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            NavigateTo("CnCNetLobby");
+    }
+
+    private void OnCnCNetGameRoomHostAbandoned()
+    {
+        ClearCnCNetGameOptionsBridge();
+        ShowStatus("The game host has abandoned the game.");
+        NavigateTo("CnCNetLobby");
+    }
+
+    private void WireCnCNetGameOptionsBridge()
+    {
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+        session.GameOptionsControlCounts = () => CnCNetGameOptionsUiBridge.GetControlCounts(_activeRoot);
+        session.GameOptionsProvider = CollectCnCNetGameOptions;
+        session.GameOptionsReceiver = ApplyCnCNetGameOptionsFromHost;
+    }
+
+    private void ClearCnCNetGameOptionsBridge()
+    {
+        CnCNetSessionService session = CnCNetSessionService.Instance;
+        session.GameOptionsControlCounts = null;
+        session.GameOptionsProvider = null;
+        session.GameOptionsReceiver = null;
+    }
+
+    private CnCNetGameOptionsState CollectCnCNetGameOptions()
+    {
+        UiNodeViewModel? lbMapList = _activeRoot != null ? FindVm(_activeRoot, "lbMapList") : null;
+        MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
+        GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
+        CnCNetGameRoomSession? room = CnCNetSessionService.Instance.GameRoom;
+        return CnCNetGameOptionsUiBridge.Collect(
+            _activeRoot,
+            map,
+            gameMode,
+            room?.RandomSeed ?? Random.Shared.Next(),
+            room?.RemoveStartingLocations ?? false);
+    }
+
+    private void ApplyCnCNetGameOptionsFromHost(CnCNetGameOptionsState state)
+    {
+        if (_activeRoot == null)
+            return;
+
+        CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources);
+        RefreshLobbyMapList();
+        RefreshCnCNetGameListing();
     }
 
     private void OnCnCNetStateChanged()
@@ -1079,10 +1233,26 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
     {
+        if (_applyingCnCNetGameRoomPlayers)
+            return;
+
         CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
         if (room == null)
             return;
 
+        _applyingCnCNetGameRoomPlayers = true;
+        try
+        {
+            ApplyCnCNetGameRoomPlayersCore(root, room);
+        }
+        finally
+        {
+            _applyingCnCNetGameRoomPlayers = false;
+        }
+    }
+
+    private void ApplyCnCNetGameRoomPlayersCore(UiNodeViewModel root, CnCNetActiveGameRoom room)
+    {
         CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
         string localNick = CnCNetSessionService.Instance.LocalNick;
         string hostName = room.HostName;
@@ -1119,12 +1289,15 @@ public partial class MainWindow : Window, IUiNavigationHost
             locked,
             room.IsHost);
 
-        CnCNetGameLobbyUiHelper.ApplyJoinerToolbar(root, resources, _mainBehaviors, isJoiner: !room.IsHost);
+        CnCNetGameLobbyUiHelper.ApplyToolbarRole(root, resources, _mainBehaviors, isJoiner: !room.IsHost);
         CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: !room.IsHost);
         UpdateLaunchButtonState(root);
 
         if (room.IsHost)
+        {
+            CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
             RefreshCnCNetGameListing();
+        }
 
         ShowStatus(room.IsHost
             ? $"Hosting \"{room.RoomName}\" — waiting for players."

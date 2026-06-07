@@ -22,6 +22,25 @@ public sealed class CnCNetGameRoomSession
     private bool _locked;
     private int _uniqueGameId;
     private string _localNick = ProgramConstants.PLAYERNAME;
+    private int _randomSeed;
+    private bool _removeStartingLocations;
+    private bool _tunnelErrorMode;
+
+    public bool TunnelErrorMode => _tunnelErrorMode;
+
+    public Func<CnCNetGameOptionsState>? GameOptionsProvider { get; set; }
+
+    public Action<CnCNetGameOptionsState>? GameOptionsReceiver { get; set; }
+
+    public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts { get; set; }
+
+    public int RandomSeed => _randomSeed;
+
+    public bool RemoveStartingLocations => _removeStartingLocations;
+
+    public event Action? HostAbandoned;
+
+    private string _gameFilesHash = string.Empty;
 
     public CnCNetGameRoomSession(CnCNetActiveGameRoom room)
     {
@@ -73,9 +92,14 @@ public sealed class CnCNetGameRoomSession
 
     public void OnLocalJoined()
     {
+        var fhc = new FileHashCalculator();
+        fhc.CalculateHashes();
+        _gameFilesHash = fhc.GetCompleteHash();
+
         lock (_sync)
         {
             _uniqueGameId = Random.Shared.Next(1_000_000, int.MaxValue);
+            _randomSeed = Random.Shared.Next();
             _channelUsers.Add(_localNick);
 
             if (IsHost)
@@ -87,13 +111,53 @@ public sealed class CnCNetGameRoomSession
             }
             else
             {
-                SendCtcp("FHSH 0");
+                SendCtcp($"FHSH {_gameFilesHash}");
             }
         }
 
         LogNotice(IsHost ? $"Hosting \"{Room.RoomName}\"." : $"Joined \"{Room.RoomName}\".");
         if (!IsHost)
             BroadcastLocalTunnelPingLocked();
+
+        StateChanged?.Invoke();
+    }
+
+    public void OnChannelUserList(IReadOnlyList<string> users)
+    {
+        if (!IsGameChannel(Room.ChannelName))
+            return;
+
+        lock (_sync)
+        {
+            foreach (string user in users)
+            {
+                string name = StripPrefixes(user);
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                _channelUsers.Add(name);
+
+                if (IsHost)
+                    AddOrRefreshHumanPlayerLocked(name, name.Equals(_localNick, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (IsHost)
+                BroadcastPlayerOptionsLocked();
+        }
+
+        if (!IsHost && !string.IsNullOrWhiteSpace(HostName))
+        {
+            bool hostPresent = users.Any(u =>
+                StripPrefixes(u).Equals(HostName, StringComparison.OrdinalIgnoreCase));
+
+            if (!hostPresent)
+            {
+                LogNotice("The game host has abandoned the game.");
+                HostAbandoned?.Invoke();
+                return;
+            }
+        }
+
         StateChanged?.Invoke();
     }
 
@@ -119,6 +183,15 @@ public sealed class CnCNetGameRoomSession
             {
                 AddOrRefreshHumanPlayerLocked(name, name.Equals(_localNick, StringComparison.OrdinalIgnoreCase));
                 BroadcastPlayerOptionsLocked();
+
+                int humanCount = _players.Count(p => !p.IsAi);
+                if (!name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)
+                    && humanCount >= Room.MaxPlayers
+                    && !_locked)
+                {
+                    LogNotice("Player limit reached. The game room has been locked.");
+                    SetLocked(true);
+                }
             }
         }
 
@@ -137,7 +210,12 @@ public sealed class CnCNetGameRoomSession
             _players.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
             if (IsHost)
+            {
                 BroadcastPlayerOptionsLocked();
+
+                if (_locked && !ProgramConstants.IsInGame)
+                    SetLocked(false);
+            }
         }
 
         StateChanged?.Invoke();
@@ -184,6 +262,36 @@ public sealed class CnCNetGameRoomSession
             return;
         }
 
+        if (ctcp.StartsWith("GSETTINGS ", StringComparison.Ordinal))
+        {
+            ApplyGameLobbySettings(sender, ctcp[10..]);
+            return;
+        }
+
+        if (ctcp.StartsWith("FHSH ", StringComparison.Ordinal) && IsHost)
+        {
+            HandleFileHashNotification(sender, ctcp[5..].Trim());
+            return;
+        }
+
+        if (ctcp.StartsWith("MM ", StringComparison.Ordinal))
+        {
+            HandleCheaterNotification(sender, ctcp[3..].Trim());
+            return;
+        }
+
+        if (ctcp.Equals("CD", StringComparison.Ordinal))
+        {
+            LogNotice($"{sender} has modified game files during the client session. They are likely attempting to cheat!");
+            return;
+        }
+
+        if (ctcp.StartsWith("CHTNL ", StringComparison.Ordinal))
+        {
+            HandleTunnelChange(sender, ctcp[6..].Trim());
+            return;
+        }
+
         if (ctcp.Equals("STRTD", StringComparison.Ordinal))
             LogNotice($"{sender} started the game.");
     }
@@ -192,10 +300,21 @@ public sealed class CnCNetGameRoomSession
     {
         lock (_sync)
         {
+            if (_locked == locked)
+                return;
+
             _locked = locked;
-            if (IsHost)
+
+            if (IsHost && _connection != null)
+            {
+                string channel = NormalizeChannel(Room.ChannelName);
+                _connection.SendInstant($"MODE {channel} {(locked ? "+i" : "-i")}");
                 BroadcastPlayerOptionsLocked();
+            }
         }
+
+        if (IsHost)
+            LogNotice(locked ? "You've locked the game room." : "The game room has been unlocked.");
 
         StateChanged?.Invoke();
     }
@@ -235,12 +354,78 @@ public sealed class CnCNetGameRoomSession
         if (!IsHost)
             return;
 
-        var names = Players.Select(p => p.Name).ToList();
-        _gameBroadcast?.UpdateListing(mapName, gameModeName, mapSha1, names, _locked, closed: false);
+        _gameBroadcastListingMapName = mapName;
+        _gameBroadcastListingGameMode = gameModeName;
+        _gameBroadcastListingMapSha1 = mapSha1;
 
-        lock (_sync)
-            BroadcastGameOptionsLocked(mapName, gameModeName, mapSha1);
+        var names = GetHumanPlayerNamesLocked();
+        _gameBroadcast?.UpdateListing(mapName, gameModeName, mapSha1, names, _locked, closed: false);
+        BroadcastGameOptionsLocked();
     }
+
+    public void UpdateGameLobbySettings(string roomName, int maxPlayers, int skillLevel, string? password)
+    {
+        if (!IsHost || _connection == null)
+            return;
+
+        int occupiedCount = _players.Count;
+        if (maxPlayers < occupiedCount)
+        {
+            LogNotice($"Cannot reduce maximum players to {maxPlayers} with {occupiedCount} players currently in game.");
+            return;
+        }
+
+        string oldRoomName = Room.RoomName;
+        int oldMaxPlayers = Room.MaxPlayers;
+        bool oldCustomPassword = Room.CustomPassword;
+        Room.RoomName = roomName;
+        Room.MaxPlayers = maxPlayers;
+        Room.SkillLevel = skillLevel;
+
+        if (password != null)
+        {
+            string actualPassword = string.IsNullOrEmpty(password)
+                ? Utilities.CalculateSHA1ForString(Room.ChannelName)[..10]
+                : password;
+
+            Room.CustomPassword = !string.IsNullOrEmpty(password);
+            Room.Password = actualPassword;
+            _connection.SendInstant($"MODE {NormalizeChannel(Room.ChannelName)} +k {actualPassword}");
+        }
+
+        BroadcastGameLobbySettings();
+
+        if (!oldRoomName.Equals(roomName, StringComparison.Ordinal))
+            LogNotice($"Game room name changed from \"{oldRoomName}\" to \"{roomName}\".");
+
+        if (oldMaxPlayers != maxPlayers)
+            LogNotice($"Maximum players changed to {maxPlayers}.");
+
+        if (password != null)
+        {
+            if (string.IsNullOrEmpty(password))
+                LogNotice("Password removed from the game.");
+            else if (!oldCustomPassword)
+                LogNotice("Password added to the game.");
+            else
+                LogNotice("Password changed.");
+        }
+
+        BroadcastPlayerOptionsLocked();
+        _gameBroadcast?.UpdateListing(
+            _gameBroadcastListingMapName,
+            _gameBroadcastListingGameMode,
+            _gameBroadcastListingMapSha1,
+            GetHumanPlayerNamesLocked(),
+            _locked,
+            closed: false);
+
+        StateChanged?.Invoke();
+    }
+
+    private string _gameBroadcastListingMapName = string.Empty;
+    private string _gameBroadcastListingGameMode = string.Empty;
+    private string _gameBroadcastListingMapSha1 = string.Empty;
 
     public void KickPlayer(string playerName)
     {
@@ -280,13 +465,19 @@ public sealed class CnCNetGameRoomSession
         lock (_sync)
         {
             List<CnCNetGameRoomPlayer> entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
+            AppendChannelJoinersLocked(entries, hostName);
+
             var readyByName = _players.Where(p => !p.IsAi)
                 .ToDictionary(p => p.Name, p => (p.Ready, p.AutoReady), StringComparer.OrdinalIgnoreCase);
 
             _players.Clear();
             foreach (CnCNetGameRoomPlayer entry in entries)
             {
-                if (!entry.IsAi && readyByName.TryGetValue(entry.Name, out (bool Ready, bool AutoReady) existing))
+                if (entry.IsAi)
+                {
+                    entry.Ready = true;
+                }
+                else if (readyByName.TryGetValue(entry.Name, out (bool Ready, bool AutoReady) existing))
                 {
                     entry.Ready = existing.Ready;
                     entry.AutoReady = existing.AutoReady;
@@ -309,7 +500,7 @@ public sealed class CnCNetGameRoomSession
         message = string.Empty;
         if (!IsHost)
         {
-            message = "Only the host can launch.";
+            message = "Only the host can launch the game.";
             return false;
         }
 
@@ -319,13 +510,18 @@ public sealed class CnCNetGameRoomSession
             return false;
         }
 
+        if (!_locked)
+        {
+            message = "The host needs to lock the game room before launching the game.";
+            return false;
+        }
+
         lock (_sync)
         {
-            var humans = _players.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
-            if (humans.Count == 0)
+            if (_players.Count == 0)
                 EnsureHostPlayerLocked();
 
-            humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+            var humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
             if (humans.Count == 0)
             {
                 message = "No players in the room.";
@@ -334,8 +530,11 @@ public sealed class CnCNetGameRoomSession
 
             foreach (CnCNetGameRoomPlayer human in humans)
             {
-                if (human.IsHost || human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost)
+                if (human.IsHost || (IsHost && human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)))
+                {
+                    human.Ready = true;
                     continue;
+                }
 
                 if (!human.Ready)
                 {
@@ -368,6 +567,22 @@ public sealed class CnCNetGameRoomSession
 
                 SendCtcp(sb.ToString());
             }
+            else
+            {
+                Logger.Log("One player MP -- starting!");
+            }
+
+            var fhc = new FileHashCalculator();
+            fhc.CalculateHashes();
+            if (_gameFilesHash != fhc.GetCompleteHash())
+            {
+                Logger.Log("Game files modified during client session!");
+                SendCtcp("CD");
+                LogNotice($"{_localNick} has modified game files during the client session. They are likely attempting to cheat!");
+            }
+
+            _gameBroadcast?.MarkGameStarting();
+            SendCtcp("STRTD");
 
             int localPort = FindPlayerLocked(_localNick)?.Port ?? 0;
             GameStarting?.Invoke(new CnCNetStartGameInfo
@@ -381,6 +596,23 @@ public sealed class CnCNetGameRoomSession
 
         message = "Starting game...";
         return true;
+    }
+
+    private List<string> GetHumanPlayerNamesLocked()
+    {
+        lock (_sync)
+        {
+            return _players
+                .Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => p.Name)
+                .ToList();
+        }
+    }
+
+    public IReadOnlyList<string> GetHumanPlayerNames()
+    {
+        lock (_sync)
+            return GetHumanPlayerNamesLocked();
     }
 
     public void Leave()
@@ -609,10 +841,140 @@ public sealed class CnCNetGameRoomSession
         if (IsHost || !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Minimal GO handling: last fields are map sha1, mode, map name in XNA order.
-        // Joiners log receipt; map selection stays local until full GO port.
+        (int checkBoxCount, int dropDownCount) = GameOptionsControlCounts?.Invoke() ?? (0, 0);
+        if (checkBoxCount == 0 && dropDownCount == 0)
+        {
+            LogNotice("Game options updated by host.");
+            StateChanged?.Invoke();
+            return;
+        }
+
+        if (!CnCNetGameOptionsCodec.TryParseBody(message, checkBoxCount, dropDownCount, out CnCNetGameOptionsState? parsed, out string? error)
+            || parsed == null)
+        {
+            LogNotice("The game host has sent an invalid game options message! The game host's game version might be different from yours.");
+            Logger.Log($"CnCNet GO parse failed: {error}");
+            return;
+        }
+
+        _randomSeed = parsed.RandomSeed;
+        _removeStartingLocations = parsed.RemoveStartingLocations;
+        GameOptionsReceiver?.Invoke(parsed);
         LogNotice("Game options updated by host.");
         StateChanged?.Invoke();
+    }
+
+    private void ApplyGameLobbySettings(string sender, string message)
+    {
+        if (IsHost || !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        string[] parts = message.Split(';');
+        if (parts.Length < 4)
+            return;
+
+        string newRoomName = parts[0];
+        int newMaxPlayers = Conversions.IntFromString(parts[1], Room.MaxPlayers);
+        int newSkillLevel = Conversions.IntFromString(parts[2], Room.SkillLevel);
+        bool newCustomPassword = Convert.ToBoolean(Conversions.IntFromString(parts[3], 0));
+
+        bool nameChanged = !Room.RoomName.Equals(newRoomName, StringComparison.Ordinal);
+        bool maxChanged = Room.MaxPlayers != newMaxPlayers;
+        bool skillChanged = Room.SkillLevel != newSkillLevel;
+
+        Room.RoomName = newRoomName;
+        Room.MaxPlayers = newMaxPlayers;
+        Room.SkillLevel = newSkillLevel;
+        Room.CustomPassword = newCustomPassword;
+
+        if (nameChanged)
+            LogNotice($"{sender} changed game room name to \"{newRoomName}\".");
+
+        if (maxChanged)
+            LogNotice($"{sender} changed maximum players to {newMaxPlayers}.");
+
+        if (skillChanged)
+        {
+            string[] options = ClientConfiguration.Instance.SkillLevelOptions.Split(',');
+            string skillName = newSkillLevel >= 0 && newSkillLevel < options.Length
+                ? options[newSkillLevel]
+                : newSkillLevel.ToString();
+            LogNotice($"{sender} changed skill level to {skillName}.");
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    private void HandleFileHashNotification(string sender, string filesHash)
+    {
+        if (!IsHost)
+            return;
+
+        if (filesHash.Equals(_gameFilesHash, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        SendCtcp($"MM {sender}");
+        HandleCheaterNotification(_localNick, sender);
+    }
+
+    private void HandleCheaterNotification(string sender, string cheaterName)
+    {
+        if (!sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        LogNotice($"Player {cheaterName} has different files compared to the game host. Either {cheaterName} or the game host could be cheating.");
+    }
+
+    private void HandleTunnelChange(string sender, string tunnelAddressAndPort)
+    {
+        if (IsHost || !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        string[] split = tunnelAddressAndPort.Split(':');
+        if (split.Length < 2 || !int.TryParse(split[1], out int tunnelPort))
+            return;
+
+        CnCNetTunnelEntry? tunnel = CnCNetTunnelListLoader.Load()
+            .FirstOrDefault(t => t.Address.Equals(split[0], StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
+
+        if (tunnel == null)
+        {
+            _tunnelErrorMode = true;
+            LogNotice("The game host has selected an invalid tunnel server! The game host needs to change the server or you will be unable to participate in the match.");
+            StateChanged?.Invoke();
+            return;
+        }
+
+        _tunnelErrorMode = false;
+        Room.Tunnel = tunnel;
+        LogNotice($"The game host has changed the tunnel server to: {tunnel.Name}");
+
+        lock (_sync)
+        {
+            foreach (CnCNetGameRoomPlayer player in _players)
+            {
+                if (!player.IsAi)
+                    player.Ping = -1;
+            }
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    private void BroadcastGameLobbySettings()
+    {
+        if (!IsHost || _connection == null)
+            return;
+
+        var sb = new StringBuilder("GSETTINGS ");
+        sb.Append(Room.RoomName);
+        sb.Append(';');
+        sb.Append(Room.MaxPlayers);
+        sb.Append(';');
+        sb.Append(Room.SkillLevel);
+        sb.Append(';');
+        sb.Append(Convert.ToInt32(Room.CustomPassword));
+        SendCtcp(sb.ToString());
     }
 
     private void BroadcastPlayerOptionsLocked()
@@ -646,26 +1008,64 @@ public sealed class CnCNetGameRoomSession
         SendCtcp(sb.ToString());
     }
 
-    private void BroadcastGameOptionsLocked(string mapName, string gameModeName, string mapSha1)
+    private void BroadcastGameOptionsLocked()
     {
         if (!IsHost || _connection == null)
             return;
 
-        int seed = Random.Shared.Next();
-        var sb = new StringBuilder("GO ");
-        sb.Append('0').Append(';');
-        sb.Append('0').Append(';');
-        sb.Append('0').Append(';');
-        sb.Append('1').Append(';');
-        sb.Append(mapSha1).Append(';');
-        sb.Append(gameModeName).Append(';');
-        sb.Append('6').Append(';');
-        sb.Append('0').Append(';');
-        sb.Append('2').Append(';');
-        sb.Append(seed).Append(';');
-        sb.Append('0').Append(';');
-        sb.Append(mapName);
-        SendCtcp(sb.ToString());
+        CnCNetGameOptionsState? state = GameOptionsProvider?.Invoke();
+        if (state == null)
+        {
+            state = new CnCNetGameOptionsState
+            {
+                CheckBoxValues = [],
+                DropDownIndices = [],
+                MapOfficial = false,
+                MapSha1 = _gameBroadcastListingMapSha1,
+                GameModeName = _gameBroadcastListingGameMode,
+                MapUntranslatedName = _gameBroadcastListingMapName,
+                FrameSendRate = ClientConfiguration.Instance.DefaultFrameSendRate,
+                MaxAhead = ClientConfiguration.Instance.DefaultMaxAhead,
+                ProtocolVersion = ClientConfiguration.Instance.DefaultProtocolVersion,
+                RandomSeed = _randomSeed,
+                RemoveStartingLocations = _removeStartingLocations,
+            };
+        }
+        else
+        {
+            _randomSeed = state.RandomSeed;
+            _removeStartingLocations = state.RemoveStartingLocations;
+        }
+
+        SendCtcp("GO " + CnCNetGameOptionsCodec.BuildBody(state));
+    }
+
+    private void AppendChannelJoinersLocked(List<CnCNetGameRoomPlayer> entries, string hostName)
+    {
+        var namesInEntries = new HashSet<string>(
+            entries.Where(e => !e.IsAi).Select(e => e.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        int insertAt = entries.FindIndex(e => e.IsAi);
+        if (insertAt < 0)
+            insertAt = entries.Count;
+
+        foreach (string channelUser in _channelUsers.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+        {
+            if (channelUser.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (namesInEntries.Contains(channelUser))
+                continue;
+
+            CnCNetGameRoomPlayer? existing = FindPlayerLocked(channelUser);
+            entries.Insert(insertAt++, existing ?? new CnCNetGameRoomPlayer
+            {
+                Name = channelUser,
+                IsHost = channelUser.Equals(hostName, StringComparison.OrdinalIgnoreCase),
+            });
+            namesInEntries.Add(channelUser);
+        }
     }
 
     private void EnsureHostPlayerLocked()

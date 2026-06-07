@@ -29,7 +29,7 @@ internal static class MultiplayerGameLobbyLayout
         if (sideMargin <= 0)
             sideMargin = 22;
 
-        foreach (string id in new[] { "btnManualReady", "btnLaunchGame", "btnLockGame", "chkAutoSave" })
+        foreach (string id in new[] { "btnManualReady", "btnLaunchGame", "btnLockGame", "chkAutoSave", "chkAutoReady" })
         {
             UiNode? node = tree.FindNode(id);
             if (node == null || !IsVisible(node))

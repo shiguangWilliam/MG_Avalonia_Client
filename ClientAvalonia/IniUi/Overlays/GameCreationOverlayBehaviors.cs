@@ -44,8 +44,8 @@ public static class GameCreationOverlayBehaviors
                 return;
             }
 
+            host.EnterCnCNetGameLobbyConnecting();
             host.ShowStatus(message);
-            host.NavigateTo(gameLobbyWindow);
         };
     }
 }

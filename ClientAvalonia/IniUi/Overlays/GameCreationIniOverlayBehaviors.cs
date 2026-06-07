@@ -64,8 +64,8 @@ public static class GameCreationIniOverlayBehaviors
             return;
         }
 
+        host.EnterCnCNetGameLobbyConnecting();
         host.ShowStatus(message);
-        host.NavigateTo("CnCNetGameLobby");
     }
 
     private static string? ReadText(UiNodeViewModel root, params string[] ids)

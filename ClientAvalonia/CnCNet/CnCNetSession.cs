@@ -18,12 +18,15 @@ public sealed class CnCNetSession : IDisposable
     private readonly Dictionary<string, Dictionary<string, CnCNetHostedGameSummary>> _gamesByBroadcast = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _joinedBroadcastChannels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _followedGameIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool _settingsSavedSubscribed;
 
     private CnCNetIrcConnection? _connection;
     private CnCNetGameCollection? _gameCollection;
     private CnCNetGameEntry? _currentGame;
     private int _selectedChannelIndex;
     private CnCNetPlayerCountService? _playerCountService;
+    private Timer? _hostedGameRefreshTimer;
     private CnCNetActiveGameRoom? _activeGameRoom;
     private CnCNetGameRoomSession? _gameRoom;
     private readonly CnCNetGameBroadcastService _gameBroadcast = new();
@@ -65,6 +68,17 @@ public sealed class CnCNetSession : IDisposable
 
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
+    public event Action? GameRoomHostAbandoned;
+
+    public Func<CnCNetGameOptionsState>? GameOptionsProvider { get; set; }
+
+    public Action<CnCNetGameOptionsState>? GameOptionsReceiver { get; set; }
+
+    public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts { get; set; }
+
+    private const double HostedGameLifetimeSeconds = 35;
+    private const double HostedGameRefreshIntervalSeconds = 5;
+
     public void EnsureStarted()
     {
         LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (legacy GAME={ProgramConstants.UsesLegacyCnCNetGameBroadcast}).");
@@ -80,6 +94,13 @@ public sealed class CnCNetSession : IDisposable
                 StateChanged?.Invoke();
             };
             _playerCountService.Start();
+        }
+
+        if (_hostedGameRefreshTimer == null)
+        {
+            _hostedGameRefreshTimer = new Timer(_ => PruneStaleHostedGames(), null,
+                TimeSpan.FromSeconds(HostedGameRefreshIntervalSeconds),
+                TimeSpan.FromSeconds(HostedGameRefreshIntervalSeconds));
         }
 
         ThreadPool.QueueUserWorkItem(_ =>
@@ -136,6 +157,7 @@ public sealed class CnCNetSession : IDisposable
             _systemId = CnCNetIdentity.CreateSystemId();
             _connection = new CnCNetIrcConnection(_systemId);
             WireConnection(_connection);
+            EnsureSettingsSavedSubscription();
             LobbyState.SetConnectionStatus("Connecting to CnCNet...");
             LobbyState.SetChannelName(_currentGame.UiName, _currentGame.ChatChannel);
             StateChanged?.Invoke();
@@ -172,7 +194,7 @@ public sealed class CnCNetSession : IDisposable
 
         string nextChat = NormalizeIrcChannel(next.ChatChannel);
         if (nextChat != localChat && nextChat != cncnetChat)
-            _connection.JoinChannelInstant(next.ChatChannel);
+            _connection.JoinChannelInstant(next.ChatChannel, "ra1-derp");
 
         JoinGameBroadcastChannel(next);
         _connection.RequestChannelNames(next.ChatChannel);
@@ -267,10 +289,34 @@ public sealed class CnCNetSession : IDisposable
         if (_gameRoom == null || _connection == null)
             return;
 
+        DetachGameRoomSessionHandlers();
+
         _gameRoom.Attach(_connection, _gameBroadcast, Channels);
+        _gameRoom.GameOptionsProvider = () => GameOptionsProvider?.Invoke();
+        _gameRoom.GameOptionsReceiver = state => GameOptionsReceiver?.Invoke(state);
+        _gameRoom.GameOptionsControlCounts = () => GameOptionsControlCounts?.Invoke() ?? (0, 0);
+        _gameRoom.HostAbandoned += OnGameRoomHostAbandoned;
         _gameRoom.StateChanged += OnGameRoomStateChanged;
         _gameRoom.NoticeLogged += OnGameRoomNotice;
         _gameRoom.GameStarting += OnGameRoomStarting;
+    }
+
+    private void DetachGameRoomSessionHandlers()
+    {
+        if (_gameRoom == null)
+            return;
+
+        _gameRoom.StateChanged -= OnGameRoomStateChanged;
+        _gameRoom.NoticeLogged -= OnGameRoomNotice;
+        _gameRoom.GameStarting -= OnGameRoomStarting;
+        _gameRoom.HostAbandoned -= OnGameRoomHostAbandoned;
+    }
+
+    private void OnGameRoomHostAbandoned()
+    {
+        LogActivity("Game host abandoned — leaving game room.");
+        LeaveGameRoom();
+        GameRoomHostAbandoned?.Invoke();
     }
 
     private void OnGameRoomStateChanged() => StateChanged?.Invoke();
@@ -283,9 +329,7 @@ public sealed class CnCNetSession : IDisposable
     {
         if (_gameRoom != null)
         {
-            _gameRoom.StateChanged -= OnGameRoomStateChanged;
-            _gameRoom.NoticeLogged -= OnGameRoomNotice;
-            _gameRoom.GameStarting -= OnGameRoomStarting;
+            DetachGameRoomSessionHandlers();
             _gameRoom.Leave();
         }
 
@@ -299,7 +343,13 @@ public sealed class CnCNetSession : IDisposable
     {
         if (_gameRoom == null)
         {
-            message = "Not in a game room.";
+            if (_activeGameRoom != null)
+            {
+                message = "Still joining the CnCNet game room — please wait.";
+                return false;
+            }
+
+            message = "Not in a CnCNet game room.";
             return false;
         }
 
@@ -375,22 +425,35 @@ public sealed class CnCNetSession : IDisposable
         LeaveGameRoom();
     }
 
+    private void CompleteLocalGameRoomJoin()
+    {
+        if (!_gameRoomJoinPending || _activeGameRoom == null || _gameRoom == null)
+            return;
+
+        _gameRoomJoinPending = false;
+        _gameRoom.OnLocalJoined();
+        LogActivity($"Joined game room \"{_activeGameRoom.RoomName}\".");
+        GameRoomJoined?.Invoke(_activeGameRoom);
+    }
+
     private void OnChannelJoinFailed(int code, string channel, string detail)
     {
         if (!_gameRoomJoinPending || _activeGameRoom == null)
             return;
 
-        if (!NormalizeIrcChannel(channel).Equals(
+        if (!string.IsNullOrWhiteSpace(channel)
+            && !NormalizeIrcChannel(channel).Equals(
                 NormalizeIrcChannel(_activeGameRoom.ChannelName),
                 StringComparison.OrdinalIgnoreCase))
             return;
 
         string message = code switch
         {
-            473 => "Cannot join ? game room is locked.",
-            471 => "Cannot join ? game room is full.",
+            473 => "Cannot join — game room is locked.",
+            471 => "Cannot join — game room is full.",
             475 => "Incorrect game room password.",
             474 => "You are banned from this game room.",
+            439 => "Cannot join — changing channels too fast. Wait a moment and try again.",
             _ => string.IsNullOrWhiteSpace(detail)
                 ? $"Cannot join game room (IRC {code})."
                 : detail.TrimEnd('.') + ".",
@@ -402,6 +465,8 @@ public sealed class CnCNetSession : IDisposable
     public void Dispose()
     {
         _autoReconnect = false;
+        _hostedGameRefreshTimer?.Dispose();
+        _hostedGameRefreshTimer = null;
         _gameBroadcast.Dispose();
         Disconnect();
         _connection?.Dispose();
@@ -424,15 +489,106 @@ public sealed class CnCNetSession : IDisposable
         connection.UserJoined += OnUserJoined;
         connection.UserLeft += OnUserLeft;
         connection.GameBroadcastReceived += OnGameBroadcast;
-        connection.ChannelCtcpReceived += OnChannelCtcp;
+        connection.ChannelCtcpReceived += OnAnyCtcp;
         connection.ChatMessageReceived += OnChatMessageReceived;
         connection.ChannelNamesComplete += OnChannelNamesComplete;
         connection.ChannelJoinFailed += OnChannelJoinFailed;
         connection.ActivityLogged += msg => LogActivity(msg, notifyUi: false);
     }
 
+    private void OnAnyCtcp(string channel, string sender, string ctcp)
+    {
+        if (ctcp.StartsWith("INVITE ", StringComparison.Ordinal))
+        {
+            HandleGameInvite(sender, ctcp[7..]);
+            return;
+        }
+
+        OnChannelCtcp(channel, sender, ctcp);
+    }
+
+    private void HandleGameInvite(string sender, string arguments)
+    {
+        string[] parts = arguments.Split(';');
+        if (parts.Length < 2)
+            return;
+
+        string channelName = parts[0];
+        string gameName = parts[1];
+        LogActivity($"Game invite from {sender}: \"{gameName}\" ({channelName}).");
+    }
+
+    private void EnsureSettingsSavedSubscription()
+    {
+        if (_settingsSavedSubscribed)
+            return;
+
+        UserINISettings.Instance.SettingsSaved += OnUserSettingsSaved;
+        _settingsSavedSubscribed = true;
+    }
+
+    private void OnUserSettingsSaved(object? sender, EventArgs e)
+    {
+        if (_connection is not { IsConnected: true } || _gameCollection == null || _currentGame == null)
+            return;
+
+        string localName = _currentGame.InternalName;
+        foreach (CnCNetGameEntry game in _gameCollection.Games)
+        {
+            if (!game.HasGameBroadcast || !game.Supported)
+                continue;
+
+            if (game.InternalName.Equals(localName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            bool followed = UserINISettings.Instance.IsGameFollowed(game.InternalName.ToUpperInvariant());
+            bool wasFollowed = _followedGameIds.Contains(game.InternalName);
+
+            if (wasFollowed && !followed)
+            {
+                _connection.PartChannel(game.GameBroadcastChannel!);
+                _joinedBroadcastChannels.Remove(NormalizeIrcChannel(game.GameBroadcastChannel!));
+                _followedGameIds.Remove(game.InternalName);
+            }
+            else if (!wasFollowed && followed)
+            {
+                JoinGameBroadcastChannel(game);
+                _followedGameIds.Add(game.InternalName);
+            }
+        }
+
+        RefreshHostedGames();
+    }
+
+    private void JoinFollowedBroadcastChannels()
+    {
+        if (_gameCollection == null || _connection == null || _currentGame == null)
+            return;
+
+        foreach (CnCNetGameEntry game in _gameCollection.Games)
+        {
+            if (!game.HasGameBroadcast || !game.Supported)
+                continue;
+
+            if (game.InternalName.Equals(_currentGame.InternalName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!UserINISettings.Instance.IsGameFollowed(game.InternalName.ToUpperInvariant()))
+                continue;
+
+            JoinGameBroadcastChannel(game);
+            _followedGameIds.Add(game.InternalName);
+        }
+    }
+
     private void OnChannelNamesComplete(string channel)
     {
+        if (_activeGameRoom != null
+            && channel.Equals(NormalizeIrcChannel(_activeGameRoom.ChannelName), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         if (_currentGame == null || !IsChatChannel(channel))
             return;
 
@@ -464,9 +620,10 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
-        _connection.JoinChannelInstant(chatChannel);
+        _connection.JoinChannelInstant(chatChannel, "ra1-derp");
         _connection.JoinChannelInstant("#cncnet");
         JoinGameBroadcastChannel(_currentGame);
+        JoinFollowedBroadcastChannels();
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_currentGame.ChatChannel);
 
@@ -474,12 +631,13 @@ public sealed class CnCNetSession : IDisposable
         LobbyState.SelectedChatColorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
         _reconnectAttempts = 0;
         LogActivity($"JOIN {chatChannel}, #cncnet + broadcast channels; NAMES requested.");
+        TryRejoinActiveGameRoom();
         StateChanged?.Invoke();
     }
 
     private void OnConnectionFailed(string message)
     {
-        ClearLobbyData();
+        ClearLobbyData(preserveGameRoom: _activeGameRoom != null);
         LobbyState.SetConnectionStatus(message);
         LogActivity($"Connection failed: {message}");
         StateChanged?.Invoke();
@@ -488,7 +646,7 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnDisconnected(string message)
     {
-        ClearLobbyData();
+        ClearLobbyData(preserveGameRoom: _activeGameRoom != null);
         LobbyState.SetConnectionStatus("Offline");
         LogActivity($"Disconnected: {message}");
         StateChanged?.Invoke();
@@ -504,7 +662,7 @@ public sealed class CnCNetSession : IDisposable
 
     private void ScheduleReconnect()
     {
-        if (!_autoReconnect || _reconnectAttempts >= 3)
+        if (!_autoReconnect || _reconnectAttempts >= 3 || ProgramConstants.IsInGame)
             return;
 
         _reconnectAttempts++;
@@ -527,21 +685,48 @@ public sealed class CnCNetSession : IDisposable
         });
     }
 
-    private void ClearLobbyData()
+    private void ClearLobbyData(bool preserveGameRoom = false)
     {
         _gameBroadcast.Stop();
-        _gameRoom = null;
         _channelUsers.Clear();
         _games.Clear();
         _gamesByBroadcast.Clear();
         _joinedBroadcastChannels.Clear();
-        _activeGameRoom = null;
+        _followedGameIds.Clear();
         LobbyState.SetChannelPlayers([]);
         LobbyState.SetHostedGames([]);
+
+        if (preserveGameRoom)
+        {
+            LogActivity("IRC disconnected — preserving active game room for reconnect.");
+            return;
+        }
+
+        _gameRoom = null;
+        _activeGameRoom = null;
+        _gameRoomJoinPending = false;
+    }
+
+    private void TryRejoinActiveGameRoom()
+    {
+        if (_activeGameRoom == null || _connection is not { IsConnected: true } || ProgramConstants.IsInGame)
+            return;
+
+        _gameRoomJoinPending = true;
+        JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _);
+        AttachGameRoomSession();
+        LogActivity($"Rejoining game room \"{_activeGameRoom.RoomName}\"...");
     }
 
     private void OnUserList(string channel, IReadOnlyList<string> users)
     {
+        if (_activeGameRoom != null
+            && channel.Equals(NormalizeIrcChannel(_activeGameRoom.ChannelName), StringComparison.OrdinalIgnoreCase))
+        {
+            _gameRoom?.OnChannelUserList(users);
+            return;
+        }
+
         if (_currentGame == null || !IsChatChannel(channel))
             return;
 
@@ -569,12 +754,7 @@ public sealed class CnCNetSession : IDisposable
             _gameRoom?.OnUserJoined(channel, name);
 
             if (_connection != null && _connection.IsLocalUser(name))
-            {
-                _gameRoomJoinPending = false;
-                _gameRoom?.OnLocalJoined();
-                LogActivity($"Joined game room {_activeGameRoom.RoomName}.");
-                GameRoomJoined?.Invoke(_activeGameRoom);
-            }
+                CompleteLocalGameRoomJoin();
 
             return;
         }
@@ -613,6 +793,9 @@ public sealed class CnCNetSession : IDisposable
             return;
         }
 
+        if (RemoveHostedGamesByHost(name))
+            return;
+
         if (_currentGame == null)
             return;
 
@@ -621,6 +804,33 @@ public sealed class CnCNetSession : IDisposable
 
         _channelUsers.Remove(name);
         RefreshLobbyPlayers();
+    }
+
+    private bool RemoveHostedGamesByHost(string hostName)
+    {
+        if (string.IsNullOrWhiteSpace(hostName))
+            return false;
+
+        bool changed = false;
+        foreach (Dictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
+        {
+            var toRemove = bucket.Values
+                .Where(g => g.HostName.Equals(hostName, StringComparison.OrdinalIgnoreCase))
+                .Select(g => g.ChannelName)
+                .ToList();
+
+            foreach (string key in toRemove)
+            {
+                if (bucket.Remove(key))
+                    changed = true;
+                _games.Remove(key);
+            }
+        }
+
+        if (changed)
+            RefreshHostedGames();
+
+        return changed;
     }
 
     private void OnChannelCtcp(string channel, string sender, string ctcp)
@@ -718,6 +928,29 @@ public sealed class CnCNetSession : IDisposable
         StateChanged?.Invoke();
     }
 
+    private void PruneStaleHostedGames()
+    {
+        DateTime cutoff = DateTime.UtcNow.AddSeconds(-HostedGameLifetimeSeconds);
+        bool changed = false;
+
+        foreach (Dictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
+        {
+            foreach (CnCNetHostedGameSummary game in bucket.Values.ToList())
+            {
+                if (game.LastRefreshUtc >= cutoff)
+                    continue;
+
+                if (bucket.Remove(game.ChannelName))
+                    changed = true;
+
+                _games.Remove(game.ChannelName);
+            }
+        }
+
+        if (changed)
+            RefreshHostedGames();
+    }
+
     private List<CnCNetHostedGameSummary> GetHostedGamesForCurrentChannel()
     {
         if (_currentGame?.HasGameBroadcast != true)
@@ -728,6 +961,7 @@ public sealed class CnCNetSession : IDisposable
             return [];
 
         return bucket.Values
+            .Where(g => !UserINISettings.Instance.HideIncompatibleGames.Value || !g.Incompatible)
             .OrderBy(g => g.RoomName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

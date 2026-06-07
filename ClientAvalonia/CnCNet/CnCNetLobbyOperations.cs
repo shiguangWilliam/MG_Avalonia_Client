@@ -38,13 +38,6 @@ public static class CnCNetLobbyOperations
             ? request.Password.Trim()
             : Utilities.CalculateSHA1ForString(channelName)[..10];
 
-        session.JoinGameChannel(channelName, password, out string? joinError);
-        if (joinError != null)
-        {
-            message = joinError;
-            return false;
-        }
-
         string hostName = string.IsNullOrWhiteSpace(session.LocalNick)
             ? ProgramConstants.PLAYERNAME
             : session.LocalNick;
@@ -61,6 +54,14 @@ public static class CnCNetLobbyOperations
             SkillLevel = request.SkillLevel,
             CustomPassword = customPassword,
         });
+
+        session.JoinGameChannel(channelName, password, out string? joinError);
+        if (joinError != null)
+        {
+            session.LeaveGameRoom();
+            message = joinError;
+            return false;
+        }
 
         message = $"Creating game \"{roomName}\" on {channelName}...";
         return true;
@@ -116,6 +117,12 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
+        if (game.Incompatible && ClientConfiguration.Instance.DisallowJoiningIncompatibleGames)
+        {
+            message = "Cannot join game. The host is on a different game version than you.";
+            return false;
+        }
+
         if (game.CustomPassword && string.IsNullOrWhiteSpace(password))
         {
             message = "This game requires a password.";
@@ -125,13 +132,6 @@ public static class CnCNetLobbyOperations
         string joinPassword = !string.IsNullOrWhiteSpace(password)
             ? password
             : Utilities.CalculateSHA1ForString(game.ChannelName)[..10];
-
-        session.JoinGameChannel(game.ChannelName, joinPassword, out string? joinError);
-        if (joinError != null)
-        {
-            message = joinError;
-            return false;
-        }
 
         CnCNetTunnelEntry? tunnel = session.Tunnels.FirstOrDefault(t =>
             t.Address.Equals(game.TunnelAddress, StringComparison.OrdinalIgnoreCase)
@@ -155,6 +155,14 @@ public static class CnCNetLobbyOperations
             SkillLevel = game.SkillLevel,
             CustomPassword = game.CustomPassword,
         });
+
+        session.JoinGameChannel(game.ChannelName, joinPassword, out string? joinError);
+        if (joinError != null)
+        {
+            session.LeaveGameRoom();
+            message = joinError;
+            return false;
+        }
 
         message = $"Joining \"{game.RoomName}\"...";
         return true;

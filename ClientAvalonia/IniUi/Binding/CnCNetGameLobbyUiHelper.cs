@@ -7,50 +7,77 @@ using ClientAvalonia.Services;
 
 namespace ClientAvalonia.IniUi.Binding;
 
-/// <summary>Runtime controls for CnCNet in-game lobby (manual ready button).</summary>
+/// <summary>Runtime toolbar layout for CnCNet in-game lobby (host launch bar vs joiner ready cluster).</summary>
 public static class CnCNetGameLobbyUiHelper
 {
     private const int ReadyButtonWidth = 152;
     private const int AutoToggleWidth = 92;
-    private const int ClusterSpacing = 6;
+    private const int ClusterSpacing = 8;
+    private const int CheckboxVerticalOffset = 3;
 
-    public static void ApplyJoinerToolbar(
+    public static void ApplyToolbarRole(
         UiNodeViewModel root,
         ResourceResolver resources,
         BehaviorRegistry behaviors,
         bool isJoiner)
     {
+        if (isJoiner)
+            ApplyJoinerToolbar(root, resources, behaviors);
+        else
+            ApplyHostToolbar(root);
+    }
+
+    public static void ApplyJoinerToolbar(
+        UiNodeViewModel root,
+        ResourceResolver resources,
+        BehaviorRegistry behaviors)
+    {
         UiNodeViewModel? manualReady = EnsureManualReadyButton(root, resources, behaviors);
         UiNodeViewModel? autoReady = FindVm(root, "chkAutoReady");
         UiNodeViewModel? launch = FindVm(root, "btnLaunchGame");
+        UiNodeViewModel? lockGame = FindVm(root, "btnLockGame");
+        UiNodeViewModel? autoSave = FindVm(root, "chkAutoSave");
 
-        if (!isJoiner)
-        {
-            manualReady?.IsVisible = false;
-            autoReady?.IsVisible = false;
-            if (launch != null)
-                launch.IsVisible = true;
-            return;
-        }
+        lockGame?.IsVisible = false;
+        autoSave?.IsVisible = false;
+        launch?.IsVisible = false;
 
         if (manualReady != null)
         {
             manualReady.IsVisible = true;
-            manualReady.IsEnabled = true;
             manualReady.Node.TemplateKey = "DxReadyActionButton";
         }
-
-        if (launch != null)
-            launch.IsVisible = false;
 
         if (autoReady != null)
         {
             autoReady.IsVisible = true;
+            autoReady.IsEnabled = true;
             autoReady.Node.TemplateKey = "DxLobbyToolbarCheckBox";
-            autoReady.SetDisplayText("Auto");
+            autoReady.SetDisplayText("Auto Accept");
         }
 
         LayoutJoinerReadyCluster(root);
+    }
+
+    public static void ApplyHostToolbar(UiNodeViewModel root)
+    {
+        UiNodeViewModel? manualReady = FindVm(root, "btnManualReady");
+        UiNodeViewModel? autoReady = FindVm(root, "chkAutoReady");
+        UiNodeViewModel? launch = FindVm(root, "btnLaunchGame");
+        UiNodeViewModel? lockGame = FindVm(root, "btnLockGame");
+        UiNodeViewModel? autoSave = FindVm(root, "chkAutoSave");
+
+        manualReady?.IsVisible = false;
+        launch?.IsVisible = true;
+        lockGame?.IsVisible = true;
+        autoSave?.IsVisible = true;
+
+        if (autoReady != null)
+        {
+            autoReady.IsVisible = false;
+            autoReady.IsEnabled = false;
+            autoReady.IsChecked = false;
+        }
     }
 
     public static void UpdateManualReadyLabel(UiNodeViewModel root, bool isJoiner)
@@ -69,6 +96,13 @@ public static class CnCNetGameLobbyUiHelper
         LayoutJoinerReadyCluster(root);
     }
 
+    public static void SetJoinerReadyEnabled(UiNodeViewModel root, bool enabled)
+    {
+        UiNodeViewModel? manualReady = FindVm(root, "btnManualReady");
+        if (manualReady is { IsVisible: true })
+            manualReady.IsEnabled = enabled;
+    }
+
     private static void LayoutJoinerReadyCluster(UiNodeViewModel root)
     {
         UiNodeViewModel? launch = FindVm(root, "btnLaunchGame");
@@ -77,19 +111,21 @@ public static class CnCNetGameLobbyUiHelper
         if (launch == null || manualReady is not { IsVisible: true })
             return;
 
-        int y = (int)launch.CanvasTop;
-        int h = Math.Max((int)launch.Height, 34);
+        int barY = (int)launch.CanvasTop;
+        int barHeight = Math.Max((int)launch.Height, 34);
         int x = (int)launch.CanvasLeft;
 
-        manualReady.SetCanvasPosition(x, y);
+        manualReady.SetCanvasPosition(x, barY);
         manualReady.Node.Props["Width"] = (double)ReadyButtonWidth;
-        manualReady.Node.Props["Height"] = (double)h;
+        manualReady.Node.Props["Height"] = (double)barHeight;
 
         if (autoReady is { IsVisible: true })
         {
-            autoReady.SetCanvasPosition(x + ReadyButtonWidth + ClusterSpacing, y);
+            int checkY = barY + CheckboxVerticalOffset;
+            int checkHeight = Math.Max(barHeight - CheckboxVerticalOffset, 28);
+            autoReady.SetCanvasPosition(x + ReadyButtonWidth + ClusterSpacing, checkY);
             autoReady.Node.Props["Width"] = (double)AutoToggleWidth;
-            autoReady.Node.Props["Height"] = (double)h;
+            autoReady.Node.Props["Height"] = (double)checkHeight;
         }
     }
 

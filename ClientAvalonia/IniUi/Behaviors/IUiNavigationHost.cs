@@ -48,11 +48,15 @@ public interface IUiNavigationHost
 
     bool TryLaunchCampaign(out string message);
 
+    bool TryLaunchCnCNetGame(out string message);
+
     void RefreshCnCNetGameListing();
 
     void RefreshCnCNetGameRoomPlayers();
 
     void TryJoinSelectedCnCNetGame();
+
+    void EnterCnCNetGameLobbyConnecting();
 
     void SelectOptionsTab(int index);
 

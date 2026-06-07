@@ -39,8 +39,12 @@ public sealed class CnCNetHostedGameSummary
 
     public int SkillLevel { get; init; }
 
+    public bool Incompatible { get; init; }
+
     /// <summary>CnCNet game id for the broadcast channel this entry came from (XNA CnCNetGame.InternalName).</summary>
     public string SourceGameId { get; init; } = string.Empty;
+
+    public DateTime LastRefreshUtc { get; init; } = DateTime.UtcNow;
 
     public string DisplayLine => Locked
         ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
@@ -122,6 +126,11 @@ public static class CnCNetGameMessageParser
         if (parts.Length == 13 && int.TryParse(parts[11], out int parsedSkill))
             skillLevel = parsedSkill;
 
+        string localGameId = ClientConfiguration.Instance.LocalGame;
+        bool incompatible = !string.IsNullOrWhiteSpace(sourceGameId)
+            && sourceGameId.Equals(localGameId, StringComparison.OrdinalIgnoreCase)
+            && !parts[1].Equals(ProgramConstants.GAME_VERSION, StringComparison.OrdinalIgnoreCase);
+
         return new CnCNetHostedGameSummary
         {
             HostName = hostName,
@@ -134,12 +143,14 @@ public static class CnCNetGameMessageParser
             CustomPassword = customPassword,
             IsLoadedGame = isLoadedGame,
             GameVersion = parts[1],
+            Incompatible = incompatible,
             TunnelAddress = tunnelAddress,
             TunnelPort = tunnelPort,
             MapName = parts[7],
             GameMode = parts[8],
             SkillLevel = skillLevel,
             SourceGameId = sourceGameId,
+            LastRefreshUtc = DateTime.UtcNow,
         };
     }
 
@@ -150,9 +161,7 @@ public static class CnCNetGameMessageParser
         => TryParse(hostName, ctcpMessage, tunnels, out _);
 
     private static bool IsSupportedRevision(string revision)
-        => revision.Equals("R10", StringComparison.OrdinalIgnoreCase)
-           || revision.Equals("R13", StringComparison.OrdinalIgnoreCase)
-           || revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase);
+        => revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>R10 legacy broadcasts omit skillLevel and mapSha1 (11 fields).</summary>
     public static bool IsLegacyRevision(string revision)
