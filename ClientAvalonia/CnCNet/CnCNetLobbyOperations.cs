@@ -15,7 +15,7 @@ public static class CnCNetLobbyOperations
         return Utilities.CalculateSHA1ForString(channel)[..10];
     }
 
-    /// <summary>Maps DXMain Passworded / CustomPassword to the IRC JOIN key.</summary>
+    /// <summary>Maps DXMain Passworded to the IRC JOIN key.</summary>
     public static bool TryResolveJoinPassword(
         CnCNetHostedGameSummary game,
         string? userPassword,
@@ -25,7 +25,7 @@ public static class CnCNetLobbyOperations
         joinPassword = string.Empty;
         error = null;
 
-        if (game.CustomPassword)
+        if (game.Passworded)
         {
             if (string.IsNullOrWhiteSpace(userPassword))
             {
@@ -65,10 +65,10 @@ public static class CnCNetLobbyOperations
         }
 
         string channelName = GenerateUniqueGameChannel(session, session.Channels.ChatChannel);
-        bool customPassword = !string.IsNullOrWhiteSpace(request.Password);
-        string password = customPassword
+        bool passworded = request.Passworded;
+        string password = passworded
             ? request.Password.Trim()
-            : GetDefaultChannelPassword(channelName);
+            : GetDefaultChannelPassword(CnCNetIrcChannelNames.Preserve(channelName));
 
         string hostName = string.IsNullOrWhiteSpace(session.LocalNick)
             ? ProgramConstants.PLAYERNAME
@@ -84,7 +84,7 @@ public static class CnCNetLobbyOperations
             IsHost = true,
             MaxPlayers = request.MaxPlayers,
             SkillLevel = request.SkillLevel,
-            CustomPassword = customPassword,
+            Passworded = passworded,
         });
 
         session.JoinGameChannel(channelName, password, out string? joinError);
@@ -167,6 +167,13 @@ public static class CnCNetLobbyOperations
 
         if (tunnel == null)
         {
+            tunnel = CnCNetTunnelListLoader.Load().FirstOrDefault(t =>
+                t.Address.Equals(game.TunnelAddress, StringComparison.OrdinalIgnoreCase)
+                && t.Port == game.TunnelPort);
+        }
+
+        if (tunnel == null)
+        {
             message = $"Tunnel {game.TunnelAddress}:{game.TunnelPort} is unavailable.";
             return false;
         }
@@ -181,7 +188,7 @@ public static class CnCNetLobbyOperations
             IsHost = false,
             MaxPlayers = game.MaxPlayers,
             SkillLevel = game.SkillLevel,
-            CustomPassword = game.CustomPassword,
+            Passworded = game.Passworded,
         });
 
         session.JoinGameChannel(game.ChannelName, joinPassword, out string? joinError);

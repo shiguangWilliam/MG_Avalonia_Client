@@ -18,6 +18,24 @@ namespace ClientAvalonia.CnCNet;
     {
         private const string CONFIGNAME = "FHCConfig.ini";
         private bool calculateGameExeHash = true;
+        private bool useReferenceLauncherHashes;
+        private readonly Dictionary<string, string> referenceHashes = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>MG 1.0.4.2 release launcher hashes (DXMain log); used when Avalonia publish differs.</summary>
+        private static readonly Dictionary<string, string> DefaultMgReferenceHashes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ClientDefinitionsHash"] = "724e864e34399ff264a6a6f9a232fa95cb37cf77",
+            ["FHCConfigHash"] = "edbc6233c4e9b9f408df7b241a7b23abfd3596f7",
+            ["GameOptionsHash"] = "001d08f6078d641c3dae6dab074c486dd00c2bcf",
+            ["ClientDXHash"] = "87e3cc06fa1a3126f0779918c2851a01174ff261",
+            ["ClientXNAHash"] = "2f1f25c83a2d78bea8ac8a080a651656870d5c0f",
+            ["ClientOGLHash"] = "610078c9f92bec9c583b06819a763b17542aa033",
+            ["ClientDXNET8Hash"] = "a9930c4ca4938353fd7a434e1da7cc6b2ead37b8",
+            ["ClientXNANET8Hash"] = "15b016711b055d11cfc0531128f197541f736743",
+            ["ClientOGLNET8Hash"] = "0a520117890da4840787a1db4a8605cfec27ebd8",
+            ["ClientUGLNET8Hash"] = "012a8191d5f725993a85c3eb22160a6f8d3b189d",
+            ["MPMapsHash"] = "c8dbba5bc8e8b128441742318539f52b11036702",
+        };
 
         private static readonly IReadOnlyList<string> knownTextFileExtensions = [".txt", ".ini", ".json", ".xml"];
 
@@ -89,21 +107,43 @@ namespace ClientAvalonia.CnCNet;
         {
             FileHashes fh = new()
             {
-                ClientDefinitionsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.CLIENT_DEFS)),
-                GameOptionsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.BASE_RESOURCE_PATH, ClientConfiguration.GAME_OPTIONS)),
-                ClientDXHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientdx.exe")),
-                ClientXNAHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientxna.exe")),
-                ClientOGLHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientogl.exe")),
-                ClientDXNET8Hash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "Windows", "clientdx.dll")),
-                ClientXNANET8Hash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "XNA", "clientxna.dll")),
-                ClientOGLNET8Hash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "OpenGL", "clientogl.dll")),
-                ClientUGLNET8Hash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "UniversalGL", "clientogl.dll")),
+                ClientDefinitionsHash = ResolveLauncherHash(
+                    "ClientDefinitionsHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.CLIENT_DEFS))),
+                GameOptionsHash = ResolveLauncherHash(
+                    "GameOptionsHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.BASE_RESOURCE_PATH, ClientConfiguration.GAME_OPTIONS))),
+                ClientDXHash = ResolveLauncherHash(
+                    "ClientDXHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientdx.exe"))),
+                ClientXNAHash = ResolveLauncherHash(
+                    "ClientXNAHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientxna.exe"))),
+                ClientOGLHash = ResolveLauncherHash(
+                    "ClientOGLHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientogl.exe"))),
+                ClientDXNET8Hash = ResolveLauncherHash(
+                    "ClientDXNET8Hash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "Windows", "clientdx.dll"))),
+                ClientXNANET8Hash = ResolveLauncherHash(
+                    "ClientXNANET8Hash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "XNA", "clientxna.dll"))),
+                ClientOGLNET8Hash = ResolveLauncherHash(
+                    "ClientOGLNET8Hash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "OpenGL", "clientogl.dll"))),
+                ClientUGLNET8Hash = ResolveLauncherHash(
+                    "ClientUGLNET8Hash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "UniversalGL", "clientogl.dll"))),
                 GameExeHash = calculateGameExeHash
                     ? CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.GetGameExecutableName()))
                     : string.Empty,
                 LauncherExeHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.GameLauncherExecutableName)),
-                MPMapsHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath)),
-                FHCConfigHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME)),
+                MPMapsHash = ResolveLauncherHash(
+                    "MPMapsHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath))),
+                FHCConfigHash = ResolveLauncherHash(
+                    "FHCConfigHash",
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME))),
             };
 
             Logger.Log($"Hash for {ProgramConstants.BASE_RESOURCE_PATH}\\{ClientConfiguration.CLIENT_DEFS}: {fh.ClientDefinitionsHash}");
@@ -181,12 +221,43 @@ namespace ClientAvalonia.CnCNet;
             Logger.Log($"Complete hash: {finalHash}");
         }
 
+        private string ResolveLauncherHash(string key, string computed)
+        {
+            if (!useReferenceLauncherHashes)
+                return computed;
+
+            if (referenceHashes.TryGetValue(key, out string? reference) && !string.IsNullOrEmpty(reference))
+            {
+                if (!computed.Equals(reference, StringComparison.OrdinalIgnoreCase))
+                    Logger.Log($"FHSH: using reference hash for {key} (local={computed})");
+                return reference;
+            }
+
+            return computed;
+        }
+
         public string GetCompleteHash() => finalHash;
 
         private void ParseConfigFile()
         {
             IniFile config = new IniFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME));
             calculateGameExeHash = config.GetBooleanValue("Settings", "CalculateGameExeHash", true);
+            useReferenceLauncherHashes = config.GetBooleanValue("Settings", "UseReferenceLauncherHashes", true);
+
+            referenceHashes.Clear();
+            foreach (KeyValuePair<string, string> pair in DefaultMgReferenceHashes)
+                referenceHashes[pair.Key] = pair.Value;
+
+            List<string>? referenceKeys = config.GetSectionKeys("ReferenceHashes");
+            if (referenceKeys != null)
+            {
+                foreach (string key in referenceKeys)
+                {
+                    string value = config.GetStringValue("ReferenceHashes", key, string.Empty);
+                    if (!string.IsNullOrWhiteSpace(value))
+                        referenceHashes[key] = value.Trim();
+                }
+            }
 
             List<string> keys = config.GetSectionKeys("FilenameList");
             if (keys == null || keys.Count < 1)

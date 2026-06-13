@@ -34,7 +34,7 @@ public static class GameCreationIniOverlayBehaviors
         }
 
         string roomName = ReadText(root, "tbGameName", "tbRoomName") ?? $"{ProgramConstants.PLAYERNAME}'s Game";
-        string password = ReadText(root, "tbPassword") ?? string.Empty;
+        string password = (ReadText(root, "tbPassword") ?? string.Empty).Trim();
         int maxPlayers = ReadComboInt(root, "ddMaxPlayers", 8);
         int skillLevel = ReadComboIndex(root, "ddSkillLevel");
 

@@ -18,6 +18,7 @@ using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Overlays;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.Views;
 
@@ -935,7 +936,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         string? password = null;
-        if (game.CustomPassword)
+        if (game.Passworded)
         {
             password = await ClientDialogService.ShowPasswordPromptAsync(this, game.RoomName);
             if (string.IsNullOrWhiteSpace(password))
@@ -1034,7 +1035,14 @@ public partial class MainWindow : Window, IUiNavigationHost
             LobbyRoot = _activeRoot,
         };
 
-        if (!_gameLaunch.TryLaunchCnCNet(_environment, startInfo, request, out string message, this))
+        if (!_gameLaunch.TryLaunchCnCNet(
+                _environment,
+                startInfo,
+                request,
+                out string message,
+                this,
+                CnCNetSessionService.Instance.GameRoom?.Players,
+                CollectCnCNetGameOptions()))
         {
             ShowStatus($"Launch failed: {message}");
             ClientDialogService.ShowError(this, "Cannot launch game", message);
@@ -1282,6 +1290,11 @@ public partial class MainWindow : Window, IUiNavigationHost
         try
         {
             ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"CnCNet game room UI refresh failed: {ex.Message}");
+            Logger.Log(ex.ToString());
         }
         finally
         {

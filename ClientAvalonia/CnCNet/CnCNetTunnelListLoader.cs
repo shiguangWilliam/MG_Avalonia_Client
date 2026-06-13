@@ -60,15 +60,17 @@ public sealed class CnCNetTunnelEntry
             if (string.IsNullOrWhiteSpace(data))
                 return [];
 
+            Logger.Log($"CnCNetTunnelEntry: raw ports from {Address}:{Port}: {data.Trim()}");
+
             data = data.Replace("[", string.Empty).Replace("]", string.Empty);
             var ports = new List<int>();
             foreach (string part in data.Split(',', StringSplitOptions.RemoveEmptyEntries))
             {
-                if (int.TryParse(part.Trim(), out int port))
+                if (int.TryParse(part.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int port))
                     ports.Add(port);
             }
 
-            Logger.Log($"CnCNetTunnelEntry: received {ports.Count} ports from {Address}:{Port}");
+            Logger.Log($"CnCNetTunnelEntry: received {ports.Count} ports from {Address}:{Port}: {string.Join(',', ports)}");
             return ports;
         }
         catch (Exception ex)

@@ -69,14 +69,18 @@ public sealed class GameLaunchService
         CnCNetStartGameInfo startInfo,
         SkirmishLaunchRequest request,
         out string message,
-        Window? errorOwner = null)
+        Window? errorOwner = null,
+        IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
+        CnCNetGameOptionsState? gameOptions = null)
     {
         CnCNetMultiplayerSpawnWriter.Write(
             request.Map,
             request.GameMode,
             startInfo,
             request.Players,
-            request.LobbyRoot);
+            request.LobbyRoot,
+            roomPlayers,
+            gameOptions);
         return LaunchGameProcess(environment, errorOwner, out message);
     }
 
@@ -108,7 +112,7 @@ public sealed class GameLaunchService
 
         string launcherExecutableName = string.Empty;
         if (osVersion != OSVersion.UNIX)
-            launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName;
+            launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName?.Trim() ?? string.Empty;
 
         string launchExecutableName;
         string additionalExecutableName = string.Empty;
@@ -119,14 +123,14 @@ public sealed class GameLaunchService
             if (string.IsNullOrWhiteSpace(launchExecutableName))
                 launchExecutableName = gameExecutableName;
         }
-        else if (string.IsNullOrEmpty(launcherExecutableName))
+        else if (string.IsNullOrWhiteSpace(launcherExecutableName))
         {
             launchExecutableName = gameExecutableName;
         }
         else
         {
             launchExecutableName = launcherExecutableName;
-            additionalExecutableName = "\"" + gameExecutableName + "\" ";
+            additionalExecutableName = QuoteArgument(gameExecutableName) + " ";
         }
 
         string extraCommandLine = ClientConfiguration.Instance.ExtraExeCommandLineParameters?.Trim() ?? string.Empty;
@@ -135,9 +139,29 @@ public sealed class GameLaunchService
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TI.LOG");
         SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TS.LOG");
 
-        string arguments = string.IsNullOrWhiteSpace(extraCommandLine)
-            ? additionalExecutableName + "-SPAWN"
-            : additionalExecutableName + "-SPAWN " + extraCommandLine;
+        string arguments;
+        if (string.IsNullOrWhiteSpace(extraCommandLine))
+            arguments = additionalExecutableName + "-SPAWN";
+        else
+            arguments = " " + additionalExecutableName + "-SPAWN " + extraCommandLine;
+
+        if (!string.IsNullOrWhiteSpace(launcherExecutableName)
+            && string.IsNullOrWhiteSpace(additionalExecutableName))
+        {
+            message = "Syringe launch misconfigured: GameLauncherExecutableName is set but GameExecutableNames is missing. "
+                      + "Set GameExecutableNames=gamemd.exe and GameLauncherExecutableName=Syringe.exe in Resources/ClientDefinitions.ini.";
+            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
+            return false;
+        }
+
+        if (IsSyringeLauncher(launchExecutableName)
+            && !arguments.Contains(QuoteArgument(gameExecutableName), StringComparison.OrdinalIgnoreCase))
+        {
+            message = $"Syringe requires: Syringe.exe \"{gameExecutableName}\" -SPAWN … (got: {arguments.Trim()}). "
+                      + "Check GameExecutableNames in ClientDefinitions.ini.";
+            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
+            return false;
+        }
 
         FileInfo gameFileInfo = SafePath.GetFile(ProgramConstants.GamePath, launchExecutableName);
         if (!gameFileInfo.Exists)
@@ -160,13 +184,14 @@ public sealed class GameLaunchService
             Logger.Log("Launch executable: " + startInfo.FileName);
             Logger.Log("Launch arguments: " + startInfo.Arguments);
 
+            GameProcessStarting?.Invoke();
+
             Process process = StartDetachedProcess(startInfo);
             process.EnableRaisingEvents = true;
             process.Exited += OnProcessExited;
 
             _runningProcess = process;
             ProgramConstants.IsInGame = true;
-            GameProcessStarting?.Invoke();
             GameProcessStarted?.Invoke();
 
             message = $"Launched {launchExecutableName}";
@@ -238,4 +263,9 @@ public sealed class GameLaunchService
 
         return true;
     }
+
+    private static string QuoteArgument(string value) => "\"" + value + "\"";
+
+    private static bool IsSyringeLauncher(string launchExecutableName)
+        => launchExecutableName.Contains("syringe", StringComparison.OrdinalIgnoreCase);
 }

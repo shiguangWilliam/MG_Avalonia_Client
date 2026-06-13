@@ -29,6 +29,8 @@ public sealed class CnCNetIrcConnection : IDisposable
     private readonly HashSet<string> _pendingNamesUsers = new(StringComparer.OrdinalIgnoreCase);
     private string? _pendingNamesChannel;
     private readonly Dictionary<string, int> _channelUserCounts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _localJoinedChannels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _localJoinedChannelWireNames = new(StringComparer.OrdinalIgnoreCase);
 
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -61,6 +63,53 @@ public sealed class CnCNetIrcConnection : IDisposable
     {
         string normalized = NormalizeChannelParameter(channel);
         return _channelUserCounts.GetValueOrDefault(normalized);
+    }
+
+    public bool IsLocalOnChannel(string channel)
+    {
+        string normalized = NormalizeChannelParameter(channel);
+        return _localJoinedChannels.Contains(normalized);
+    }
+
+    /// <summary>Drop queued outbound traffic targeting a channel (stale CTCP after PART / re-join).</summary>
+    public void ClearSendQueueForChannel(string channel)
+    {
+        string normalized = NormalizeChannelParameter(channel);
+        lock (_sendLock)
+        {
+            _sendQueue.RemoveAll(m => MessageTargetsChannel(m.Message, normalized));
+        }
+    }
+
+    /// <summary>Before JOIN: drop stale traffic and remember exact wire name (DX Channel.ChannelName).</summary>
+    public void PrepareChannelJoin(string channelWire)
+    {
+        if (string.IsNullOrWhiteSpace(channelWire))
+            return;
+
+        string wire = CnCNetIrcChannelNames.Preserve(channelWire);
+        string normalized = NormalizeChannelParameter(wire);
+        lock (_sendLock)
+        {
+            _sendQueue.RemoveAll(m => MessageTargetsChannel(m.Message, normalized));
+            _localJoinedChannelWireNames[normalized] = wire;
+        }
+    }
+
+    private string GetOutboundChannelWire(string channel)
+    {
+        string normalized = NormalizeChannelParameter(channel);
+        if (_localJoinedChannelWireNames.TryGetValue(normalized, out string? wire))
+            return wire;
+
+        return CnCNetIrcChannelNames.Preserve(channel);
+    }
+
+    private void DropLocalChannelMembership(string channel)
+    {
+        string normalized = NormalizeChannelParameter(channel);
+        _localJoinedChannels.Remove(normalized);
+        _localJoinedChannelWireNames.Remove(normalized);
     }
 
     /// <summary>Fired after TCP connect and USER/NICK registration sent.</summary>
@@ -157,14 +206,38 @@ public sealed class CnCNetIrcConnection : IDisposable
         EmitActivity($"??{message}");
     }
 
+    /// <summary>Send only when local JOIN for the channel has been confirmed (avoids IRC 442).</summary>
+    public bool TrySendInstantOnChannel(string channel, string message)
+    {
+        if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(message))
+            return false;
+
+        string normalized = NormalizeChannelParameter(channel);
+        if (!IsLocalOnChannel(normalized))
+        {
+            EmitActivity($"Skipping send on {normalized} (not on channel yet).");
+            return false;
+        }
+
+        SendInstant(message);
+        return true;
+    }
+
     /// <summary>Channel CTCP NOTICE (XNA Channel.SendCTCPMessage — queued with priority, not instant flood).</summary>
     public void SendCtcpNotice(string channel, string ctcpMessage)
     {
         if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(ctcpMessage))
             return;
 
-        string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
-        string wire = $"NOTICE {normalized} :\u0001{ctcpMessage}\u0001";
+        string normalized = NormalizeChannelParameter(channel);
+        if (!IsLocalOnChannel(normalized))
+        {
+            EmitActivity($"Skipping CTCP on {normalized} (not on channel yet).");
+            return;
+        }
+
+        string wireChannel = GetOutboundChannelWire(normalized);
+        string wire = $"NOTICE {wireChannel} :\u0001{ctcpMessage}\u0001";
         int priority = GetCtcpPriority(ctcpMessage);
         string? dedupeKey = GetCtcpDedupeKey(ctcpMessage);
         EnqueueSend(wire, priority, dedupeKey);
@@ -195,6 +268,25 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string normalized = channel.StartsWith('#') ? channel : "#" + channel;
         EnqueueSend($"PART {normalized.ToLowerInvariant()}");
+    }
+
+    public void PartChannelInstant(string channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+            return;
+
+        string normalized = NormalizeChannelParameter(channel);
+        lock (_sendLock)
+        {
+            _sendQueue.RemoveAll(m => MessageTargetsChannel(m.Message, normalized));
+        }
+
+        if (!_localJoinedChannels.Contains(normalized))
+            return;
+
+        string wire = GetOutboundChannelWire(normalized);
+        DropLocalChannelMembership(normalized);
+        SendInstant($"PART {wire}");
     }
 
     public void KickFromChannel(string channel, string userName)
@@ -355,7 +447,14 @@ public sealed class CnCNetIrcConnection : IDisposable
                         continue;
 
                     Logger.Log("CnCNet IRC RMP: " + line);
-                    HandleLine(line);
+                    try
+                    {
+                        HandleLine(line);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"CnCNetIrcConnection handler error: {ex.Message}");
+                    }
                 }
             }
             catch (IOException)
@@ -411,9 +510,36 @@ public sealed class CnCNetIrcConnection : IDisposable
                 continue;
             }
 
+            if (TryGetMessageChannelTarget(outbound.Value.Message, out string targetChannel)
+                && !IsLocalOnChannel(targetChannel))
+            {
+                continue;
+            }
+
             SendImmediate(outbound.Value.Message);
             Thread.Sleep(sendDelay);
         }
+    }
+
+    private static bool TryGetMessageChannelTarget(string message, out string normalizedChannel)
+    {
+        normalizedChannel = string.Empty;
+        foreach (string prefix in new[] { "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART " })
+        {
+            if (!message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string rest = message[prefix.Length..];
+            int space = rest.IndexOf(' ');
+            string target = space >= 0 ? rest[..space] : rest;
+            if (!target.StartsWith('#'))
+                return false;
+
+            normalizedChannel = NormalizeChannelParameter(target);
+            return true;
+        }
+
+        return false;
     }
 
     private void EnqueueSend(string message, int priority = 0, string? dedupeKey = null)
@@ -491,9 +617,29 @@ public sealed class CnCNetIrcConnection : IDisposable
         _client = null;
         ConnectedServer = null;
         _channelUserCounts.Clear();
+        _localJoinedChannels.Clear();
+        _localJoinedChannelWireNames.Clear();
 
         EmitActivity(reason);
         Disconnected?.Invoke(reason);
+    }
+
+    private static bool MessageTargetsChannel(string message, string normalizedChannel)
+    {
+        foreach (string prefix in new[] { "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART " })
+        {
+            if (!message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string rest = message[prefix.Length..];
+            int space = rest.IndexOf(' ');
+            string target = space >= 0 ? rest[..space] : rest;
+            target = NormalizeChannelParameter(target);
+            if (target.Equals(normalizedChannel, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private void EmitActivity(string message)
@@ -511,7 +657,7 @@ public sealed class CnCNetIrcConnection : IDisposable
                 return;
 
             int tag = Random.Shared.Next(100000, 999999);
-            SendImmediate($"PING LAG{tag}");
+            EnqueueSend($"PING LAG{tag}", priority: 100);
         }, null, KeepAliveInitialMs, KeepAliveIdlePeriodMs);
     }
 
@@ -537,7 +683,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             case "PING":
             {
                 string pong = parameters.Count > 0 ? "PONG " + parameters[0] : "PONG";
-                SendImmediate(pong);
+                EnqueueSend(pong, priority: 100);
                 Logger.Log("CnCNet IRC PONG: " + pong);
                 break;
             }
@@ -551,7 +697,7 @@ public sealed class CnCNetIrcConnection : IDisposable
             }
             case "CAP":
                 if (parameters.Count > 1 && parameters[1].Equals("LS", StringComparison.OrdinalIgnoreCase))
-                    SendImmediate("CAP END");
+                    EnqueueSend("CAP END", priority: 100);
                 break;
             case "NOTICE":
                 HandleNotice(prefix, parameters);
@@ -602,7 +748,11 @@ public sealed class CnCNetIrcConnection : IDisposable
             case 404:
             case 442:
                 if (parameters.Count > 1 && parameters[1].StartsWith('#'))
-                    NotOnChannel?.Invoke(NormalizeChannelParameter(parameters[1]));
+                {
+                    string notOnChannel = NormalizeChannelParameter(parameters[1]);
+                    DropLocalChannelMembership(notOnChannel);
+                    NotOnChannel?.Invoke(notOnChannel);
+                }
                 if (parameters.Count > 2)
                     ServerMessage?.Invoke(string.Join(' ', parameters.Skip(2)));
                 break;
@@ -689,7 +839,12 @@ public sealed class CnCNetIrcConnection : IDisposable
         string user = prefix[..exclam];
         string channel = NormalizeChannelParameter(parameters[0]);
         if (IsLocalUser(user))
+        {
             SetCurrentNick(user);
+            _localJoinedChannels.Add(channel);
+            _localJoinedChannelWireNames[channel] = CnCNetIrcChannelNames.Preserve(parameters[0]);
+        }
+
         IncrementChannelUserCount(channel);
         UserJoined?.Invoke(channel, user);
     }
@@ -729,6 +884,9 @@ public sealed class CnCNetIrcConnection : IDisposable
 
         string user = prefix[..exclam];
         string channel = NormalizeChannelParameter(parameters[0]);
+        if (IsLocalUser(user))
+            DropLocalChannelMembership(channel);
+
         DecrementChannelUserCount(channel);
         UserLeft?.Invoke(channel, user);
     }

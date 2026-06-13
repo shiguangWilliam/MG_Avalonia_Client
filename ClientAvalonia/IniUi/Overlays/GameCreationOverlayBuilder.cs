@@ -220,7 +220,7 @@ public static class GameCreationOverlayBuilder
         {
             RoomName = roomName,
             MaxPlayers = maxPlayers,
-            Password = context.PasswordBox.Text ?? string.Empty,
+            Password = (context.PasswordBox.Text ?? string.Empty).Trim(),
             Tunnel = context.SelectedTunnel,
             SkillLevel = Math.Max(0, context.SkillLevelBox.SelectedIndex),
         };

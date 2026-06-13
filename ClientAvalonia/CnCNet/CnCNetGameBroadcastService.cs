@@ -1,7 +1,7 @@
+using ClientAvalonia.CnCNet.Protocol;
 using ClientCore;
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using Rampastring.Tools;
 
@@ -32,9 +32,17 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         // XNA CnCNetGameLobby.OnJoined: MODE/TOPIC use channel.ChannelName (original casing).
         string channel = CnCNetIrcChannelNames.Preserve(room.ChannelName);
         string localGame = ClientConfiguration.Instance.LocalGame.ToLowerInvariant();
-        connection.SendInstant($"MODE {channel} +klnNs {room.Password} {room.MaxPlayers}");
-        connection.SendInstant($"TOPIC {channel} :{ProgramConstants.CNCNET_PROTOCOL_REVISION};{localGame}");
-        Logger.Log($"CnCNetGameBroadcastService: host MODE/TOPIC on {channel}");
+        bool modeSent = connection.TrySendInstantOnChannel(
+            channel,
+            $"MODE {channel} +klnNs {room.Password} {room.MaxPlayers}");
+        bool topicSent = connection.TrySendInstantOnChannel(
+            channel,
+            $"TOPIC {channel} :{ProgramConstants.CNCNET_PROTOCOL_REVISION};{localGame}");
+
+        if (modeSent && topicSent)
+            Logger.Log($"CnCNetGameBroadcastService: host MODE/TOPIC on {channel}");
+        else
+            Logger.Log($"CnCNetGameBroadcastService: deferred host MODE/TOPIC on {channel} (not on channel yet).");
     }
 
     public void StartHost(
@@ -157,48 +165,14 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     private string BuildGamePayload(bool closed)
     {
         CnCNetActiveGameRoom room = _room!;
-        string flags = (_locked ? "1" : "0")
-                       + (room.CustomPassword ? "1" : "0")
-                       + (closed ? "1" : "0")
-                       + "0"
-                       + "0";
-
-        var sb = new StringBuilder("GAME ");
-        sb.Append(ProgramConstants.CNCNET_PROTOCOL_REVISION);
-        sb.Append(';');
-        sb.Append(ProgramConstants.GAME_VERSION);
-        sb.Append(';');
-        sb.Append(room.MaxPlayers);
-        sb.Append(';');
-        sb.Append(CnCNetIrcChannelNames.Preserve(room.ChannelName));
-        sb.Append(';');
-        sb.Append(room.RoomName);
-        sb.Append(';');
-        sb.Append(flags);
-        sb.Append(';');
-        sb.Append(string.Join(',', _playerNames));
-        sb.Append(';');
-        sb.Append(_mapName);
-        sb.Append(';');
-        sb.Append(_gameModeName);
-        sb.Append(';');
-        sb.Append(room.Tunnel.Address);
-        sb.Append(':');
-        sb.Append(room.Tunnel.Port);
-        sb.Append(';');
-        sb.Append('0');
-
-        // MEMORY: R10/UsesLegacyCnCNetGameBroadcast MUST stop at 11 fields — see clientavalonia-cncnet.mdc.
-        // Do not always append skillLevel/mapSha1; legacy MG clients ignore 13-field GAME broadcasts.
-        if (!ProgramConstants.UsesLegacyCnCNetGameBroadcast)
-        {
-            sb.Append(';');
-            sb.Append(room.SkillLevel);
-            sb.Append(';');
-            sb.Append(_mapSha1);
-        }
-
-        return sb.ToString();
+        string flags = CnCNetGameFlags.Build(_locked, room.Passworded, closed);
+        return CnCNetMultiplayerProtocol.BuildGameBroadcastPayload(
+            room,
+            flags,
+            _playerNames,
+            _mapName,
+            _gameModeName,
+            _mapSha1);
     }
 
     private void RestartTimerLocked(TimeSpan firstInterval)

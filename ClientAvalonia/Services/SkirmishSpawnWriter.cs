@@ -133,7 +133,7 @@ public static class SkirmishSpawnWriter
         return players.Slots.Where(s => s.IsOccupied && s.IsAi == ai).ToList();
     }
 
-    private static void WriteSpawnMap(MapEntry map, GameModeEntry gameMode, UiNodeViewModel? lobbyRoot)
+    public static void WriteSpawnMap(MapEntry map, GameModeEntry gameMode, UiNodeViewModel? lobbyRoot)
     {
         FileInfo spawnMapIniFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI);
         spawnMapIniFile.Delete();

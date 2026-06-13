@@ -19,7 +19,8 @@ public sealed class CnCNetActiveGameRoom
 
     public int SkillLevel { get; set; }
 
-    public bool CustomPassword { get; set; }
+    /// <summary>DXMain <c>HostedCnCNetGame.Passworded</c> / CnCNetGameLobby <c>isCustomPassword</c>.</summary>
+    public bool Passworded { get; set; }
 }
 
 /// <summary>Player slot in an active CnCNet game room (XNA PlayerInfo subset).</summary>
@@ -60,4 +61,7 @@ public sealed class CnCNetStartGameInfo
     public required int LocalPlayerPort { get; init; }
 
     public required bool IsHost { get; init; }
+
+    /// <summary>Per-human NAT ports from START / tunnel request (name → port).</summary>
+    public IReadOnlyDictionary<string, int> PlayerPorts { get; init; } = new Dictionary<string, int>();
 }

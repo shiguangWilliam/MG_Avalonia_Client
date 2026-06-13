@@ -30,7 +30,9 @@ public sealed class CnCNetSessionService : IDisposable
     public Action<CnCNetGameOptionsState>? GameOptionsReceiver
     {
         get => _session.GameOptionsReceiver;
-        set => _session.GameOptionsReceiver = value;
+        set => _session.GameOptionsReceiver = value == null
+            ? null
+            : state => Dispatcher.UIThread.Post(() => value(state));
     }
 
     public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts
@@ -148,7 +150,7 @@ public sealed class CnCNetSessionService : IDisposable
         return TryJoinGame(game, password: null, out message);
     }
 
-    /// <summary>Re-read the selected entry from core lobby state (avoids stale CustomPassword flags).</summary>
+    /// <summary>Re-read the selected entry from core lobby state (avoids stale Passworded flags).</summary>
     public CnCNetHostedGameSummary? ResolveSelectedGameForJoin()
     {
         CnCNetHostedGameSummary? selected = LobbyState.GetSelectedGame();
@@ -165,7 +167,7 @@ public sealed class CnCNetSessionService : IDisposable
     public bool SelectedGameRequiresPassword()
     {
         CnCNetHostedGameSummary? game = ResolveSelectedGameForJoin();
-        return game is { CustomPassword: true };
+        return game is { Passworded: true };
     }
 
     public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);

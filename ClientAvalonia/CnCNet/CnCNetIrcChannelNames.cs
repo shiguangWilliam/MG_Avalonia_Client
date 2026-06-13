@@ -16,7 +16,7 @@ internal static class CnCNetIrcChannelNames
         return normalized;
     }
 
-    /// <summary>Lower-case channel for comparisons and NOTICE/PRIVMSG wire targets.</summary>
+    /// <summary>Lower-case channel for comparisons only (maps, membership keys).</summary>
     public static string Normalize(string channel)
     {
         string preserved = Preserve(channel);
