@@ -1,3 +1,4 @@
+using ClientAvalonia.Online.EventArguments;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -546,6 +547,7 @@ public sealed class CnCNetSession : IDisposable
         _gameRoom.GameOptionsControlCounts = GameOptionsControlCounts;
         _gameRoom.AvailableTunnelsProvider = () => Tunnels;
         _gameRoom.HostAbandoned += OnGameRoomHostAbandoned;
+        _gameRoom.LocalUserKicked += OnGameRoomLocalUserKicked;
         _gameRoom.StateChanged += OnGameRoomStateChanged;
         _gameRoom.NoticeLogged += OnGameRoomNotice;
         _gameRoom.GameStarting += OnGameRoomStarting;
@@ -560,6 +562,13 @@ public sealed class CnCNetSession : IDisposable
         _gameRoom.NoticeLogged -= OnGameRoomNotice;
         _gameRoom.GameStarting -= OnGameRoomStarting;
         _gameRoom.HostAbandoned -= OnGameRoomHostAbandoned;
+        _gameRoom.LocalUserKicked -= OnGameRoomLocalUserKicked;
+    }
+
+    private void OnGameRoomLocalUserKicked()
+    {
+        LogActivity("You were kicked from the game room.");
+        LeaveGameRoom();
     }
 
     private void OnGameRoomHostAbandoned()
@@ -819,6 +828,11 @@ public sealed class CnCNetSession : IDisposable
         connection.UserLeft += OnUserLeft;
         connection.GameBroadcastReceived += OnGameBroadcast;
         connection.ChannelCtcpReceived += OnAnyCtcp;
+        connection.PrivateCTCPReceived += OnPrivateCtcp;
+        connection.PrivateMessageReceived += OnPrivateMessageReceived;
+        connection.UserKicked += OnUserKicked;
+        connection.UserNicknameChanged += OnUserNicknameChanged;
+        connection.UserQuit += OnUserQuit;
         connection.ChatMessageReceived += OnChatMessageReceived;
         connection.ChannelNamesComplete += OnChannelNamesComplete;
         connection.ChannelJoinFailed += OnChannelJoinFailed;
@@ -867,6 +881,68 @@ public sealed class CnCNetSession : IDisposable
         }
 
         OnChannelCtcp(channel, sender, ctcp);
+    }
+
+    private void OnPrivateCtcp(object? sender, PrivateCTCPEventArgs e)
+    {
+        if (e.Message.StartsWith("INVITE ", StringComparison.Ordinal))
+            HandleGameInvite(e.Sender, e.Message[7..]);
+    }
+
+    private void OnPrivateMessageReceived(object? sender, CnCNetPrivateMessageEventArgs e)
+    {
+        LogActivity($"PM from {e.Sender}: {e.Message}", notifyUi: false);
+    }
+
+    private void OnUserKicked(object? sender, KickEventArgs e)
+    {
+        if (_activeGameRoom == null)
+            return;
+
+        string gameChannel = NormalizeIrcChannel(_activeGameRoom.ChannelName);
+        if (!gameChannel.Equals(NormalizeIrcChannel(e.ChannelName), StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _gameRoom?.OnUserKicked(e.ChannelName, e.UserName);
+    }
+
+    private void OnUserNicknameChanged(object? sender, UserNicknameEventArgs e)
+    {
+        string oldName = StripIrcPrefixes(e.OldNickname);
+        string newName = StripIrcPrefixes(e.NewNickname);
+        if (string.IsNullOrWhiteSpace(oldName) || string.IsNullOrWhiteSpace(newName))
+            return;
+
+        ReplaceChannelUserName(oldName, newName);
+        _gameRoom?.OnUserNicknameChanged(oldName, newName);
+
+        if (RemoveHostedGamesByHost(oldName))
+            RefreshHostedGames();
+    }
+
+    private void OnUserQuit(object? sender, UserNicknameEventArgs e)
+    {
+        string name = StripIrcPrefixes(e.OldNickname);
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        if (_activeGameRoom != null)
+            _gameRoom?.OnUserLeft(_activeGameRoom.ChannelName, name);
+
+        if (RemoveHostedGamesByHost(name))
+            return;
+
+        if (_currentGame == null)
+            return;
+
+        _channelUsers.Remove(name);
+        RefreshLobbyPlayers();
+    }
+
+    private void ReplaceChannelUserName(string oldName, string newName)
+    {
+        if (_channelUsers.Remove(oldName))
+            _channelUsers.Add(newName);
     }
 
     private void HandleGameInvite(string sender, string arguments)

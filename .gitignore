@@ -426,4 +426,7 @@ Directory.Build.Game.*.props
 # Local notes (restored from history, not tracked)
 note/
 
+# Cursor agent memory bank (local only — not versioned)
+.cursor/rules/
+
 /Dist

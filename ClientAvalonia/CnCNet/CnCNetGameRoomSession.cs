@@ -50,6 +50,8 @@ public sealed class CnCNetGameRoomSession
 
     public event Action? HostAbandoned;
 
+    public event Action? LocalUserKicked;
+
     private string _gameFilesHash = string.Empty;
 
     public CnCNetGameRoomSession(CnCNetActiveGameRoom room)
@@ -229,6 +231,48 @@ public sealed class CnCNetGameRoomSession
                 if (_locked && !ProgramConstants.IsInGame)
                     SetLocked(false);
             }
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    public void OnUserKicked(string channel, string user)
+    {
+        if (!IsGameChannel(channel))
+            return;
+
+        string name = StripPrefixes(user);
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        if (name.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
+        {
+            LogNotice("You were kicked from the game!");
+            LocalUserKicked?.Invoke();
+            return;
+        }
+
+        OnUserLeft(channel, name);
+    }
+
+    public void OnUserNicknameChanged(string oldNickname, string newNickname)
+    {
+        if (string.IsNullOrWhiteSpace(oldNickname) || string.IsNullOrWhiteSpace(newNickname))
+            return;
+
+        lock (_sync)
+        {
+            if (_channelUsers.Remove(oldNickname))
+                _channelUsers.Add(newNickname);
+
+            foreach (CnCNetGameRoomPlayer player in _players)
+            {
+                if (player.Name.Equals(oldNickname, StringComparison.OrdinalIgnoreCase))
+                    player.Name = newNickname;
+            }
+
+            if (HostName.Equals(oldNickname, StringComparison.OrdinalIgnoreCase))
+                HostName = newNickname;
         }
 
         StateChanged?.Invoke();

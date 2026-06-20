@@ -1,3 +1,4 @@
+using ClientAvalonia.Online.EventArguments;
 using ClientCore;
 using System;
 using System.Collections.Generic;
@@ -140,8 +141,32 @@ public sealed class CnCNetIrcConnection : IDisposable
     /// <summary>Any channel CTCP (game room PO/GO/START/etc.).</summary>
     public event Action<string, string, string>? ChannelCtcpReceived;
 
+    /// <summary>CTCP delivered to local nick (PRIVMSG/NOTICE target is not a channel).</summary>
+    public event EventHandler<PrivateCTCPEventArgs>? PrivateCTCPReceived;
+
     /// <summary>Regular channel PRIVMSG (chat).</summary>
     public event Action<string, string, string>? ChatMessageReceived;
+
+    /// <summary>Private PRIVMSG to local nick.</summary>
+    public event EventHandler<CnCNetPrivateMessageEventArgs>? PrivateMessageReceived;
+
+    /// <summary>User was kicked from a channel.</summary>
+    public event EventHandler<KickEventArgs>? UserKicked;
+
+    /// <summary>Remote user changed nick (local nick updates CurrentNick separately).</summary>
+    public event EventHandler<UserNicknameEventArgs>? UserNicknameChanged;
+
+    /// <summary>User quit IRC (all channels).</summary>
+    public event EventHandler<UserNicknameEventArgs>? UserQuit;
+
+    /// <summary>Channel topic changed.</summary>
+    public event EventHandler<ChannelTopicEventArgs>? ChannelTopicChanged;
+
+    /// <summary>Channel mode changed.</summary>
+    public event EventHandler<ChannelModeEventArgs>? ChannelModeChanged;
+
+    /// <summary>IRC server connection attempt (DX ConnectionManager.OnAttemptedServerChanged).</summary>
+    public event EventHandler<AttemptedServerEventArgs>? AttemptedServerChanged;
 
     /// <summary>IRC 442/404 — attempted to send to a channel we are not on.</summary>
     public event Action<string>? NotOnChannel;
@@ -329,6 +354,7 @@ public sealed class CnCNetIrcConnection : IDisposable
 
                 try
                 {
+                    AttemptedServerChanged?.Invoke(this, new AttemptedServerEventArgs(server.Name));
                     EmitActivity($"Trying {server.Host}:{port} ({server.Name})...");
                     var client = new TcpClient();
                     var connectTask = client.ConnectAsync(server.Host, port);
@@ -717,6 +743,15 @@ public sealed class CnCNetIrcConnection : IDisposable
             case "QUIT":
                 HandleQuit(prefix);
                 break;
+            case "MODE":
+                HandleMode(prefix, parameters);
+                break;
+            case "KICK":
+                HandleKick(parameters);
+                break;
+            case "TOPIC":
+                HandleTopic(prefix, parameters);
+                break;
         }
     }
 
@@ -798,6 +833,7 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (parameters.Count < 2 || parameters[1].Length == 0)
             return;
 
+        // DX Connection.cs: CTCP may arrive via PRIVMSG with leading SOH (same as NOTICE).
         if (parameters[1][0] == '\u0001' && !parameters[1].Contains("ACTION", StringComparison.Ordinal))
         {
             HandleCtcp(prefix, parameters[0], parameters[1]);
@@ -809,10 +845,23 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         string sender = prefix[..exclam];
-        ChatMessageReceived?.Invoke(parameters[0], sender, parameters[1]);
+        string target = parameters[0];
+        string message = parameters[1];
+
+        if (message.StartsWith('\u0001'.ToString() + "ACTION", StringComparison.Ordinal) && message.Length > 2)
+            message = message[1..^1];
+
+        if (IsChannelTarget(target))
+        {
+            ChatMessageReceived?.Invoke(target, sender, message);
+            return;
+        }
+
+        if (IsLocalUser(target))
+            PrivateMessageReceived?.Invoke(this, new CnCNetPrivateMessageEventArgs(sender, message));
     }
 
-    private void HandleCtcp(string prefix, string channel, string ctcpPayload)
+    private void HandleCtcp(string prefix, string target, string ctcpPayload)
     {
         int exclam = prefix.IndexOf('!');
         if (exclam <= 0)
@@ -821,11 +870,23 @@ public sealed class CnCNetIrcConnection : IDisposable
         string sender = prefix[..exclam];
         string ctcp = ctcpPayload.Trim('\u0001');
 
-        ChannelCtcpReceived?.Invoke(channel, sender, ctcp);
+        if (IsChannelTarget(target))
+        {
+            ChannelCtcpReceived?.Invoke(target, sender, ctcp);
 
-        if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
-            GameBroadcastReceived?.Invoke(channel, sender, ctcp);
+            if (ctcp.StartsWith("GAME ", StringComparison.Ordinal))
+                GameBroadcastReceived?.Invoke(target, sender, ctcp);
+
+            return;
+        }
+
+        // DX CnCNetManager.DoCTCPParsed: target == local nick → private CTCP (INVITE, etc.).
+        if (IsLocalUser(target))
+            PrivateCTCPReceived?.Invoke(this, new PrivateCTCPEventArgs(sender, ctcp));
     }
+
+    private static bool IsChannelTarget(string target)
+        => target.StartsWith('#') || target.StartsWith('&');
 
     private void HandleJoin(string prefix, List<string> parameters)
     {
@@ -861,7 +922,12 @@ public sealed class CnCNetIrcConnection : IDisposable
         string oldNick = prefix[..exclam];
         string newNick = parameters[0].TrimStart(':');
         if (IsLocalUser(oldNick))
+        {
             SetCurrentNick(newNick);
+            return;
+        }
+
+        UserNicknameChanged?.Invoke(this, new UserNicknameEventArgs(oldNick, newNick));
     }
 
     private void SetCurrentNick(string nick)
@@ -898,7 +964,65 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         string user = prefix[..exclam];
+        UserQuit?.Invoke(this, new UserNicknameEventArgs(user, string.Empty));
         UserLeft?.Invoke("*", user);
+    }
+
+    private void HandleKick(List<string> parameters)
+    {
+        if (parameters.Count < 2)
+            return;
+
+        string channel = NormalizeChannelParameter(parameters[0]);
+        string user = StripIrcPrefixes(parameters[1]);
+        if (string.IsNullOrWhiteSpace(user))
+            return;
+
+        if (IsLocalUser(user))
+            DropLocalChannelMembership(channel);
+        else
+            DecrementChannelUserCount(channel);
+
+        UserKicked?.Invoke(this, new KickEventArgs(channel, user));
+        UserLeft?.Invoke(channel, user);
+    }
+
+    private void HandleMode(string prefix, List<string> parameters)
+    {
+        if (parameters.Count < 2)
+            return;
+
+        int exclam = prefix.IndexOf('!');
+        if (exclam <= 0)
+            return;
+
+        string user = prefix[..exclam];
+        string channel = NormalizeChannelParameter(parameters[0]);
+        string modeString = parameters[1];
+        ChannelModeChanged?.Invoke(this, new ChannelModeEventArgs(user, channel, modeString));
+    }
+
+    private void HandleTopic(string prefix, List<string> parameters)
+    {
+        if (parameters.Count < 2)
+            return;
+
+        int exclam = prefix.IndexOf('!');
+        if (exclam <= 0)
+            return;
+
+        string channel = NormalizeChannelParameter(parameters[0]);
+        string topic = parameters[1].TrimStart(':');
+        ChannelTopicChanged?.Invoke(this, new ChannelTopicEventArgs(channel, topic));
+    }
+
+    private static string StripIrcPrefixes(string user)
+    {
+        string name = user.Trim();
+        while (name.Length > 0 && (name[0] == '@' || name[0] == '+' || name[0] == '%'))
+            name = name[1..];
+
+        return name;
     }
 
     private void Handle353(List<string> parameters)
