@@ -5,6 +5,7 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Create / join game room flows (XNA CnCNetLobby + GameCreationWindow subset).</summary>
 public static class CnCNetLobbyOperations
 {
@@ -107,7 +108,7 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        CnCNetTunnelEntry tunnel = session.Tunnels.FirstOrDefault(t => t.Official) ?? session.Tunnels[0];
+        CnCNetTunnel tunnel = session.Tunnels.FirstOrDefault(t => t.Official) ?? session.Tunnels[0];
         var request = new CnCNetGameCreationRequest
         {
             RoomName = $"{ProgramConstants.PLAYERNAME}'s Game",
@@ -161,7 +162,7 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        CnCNetTunnelEntry? tunnel = session.Tunnels.FirstOrDefault(t =>
+        CnCNetTunnel? tunnel = session.Tunnels.FirstOrDefault(t =>
             t.Address.Equals(game.TunnelAddress, StringComparison.OrdinalIgnoreCase)
             && t.Port == game.TunnelPort);
 

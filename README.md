@@ -118,13 +118,13 @@ Set the game root with `--game-root` if the exe is not inside the mod folder.
 To copy **only** `ClientAvalonia.exe` into an existing MG install (does **not** overwrite `Resources/`, maps, or INI):
 
 ```powershell
-.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2" -SkipValidate
+.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区3" -SkipValidate
 ```
 
 Or copy manually after a normal build:
 
 ```powershell
-Copy-Item -Force .\CompiledAvalonia\ClientAvalonia.exe "D:\MG\MG-Avalonia测试区2\"
+Copy-Item -Force .\CompiledAvalonia\ClientAvalonia.exe "D:\MG\MG-Avalonia测试区3\"
 ```
 
 **Important:** close `ClientAvalonia.exe` before copying, or Windows will lock the file.

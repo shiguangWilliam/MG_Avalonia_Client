@@ -32,7 +32,7 @@ public static class SkirmishSpawnWriter
         FileInfo spawnerSettingsFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNER_SETTINGS);
         spawnerSettingsFile.Delete();
 
-        Logger.Log("SkirmishSpawnWriter: writing spawn.ini");
+        Logger.Log("Writing spawn.ini");
 
         var humans = GetOccupiedSlots(players, ai: false);
         var ais = GetOccupiedSlots(players, ai: true);
@@ -138,7 +138,7 @@ public static class SkirmishSpawnWriter
         FileInfo spawnMapIniFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI);
         spawnMapIniFile.Delete();
 
-        Logger.Log($"SkirmishSpawnWriter: writing spawnmap.ini from {map.CompleteFilePath}");
+        Logger.Log("Writing map.");
 
         IniFile mapIni = MapCodeHelper.LoadMapIni(map);
 

@@ -1,129 +1,20 @@
-using System.IO;
-using ClientAvalonia.IniUi.Loading;
-using ClientAvalonia.Services;
-using ClientCore;
-using ClientCore.INIProcessing;
-using ClientAvalonia.CnCNet;
-using ClientUpdater;
-using Rampastring.Tools;
-
 namespace ClientAvalonia.Core;
 
-/// <summary>Pre-main-window startup aligned with DXMainClient Startup.Execute (Core + Updater + INI preprocessor).</summary>
+/// <summary>Backward-compatible facade over <see cref="PreStartup"/> / <see cref="Startup"/>.</summary>
 public static class ClientStartupService
 {
-    private static bool _ran;
+    public static bool BootstrapSucceeded => Startup.BootstrapSucceeded;
 
-    public static bool BootstrapSucceeded { get; private set; }
+    public static string? BootstrapError => Startup.BootstrapError;
 
-    public static string? BootstrapError { get; private set; }
+    public static bool IsUpdaterInitialized => Startup.IsUpdaterInitialized;
 
-    public static bool IsUpdaterInitialized { get; private set; }
-
-    public static event Action? LocalVersionsChecked;
+    public static event Action? LocalVersionsChecked
+    {
+        add => Startup.LocalVersionsChecked += value;
+        remove => Startup.LocalVersionsChecked -= value;
+    }
 
     public static void Run(string? gameRoot = null)
-    {
-        if (_ran)
-            return;
-
-        _ran = true;
-
-        gameRoot ??= ClientEnvironment.FindGameRoot(Directory.GetCurrentDirectory());
-        Environment.CurrentDirectory = gameRoot;
-
-        if (!ClientCoreBootstrap.TryEnsureInitialized(gameRoot, out string? bootstrapError))
-        {
-            BootstrapError = bootstrapError ?? "unknown error";
-            BootstrapSucceeded = false;
-            Console.Error.WriteLine($"ClientCore bootstrap failed: {BootstrapError}");
-            return;
-        }
-
-        BootstrapSucceeded = true;
-        BootstrapError = null;
-
-        ClientLogService.EnsureInitialized();
-
-        InstallationRegistry.TryUpdateInstallPath(gameRoot);
-
-        CnCNetIdentity.EnsurePersisted();
-
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "version_u");
-
-        TryInitializeUpdater(gameRoot);
-
-        TryDeleteUpdaterTempFolder();
-        ClientConfiguration.Instance.RefreshSettings();
-        PreprocessorBackgroundTask.Instance.Run();
-
-        try
-        {
-            GameResourceCatalog.Instance.EnsureLoaded();
-        }
-        catch (Exception ex)
-        {
-            Logger.Log($"Game resource catalog load failed: {ex.Message}");
-        }
-
-        if (IsUpdaterInitialized)
-        {
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try
-                {
-                    Updater.OnLocalFileVersionsChecked += OnLocalFileVersionsChecked;
-                    Updater.CheckLocalFileVersions();
-                }
-                catch
-                {
-                }
-            });
-        }
-    }
-
-    private static bool TryInitializeUpdater(string gameRoot)
-    {
-        try
-        {
-            string callingExecutable = Path.GetFileName(Environment.ProcessPath ?? "ClientAvalonia.exe");
-            Updater.Initialize(
-                ProgramConstants.GamePath,
-                ProgramConstants.GetBaseResourcePath(),
-                ClientConfiguration.Instance.SettingsIniName,
-                ClientConfiguration.Instance.LocalGame,
-                callingExecutable);
-
-            IsUpdaterInitialized = true;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.Log($"Updater initialization failed: {ex.Message}");
-            IsUpdaterInitialized = false;
-            return false;
-        }
-    }
-
-    private static void OnLocalFileVersionsChecked()
-    {
-        Updater.OnLocalFileVersionsChecked -= OnLocalFileVersionsChecked;
-        ProgramConstants.GAME_VERSION = ClientConfiguration.Instance.ModMode ? "N/A" : Updater.GameVersion;
-        LocalVersionsChecked?.Invoke();
-    }
-
-    private static void TryDeleteUpdaterTempFolder()
-    {
-        DirectoryInfo updaterFolder = SafePath.GetDirectory(ProgramConstants.GamePath, "Updater");
-        if (!updaterFolder.Exists)
-            return;
-
-        try
-        {
-            updaterFolder.Delete(true);
-        }
-        catch
-        {
-        }
-    }
+        => PreStartup.Initialize(gameRoot);
 }

@@ -19,7 +19,7 @@ Examples:
 
 ```powershell
 .\Scripts\build-clientavalonia.ps1
-.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2" -SkipValidate
+.\Scripts\build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区3" -SkipValidate
 .\Scripts\package-mg-avalonia-patch.ps1
 ```
 

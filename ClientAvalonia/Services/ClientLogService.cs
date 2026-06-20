@@ -8,6 +8,8 @@ public static class ClientLogService
 {
     private static bool _initialized;
 
+    public static bool IsInitialized => _initialized;
+
     public static void EnsureInitialized()
     {
         if (_initialized)

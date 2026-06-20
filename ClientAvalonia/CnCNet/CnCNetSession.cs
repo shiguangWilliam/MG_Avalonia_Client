@@ -9,6 +9,7 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.</summary>
 public sealed class CnCNetSession : IDisposable
 {
@@ -42,6 +43,7 @@ public sealed class CnCNetSession : IDisposable
     private bool _tunnelRefreshInProgress;
     private uint _tunnelMaintenanceCycle;
     private readonly object _gameRoomGate = new();
+    private CnCNetLaunchPresenceKeepAlive? _launchPresenceKeepAlive;
 
     public bool IsGameRoomJoinPending => _gameRoomJoinPending;
 
@@ -55,7 +57,7 @@ public sealed class CnCNetSession : IDisposable
 
     public int OnlinePlayerCount { get; private set; } = -1;
 
-    public IReadOnlyList<CnCNetTunnelEntry> Tunnels { get; private set; } = [];
+    public IReadOnlyList<CnCNetTunnel> Tunnels { get; private set; } = [];
 
     public CnCNetIrcConnection? Connection => _connection;
 
@@ -151,7 +153,7 @@ public sealed class CnCNetSession : IDisposable
         {
             try
             {
-                IReadOnlyList<CnCNetTunnelEntry> refreshed = CnCNetTunnelListLoader.Load();
+                IReadOnlyList<CnCNetTunnel> refreshed = CnCNetTunnelListLoader.Load();
                 HandleRefreshedTunnels(refreshed);
             }
             catch (Exception ex)
@@ -166,7 +168,7 @@ public sealed class CnCNetSession : IDisposable
         });
     }
 
-    private void HandleRefreshedTunnels(IReadOnlyList<CnCNetTunnelEntry> refreshed)
+    private void HandleRefreshedTunnels(IReadOnlyList<CnCNetTunnel> refreshed)
     {
         if (refreshed.Count == 0)
         {
@@ -175,15 +177,15 @@ public sealed class CnCNetSession : IDisposable
             return;
         }
 
-        List<CnCNetTunnelEntry> updated = [];
+        List<CnCNetTunnel> updated = [];
         lock (_sync)
         {
             var existing = Tunnels.ToDictionary(t => $"{t.Address}:{t.Port}", StringComparer.OrdinalIgnoreCase);
 
-            foreach (CnCNetTunnelEntry tunnel in refreshed)
+            foreach (CnCNetTunnel tunnel in refreshed)
             {
                 string key = $"{tunnel.Address}:{tunnel.Port}";
-                if (existing.TryGetValue(key, out CnCNetTunnelEntry? existingTunnel))
+                if (existing.TryGetValue(key, out CnCNetTunnel? existingTunnel))
                 {
                     existingTunnel.UpdateFrom(tunnel);
                     updated.Add(existingTunnel);
@@ -198,7 +200,7 @@ public sealed class CnCNetSession : IDisposable
 
             if (_activeGameRoom != null)
             {
-                CnCNetTunnelEntry? activeTunnel = updated.FirstOrDefault(t =>
+                CnCNetTunnel? activeTunnel = updated.FirstOrDefault(t =>
                     t.Address.Equals(_activeGameRoom.Tunnel.Address, StringComparison.OrdinalIgnoreCase)
                     && t.Port == _activeGameRoom.Tunnel.Port);
 
@@ -210,7 +212,25 @@ public sealed class CnCNetSession : IDisposable
         LogActivity($"Loaded {updated.Count} NAT tunnels.");
         RevalidateHostedGamesAgainstTunnels();
         PingListedTunnelsAsync(updated);
-        PingCurrentTunnelAsync(checkTunnelList: true);
+
+        if (_activeGameRoom != null && _gameRoom is { IsLocalJoined: true })
+        {
+            CnCNetTunnel? activeTunnel = updated.FirstOrDefault(t =>
+                t.Address.Equals(_activeGameRoom.Tunnel.Address, StringComparison.OrdinalIgnoreCase)
+                && t.Port == _activeGameRoom.Tunnel.Port);
+
+            if (activeTunnel != null)
+            {
+                _activeGameRoom.Tunnel = activeTunnel;
+                if (_connection?.IsLocalOnChannel(_activeGameRoom.ChannelName) == true)
+                    _gameRoom.BroadcastLocalTunnelPing();
+            }
+            else
+            {
+                PingCurrentTunnelAsync(checkTunnelList: false);
+            }
+        }
+
         StateChanged?.Invoke();
     }
 
@@ -242,9 +262,9 @@ public sealed class CnCNetSession : IDisposable
             RefreshHostedGames();
     }
 
-    private void PingListedTunnelsAsync(IReadOnlyList<CnCNetTunnelEntry> tunnels)
+    private void PingListedTunnelsAsync(IReadOnlyList<CnCNetTunnel> tunnels)
     {
-        foreach (CnCNetTunnelEntry tunnel in tunnels)
+        foreach (CnCNetTunnel tunnel in tunnels)
         {
             if (!UserINISettings.Instance.PingUnofficialCnCNetTunnels.Value && !tunnel.Official && !tunnel.Recommended)
                 continue;
@@ -252,6 +272,15 @@ public sealed class CnCNetSession : IDisposable
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 tunnel.UpdatePing();
+
+                if (_activeGameRoom != null
+                    && ReferenceEquals(_activeGameRoom.Tunnel, tunnel)
+                    && _gameRoom is { IsLocalJoined: true }
+                    && _connection?.IsLocalOnChannel(_activeGameRoom.ChannelName) == true)
+                {
+                    _gameRoom.BroadcastLocalTunnelPing();
+                }
+
                 StateChanged?.Invoke();
             });
         }
@@ -263,22 +292,28 @@ public sealed class CnCNetSession : IDisposable
         if (_gameRoom is not { IsLocalJoined: true } || _gameRoomJoinPending || _activeGameRoom == null)
             return;
 
-        CnCNetTunnelEntry tunnel = _activeGameRoom.Tunnel;
+        CnCNetTunnel tunnel = _activeGameRoom.Tunnel;
         CnCNetGameRoomSession gameRoom = _gameRoom;
         bool onGameChannel = _connection?.IsLocalOnChannel(_activeGameRoom.ChannelName) == true;
 
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            tunnel.UpdatePing();
-
             if (checkTunnelList)
             {
-                CnCNetTunnelEntry? listedTunnel = Tunnels.FirstOrDefault(t =>
+                CnCNetTunnel? listedTunnel = Tunnels.FirstOrDefault(t =>
                     t.Address.Equals(tunnel.Address, StringComparison.OrdinalIgnoreCase)
                     && t.Port == tunnel.Port);
-                if (listedTunnel != null && !ReferenceEquals(listedTunnel, tunnel))
-                    listedTunnel.PingInMs = tunnel.PingInMs;
+
+                if (listedTunnel != null)
+                {
+                    if (!ReferenceEquals(listedTunnel, tunnel))
+                        _activeGameRoom.Tunnel = listedTunnel;
+
+                    tunnel = _activeGameRoom.Tunnel;
+                }
             }
+
+            tunnel.UpdatePing();
 
             if (onGameChannel)
                 gameRoom.BroadcastLocalTunnelPing();
@@ -286,6 +321,33 @@ public sealed class CnCNetSession : IDisposable
             StateChanged?.Invoke();
         });
     }
+
+    /// <summary>Warm tunnel ICMP ping when entering a game room (DX lobby shows ping before START).</summary>
+    public void WarmActiveTunnelPing()
+    {
+        if (_activeGameRoom == null)
+            return;
+
+        CnCNetTunnel tunnel = ResolveListedTunnel(_activeGameRoom.Tunnel) ?? _activeGameRoom.Tunnel;
+        _activeGameRoom.Tunnel = tunnel;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            tunnel.UpdatePing();
+            if (_gameRoom is { IsLocalJoined: true }
+                && _connection?.IsLocalOnChannel(_activeGameRoom.ChannelName) == true)
+            {
+                _gameRoom.BroadcastLocalTunnelPing();
+            }
+
+            StateChanged?.Invoke();
+        });
+    }
+
+    private CnCNetTunnel? ResolveListedTunnel(CnCNetTunnel tunnel)
+        => Tunnels.FirstOrDefault(t =>
+            t.Address.Equals(tunnel.Address, StringComparison.OrdinalIgnoreCase)
+            && t.Port == tunnel.Port);
 
     public void ConnectIfNeeded()
     {
@@ -530,6 +592,8 @@ public sealed class CnCNetSession : IDisposable
             if (_connection != null)
                 AttachGameRoomSession();
 
+            WarmActiveTunnelPing();
+
             ArmGameRoomJoinTimeout();
         }
     }
@@ -573,7 +637,7 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnGameRoomHostAbandoned()
     {
-        LogActivity("Game host abandoned — leaving game room.");
+        LogActivity("Game host abandoned ??leaving game room.");
         LeaveGameRoom();
         GameRoomHostAbandoned?.Invoke();
     }
@@ -621,7 +685,7 @@ public sealed class CnCNetSession : IDisposable
         {
             if (_activeGameRoom != null)
             {
-                message = "Still joining the CnCNet game room — please wait.";
+                message = "Still joining the CnCNet game room ??please wait.";
                 return false;
             }
 
@@ -667,6 +731,73 @@ public sealed class CnCNetSession : IDisposable
         UserINISettings.Instance.SaveSettings();
     }
 
+    /// <summary>Game process started — keep IRC available (yuanming mod marks AWAY players as Error in GAME CTCP).</summary>
+    public void NotifyGameProcessStarted()
+    {
+        if (_connection is not { IsConnected: true })
+            return;
+
+        LogActivity("In-game (IRC away disabled for mod compatibility).", notifyUi: false);
+    }
+
+    /// <summary>Game process exited.</summary>
+    public void NotifyGameProcessExited()
+    {
+        EndLaunchPresenceKeepAlive();
+        ProgramConstants.IsLaunchingGame = false;
+    }
+
+    /// <summary>During slow Syringe startup — optional synthetic heartbeats via RA2MG.ini.</summary>
+    public void BeginLaunchPresenceKeepAlive()
+    {
+        if (_gameRoom is not { IsLocalJoined: true } || _activeGameRoom == null)
+            return;
+
+        bool synthetic = UserINISettings.Instance.LaunchPresenceKeepAlive.Value;
+        _launchPresenceKeepAlive ??= new CnCNetLaunchPresenceKeepAlive(this);
+        _launchPresenceKeepAlive.Start(synthetic);
+    }
+
+    public void EndLaunchPresenceKeepAlive() => _launchPresenceKeepAlive?.Stop();
+
+    private bool IsLaunchPresenceKeepAliveActive => _launchPresenceKeepAlive?.IsActive == true;
+
+    internal void RunAcceleratedLaunchPresenceHeartbeat(Action<int> notePing)
+    {
+        if (_gameRoom is not { IsLocalJoined: true } || _activeGameRoom == null)
+            return;
+
+        PingCurrentTunnelAsync(checkTunnelList: false);
+
+        if (_activeGameRoom.Tunnel.PingInMs >= 0)
+            notePing(_activeGameRoom.Tunnel.PingInMs);
+    }
+
+    internal void RunSyntheticLaunchPresenceHeartbeat(int lastSuccessfulPingMs)
+    {
+        if (_activeGameRoom == null || _gameRoom is not { IsLocalJoined: true })
+            return;
+
+        if (_connection is not { IsConnected: true })
+        {
+            ConnectIfNeeded();
+            return;
+        }
+
+        if (_connection.IsLocalOnChannel(_activeGameRoom.ChannelName) != true)
+        {
+            LogActivity("Launch keepalive: re-JOIN game room channel.", notifyUi: false);
+            TryRejoinActiveGameRoom();
+            return;
+        }
+
+        int ping = lastSuccessfulPingMs >= 0 ? lastSuccessfulPingMs : _activeGameRoom.Tunnel.PingInMs;
+        if (ping < 0)
+            ping = 999;
+
+        _gameRoom.BroadcastTunnelPingValue(ping);
+    }
+
     public void UpdateHostedGameListing(
         string mapName,
         string gameModeName,
@@ -691,7 +822,7 @@ public sealed class CnCNetSession : IDisposable
         lock (_gameRoomGate)
         {
             _connection.PrepareChannelJoin(wire);
-            // XNA: JOIN channelName password — preserve exact channel name from GAME payload.
+            // XNA: JOIN channelName password ??preserve exact channel name from GAME payload.
             _connection.SendInstant($"JOIN {wire} {password}");
         }
 
@@ -767,7 +898,7 @@ public sealed class CnCNetSession : IDisposable
             DropBroadcastChannelMembership(channel);
             if (_autoReconnect)
             {
-                LogActivity($"Game broadcast channel join failed (IRC {code}) — will retry.", notifyUi: false);
+                LogActivity($"Game broadcast channel join failed (IRC {code}) ??will retry.", notifyUi: false);
                 EnsureGameBroadcastChannelsJoined();
             }
 
@@ -785,11 +916,11 @@ public sealed class CnCNetSession : IDisposable
 
         string message = code switch
         {
-            473 => "Cannot join — game room is locked.",
-            471 => "Cannot join — game room is full.",
+            473 => "Cannot join ??game room is locked.",
+            471 => "Cannot join ??game room is full.",
             475 => "Incorrect game room password.",
             474 => "You are banned from this game room.",
-            439 => "Cannot join — changing channels too fast. Wait a moment and try again.",
+            439 => "Cannot join ??changing channels too fast. Wait a moment and try again.",
             _ => string.IsNullOrWhiteSpace(detail)
                 ? $"Cannot join game room (IRC {code})."
                 : detail.TrimEnd('.') + ".",
@@ -801,6 +932,8 @@ public sealed class CnCNetSession : IDisposable
     public void Dispose()
     {
         _autoReconnect = false;
+        _launchPresenceKeepAlive?.Dispose();
+        _launchPresenceKeepAlive = null;
         _hostedGameRefreshTimer?.Dispose();
         _hostedGameRefreshTimer = null;
         _tunnelMaintenanceTimer?.Dispose();
@@ -854,7 +987,7 @@ public sealed class CnCNetSession : IDisposable
             {
                 _gameRoomJoinRetryCount++;
                 LogActivity(
-                    $"Not on game room channel {normalized} yet — retrying JOIN ({_gameRoomJoinRetryCount}/{MaxGameRoomJoinRetries}).",
+                    $"Not on game room channel {normalized} yet ??retrying JOIN ({_gameRoomJoinRetryCount}/{MaxGameRoomJoinRetries}).",
                     notifyUi: false);
                 JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _);
                 return;
@@ -868,7 +1001,7 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         DropBroadcastChannelMembership(channel);
-        LogActivity($"Not on game broadcast channel {normalized} — rejoining.", notifyUi: false);
+        LogActivity($"Not on game broadcast channel {normalized} ??rejoining.", notifyUi: false);
         EnsureGameBroadcastChannelsJoined();
     }
 
@@ -1082,9 +1215,12 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnDisconnected(string message)
     {
+        bool inGameOrLaunching = ProgramConstants.IsInGame;
         ClearLobbyData(preserveGameRoom: _activeGameRoom != null);
         LobbyState.SetConnectionStatus("Offline");
-        LogActivity($"Disconnected: {message}");
+        LogActivity(inGameOrLaunching
+            ? $"Disconnected during game/launch: {message}"
+            : $"Disconnected: {message}");
         StateChanged?.Invoke();
 
         lock (_sync)
@@ -1098,7 +1234,11 @@ public sealed class CnCNetSession : IDisposable
 
     private void ScheduleReconnect()
     {
-        if (!_autoReconnect || _reconnectAttempts >= 3 || ProgramConstants.IsInGame)
+        // Allow reconnect during slow Syringe/Ares startup while launch keepalive is active.
+        if (!_autoReconnect || _reconnectAttempts >= 3)
+            return;
+
+        if (ProgramConstants.IsInGame && !IsLaunchPresenceKeepAliveActive)
             return;
 
         _reconnectAttempts++;
@@ -1136,7 +1276,7 @@ public sealed class CnCNetSession : IDisposable
 
         if (preserveGameRoom)
         {
-            LogActivity("IRC disconnected — preserving active game room for reconnect.");
+            LogActivity("IRC disconnected ??preserving active game room for reconnect.");
             return;
         }
 
@@ -1149,7 +1289,11 @@ public sealed class CnCNetSession : IDisposable
 
     private void TryRejoinActiveGameRoom()
     {
-        if (_activeGameRoom == null || _connection is not { IsConnected: true } || ProgramConstants.IsInGame)
+        if (_activeGameRoom == null || _connection is not { IsConnected: true })
+            return;
+
+        // Re-JOIN during launch keepalive; skip once in match without keepalive (DX).
+        if (ProgramConstants.IsInGame && !IsLaunchPresenceKeepAliveActive)
             return;
 
         var gameSummary = new CnCNetHostedGameSummary

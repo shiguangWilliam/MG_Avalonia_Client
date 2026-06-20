@@ -8,6 +8,7 @@ using ClientCore;
 
 namespace ClientAvalonia.IniUi.Overlays;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Create-game dialog (XNA GameCreationWindow subset, programmatic fallback).</summary>
 public sealed class GameCreationOverlayContext
 {
@@ -29,7 +30,7 @@ public sealed class GameCreationOverlayContext
 
     public Control TunnelPickerOverlay { get; set; } = null!;
 
-    public CnCNetTunnelEntry? SelectedTunnel { get; set; }
+    public CnCNetTunnel? SelectedTunnel { get; set; }
 
     internal List<Border> TunnelRows { get; init; } = [];
 }
@@ -53,7 +54,7 @@ public static class GameCreationOverlayBuilder
     private static readonly IBrush OverlayDimBrush = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0));
 
     public static (Control Root, GameCreationOverlayContext Context, Size PreferredSize) Build(
-        IReadOnlyList<CnCNetTunnelEntry> tunnels)
+        IReadOnlyList<CnCNetTunnel> tunnels)
     {
         var roomName = CreateTextBox($"{ProgramConstants.PLAYERNAME}'s Game");
         var maxPlayers = CreateComboBox();
@@ -71,7 +72,7 @@ public static class GameCreationOverlayBuilder
         var password = CreateTextBox(string.Empty);
         var createButton = CreatePrimaryButton("Create Game");
         var cancelButton = CreateSecondaryButton("Cancel");
-        var moreOptionsButton = CreateSecondaryButton("More options…");
+        var moreOptionsButton = CreateSecondaryButton("More options...");
         var tunnelSummary = new TextBlock
         {
             FontSize = 12,
@@ -228,14 +229,14 @@ public static class GameCreationOverlayBuilder
 
     private static Control CreateTunnelPickerOverlay(
         GameCreationOverlayContext context,
-        IReadOnlyList<CnCNetTunnelEntry> tunnels)
+        IReadOnlyList<CnCNetTunnel> tunnels)
     {
         var tunnelRowsPanel = new StackPanel { Spacing = 6 };
         context.TunnelRows.Clear();
 
         for (int i = 0; i < tunnels.Count; i++)
         {
-            CnCNetTunnelEntry tunnel = tunnels[i];
+            CnCNetTunnel tunnel = tunnels[i];
             bool selected = context.SelectedTunnel != null
                 && context.SelectedTunnel.Address == tunnel.Address
                 && context.SelectedTunnel.Port == tunnel.Port;
@@ -355,11 +356,11 @@ public static class GameCreationOverlayBuilder
     private static void UpdateTunnelSummary(GameCreationOverlayContext context)
     {
         context.TunnelSummaryText.Text = context.SelectedTunnel == null
-            ? "No tunnel server selected — open More options to choose one."
+            ? "No tunnel server selected �?open More options to choose one."
             : $"{context.SelectedTunnel.Name}  ({context.SelectedTunnel.Address}:{context.SelectedTunnel.Port})";
     }
 
-    private static Border CreateTunnelRow(GameCreationOverlayContext context, CnCNetTunnelEntry tunnel, bool selected)
+    private static Border CreateTunnelRow(GameCreationOverlayContext context, CnCNetTunnel tunnel, bool selected)
     {
         var badge = new Border
         {
@@ -424,7 +425,7 @@ public static class GameCreationOverlayBuilder
         return row;
     }
 
-    private static void SelectTunnelRow(GameCreationOverlayContext context, Border selectedRow, CnCNetTunnelEntry tunnel)
+    private static void SelectTunnelRow(GameCreationOverlayContext context, Border selectedRow, CnCNetTunnel tunnel)
     {
         context.SelectedTunnel = tunnel;
         foreach (Border row in context.TunnelRows)

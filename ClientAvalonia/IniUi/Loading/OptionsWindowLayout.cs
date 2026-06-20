@@ -62,6 +62,7 @@ internal static class OptionsWindowLayout
         PositionFooterButtons(tree);
         ReparentControlsToPanels(tree, root);
         OptionsDisplayControlsBootstrap.Apply(tree);
+        RendererOptionsBootstrap.Apply(tree);
         OptionsGameControlsBootstrap.Apply(tree);
         OptionsCnCNetControlsBootstrap.Apply(tree);
         OptionsPanelStackLayout.Apply(tree);

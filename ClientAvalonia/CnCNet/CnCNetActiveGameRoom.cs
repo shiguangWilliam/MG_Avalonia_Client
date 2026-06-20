@@ -1,5 +1,6 @@
 namespace ClientAvalonia.CnCNet;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Active CnCNet game room the client is hosting or joining (IRC game channel).</summary>
 public sealed class CnCNetActiveGameRoom
 {
@@ -9,7 +10,7 @@ public sealed class CnCNetActiveGameRoom
 
     public required string Password { get; set; }
 
-    public required CnCNetTunnelEntry Tunnel { get; set; }
+    public required CnCNetTunnel Tunnel { get; set; }
 
     public string HostName { get; set; } = string.Empty;
 
@@ -40,7 +41,7 @@ public sealed class CnCNetGameRoomPlayer
 
     public int Ping { get; set; } = -1;
 
-    public int Port { get; set; }
+    public ushort Port { get; set; }
 
     public int SideId { get; set; }
 
@@ -56,12 +57,12 @@ public sealed class CnCNetStartGameInfo
 {
     public required int UniqueGameId { get; init; }
 
-    public required CnCNetTunnelEntry Tunnel { get; init; }
+    public required CnCNetTunnel Tunnel { get; init; }
 
-    public required int LocalPlayerPort { get; init; }
+    public required ushort LocalPlayerPort { get; init; }
 
     public required bool IsHost { get; init; }
 
-    /// <summary>Per-human NAT ports from START / tunnel request (name â†’ port).</summary>
-    public IReadOnlyDictionary<string, int> PlayerPorts { get; init; } = new Dictionary<string, int>();
+    /// <summary>Per-human NAT ports from START / tunnel request (name â†?port).</summary>
+    public IReadOnlyDictionary<string, ushort> PlayerPorts { get; init; } = new Dictionary<string, ushort>();
 }

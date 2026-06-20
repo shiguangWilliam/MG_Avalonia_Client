@@ -207,7 +207,8 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (IsFloatingOverlayOpen)
             return;
 
-        if (!CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
+        if (!windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase)
+            && !CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
         {
             ShowStatus($"{windowName} overlay is only available from MainMenu");
             return;
@@ -248,13 +249,17 @@ public partial class MainWindow : Window, IUiNavigationHost
             PART_RootView.IsHitTestVisible = false;
             _floatingOverlayWindow = windowName;
 
+            if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+                DisplayOptionsApplier.Apply(_overlayRoot);
+
             if (windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
                 ApplyCampaignOverlay(_overlayRoot);
 
-            ShowStatus($"{windowName} overlay: {width}×{height} (fixed, over MainMenu)");
+            ShowStatus($"{windowName} overlay: {width}×{height}");
         }
         catch (Exception ex)
         {
+            Logger.Log($"OpenFloatingOverlay({windowName}) failed: {ex}");
             ShowStatus($"{windowName} overlay: {ex.Message}");
         }
     }
@@ -476,16 +481,21 @@ public partial class MainWindow : Window, IUiNavigationHost
     public void CommitSettings()
     {
         _bindingSession.CommitSettings();
+
+        if (IsOptionsOverlayOpen && _overlayRoot != null)
+            DisplayOptionsApplier.Save(_overlayRoot);
+
         _environment = ClientEnvironment.Discover(_environment.GameRoot);
         ShowStatus($"Settings saved: {_bindingSession.Settings.SettingsPath}");
-
-        if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
-            NavigateTo("MainMenu");
     }
 
     public void DiscardSettings()
     {
         _bindingSession.DiscardSettings();
+
+        if (IsOptionsOverlayOpen && _overlayRoot != null)
+            DisplayOptionsApplier.Apply(_overlayRoot);
+
         ShowStatus("Settings changes discarded");
     }
 
@@ -528,17 +538,31 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         _lobbySession.PlayerState.SaveSkirmishSettings();
 
-        return _gameLaunch.TryLaunchSkirmish(
+        var request = new SkirmishLaunchRequest
+        {
+            Map = map,
+            GameMode = gameMode,
+            Players = _lobbySession.PlayerState,
+            LobbyRoot = _activeRoot,
+        };
+
+        message = "Launching game...";
+        _gameLaunch.BeginLaunch(
             _environment,
-            new SkirmishLaunchRequest
+            new SkirmishLaunchSession(request),
+            (ok, result) => Dispatcher.UIThread.Post(() =>
             {
-                Map = map,
-                GameMode = gameMode,
-                Players = _lobbySession.PlayerState,
-                LobbyRoot = _activeRoot,
-            },
-            out message,
-            this);
+                if (!ok)
+                {
+                    ShowStatus($"Launch failed: {result}");
+                    ClientDialogService.ShowError(this, "Cannot launch game", result);
+                    return;
+                }
+
+                ShowStatus(result);
+            }));
+
+        return true;
     }
 
     public bool TryLaunchCampaign(out string message)
@@ -1008,8 +1032,13 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void OnCnCNetGameStarting(CnCNetStartGameInfo startInfo)
     {
+        Logger.Log($"CnCNet GameStarting: gameId={startInfo.UniqueGameId}, tunnel={startInfo.Tunnel.Address}:{startInfo.Tunnel.Port}, localPort={startInfo.LocalPlayerPort}, window={CurrentWindow}");
+
         if (_activeRoot == null || !CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.Log("CnCNet GameStarting: aborted — not in CnCNetGameLobby.");
             return;
+        }
 
         UiNodeViewModel? ddGameMode = FindVm(_activeRoot, "ddGameMode");
         if (ddGameMode != null)
@@ -1023,7 +1052,9 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (map == null || gameMode == null)
         {
+            Logger.Log($"CnCNet GameStarting: map/gameMode missing (map={map?.DisplayName ?? "null"}, mode={gameMode?.DisplayName ?? "null"}, visibleMaps={_lobbySession.VisibleMaps.Count}, filter={_lobbySession.FilterIndex}).");
             ShowStatus("Cannot launch: map or game mode missing.");
+            ClientDialogService.ShowError(this, "Cannot launch game", "Map or game mode is missing. Reselect a map and try again.");
             return;
         }
 
@@ -1035,21 +1066,28 @@ public partial class MainWindow : Window, IUiNavigationHost
             LobbyRoot = _activeRoot,
         };
 
-        if (!_gameLaunch.TryLaunchCnCNet(
-                _environment,
-                startInfo,
-                request,
-                out string message,
-                this,
-                CnCNetSessionService.Instance.GameRoom?.Players,
-                CollectCnCNetGameOptions()))
-        {
-            ShowStatus($"Launch failed: {message}");
-            ClientDialogService.ShowError(this, "Cannot launch game", message);
-            return;
-        }
+        Logger.Log($"CnCNet GameStarting: launching {map.DisplayName} / {gameMode.DisplayName} via Syringe.");
 
-        ShowStatus(message);
+        ShowStatus("Launching game...");
+
+        var startSnapshot = startInfo;
+        var roomPlayers = CnCNetSessionService.Instance.GameRoom?.Players;
+        var gameOptions = CollectCnCNetGameOptions();
+
+        _gameLaunch.BeginLaunch(
+            _environment,
+            new MultiplayerLaunchSession(request, startSnapshot, roomPlayers, gameOptions),
+            (ok, result) => Dispatcher.UIThread.Post(() =>
+            {
+                if (!ok)
+                {
+                    ShowStatus($"Launch failed: {result}");
+                    ClientDialogService.ShowError(this, "Cannot launch game", result);
+                    return;
+                }
+
+                ShowStatus(result);
+            }));
     }
 
     private void UpdateLaunchButtonState(UiNodeViewModel? root = null)
@@ -1250,7 +1288,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (_activeRoot == null)
             return;
 
-        CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources);
+        CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources, _lobbySession);
         RefreshLobbyMapList();
         RefreshCnCNetGameListing();
     }
@@ -1414,10 +1452,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (e.Key == Key.F12 && !IsFloatingOverlayOpen)
         {
-            if (CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
-                OpenOptionsOverlay();
-            else
-                ShowStatus("Settings overlay opens from Main Menu (F2).");
+            OpenFloatingOverlay("OptionsWindow");
             e.Handled = true;
             return;
         }

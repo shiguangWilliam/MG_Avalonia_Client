@@ -19,7 +19,8 @@ internal static class Program
         if (TryValidateIni(args))
             return;
 
-        ClientStartupService.Run();
+        StartupParams parameters = PreStartup.ParseArguments(args);
+        PreStartup.Initialize(parameters);
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

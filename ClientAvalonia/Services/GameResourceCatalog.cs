@@ -2,6 +2,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientCore;
 using ClientCore.Extensions;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.Services;
 
@@ -29,7 +30,10 @@ public sealed class GameResourceCatalog
     public void EnsureLoaded()
     {
         if (!ClientCoreBootstrap.IsInitialized)
+        {
+            Logger.Log("GameResourceCatalog: skipped — ClientCore not initialized.");
             return;
+        }
 
         if (IsLoaded && Maps.Count > 0)
             return;
@@ -92,6 +96,35 @@ public sealed class GameResourceCatalog
 
         int gameModeIndex = filterIndex - LobbySessionState.FavoriteFilterIndex - 1;
         return gameModeIndex >= 0 && gameModeIndex < GameModes.Count ? GameModes[gameModeIndex] : null;
+    }
+
+    /// <summary>Combo filter index (0=favorites, 1+=game mode) that includes <paramref name="map"/>.</summary>
+    public int FindFilterIndexForMap(MapEntry map)
+    {
+        EnsureLoaded();
+
+        for (int modeIndex = 0; modeIndex < GameModes.Count; modeIndex++)
+        {
+            string modeName = GameModes[modeIndex].Name;
+            if (!map.GameModes.Any(gm => gm.Equals(modeName, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            return LobbySessionState.FavoriteFilterIndex + 1 + modeIndex;
+        }
+
+        return GameModes.Count > 0 ? LobbySessionState.FavoriteFilterIndex + 1 : LobbySessionState.FavoriteFilterIndex;
+    }
+
+    public static int IndexOfMapInList(IReadOnlyList<MapEntry> maps, MapEntry map)
+    {
+        for (int i = 0; i < maps.Count; i++)
+        {
+            if (maps[i].Sha1.Equals(map.Sha1, StringComparison.OrdinalIgnoreCase)
+                && maps[i].BaseFilePath.Equals(map.BaseFilePath, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
     }
 
     public IReadOnlyList<MapEntry> GetFavoriteMaps()

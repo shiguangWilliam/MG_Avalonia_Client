@@ -41,7 +41,7 @@
   build-clientavalonia.ps1
   Release single-file build → CompiledAvalonia + ClientAvalonia/publish
 .EXAMPLE
-  build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区2"
+  build-clientavalonia.ps1 -DeployTo "D:\MG\MG-Avalonia测试区3"
 #>
 param(
   [Parameter()]
@@ -213,6 +213,20 @@ function Copy-AvaloniaRuntimeOnly {
     }
 
     Remove-LooseSingleFileArtifacts -PackRoot $DestinationRoot
+    $destExe = Join-Path $DestinationRoot 'ClientAvalonia.exe'
+    if (Test-Path -LiteralPath $destExe) {
+      $backupExe = Join-Path $DestinationRoot 'ClientAvalonia.exe.old'
+      if (Test-Path -LiteralPath $backupExe) {
+        Remove-Item -LiteralPath $backupExe -Force
+      }
+      try {
+        Rename-Item -LiteralPath $destExe -NewName 'ClientAvalonia.exe.old' -Force
+      }
+      catch {
+        Write-Warning "Could not rename locked ClientAvalonia.exe — close the running client and redeploy."
+        throw
+      }
+    }
     Copy-Item -LiteralPath $exe -Destination $DestinationRoot -Force
     Write-Host "Deployed single-file exe (removed legacy loose DLLs in target)."
     return

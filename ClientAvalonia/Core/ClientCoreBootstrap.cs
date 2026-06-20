@@ -9,7 +9,7 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.Core;
 
-/// <summary>Initializes ClientCore (settings, translation, resource paths) aligned with DXMainClient PreStartup.</summary>
+/// <summary>Initializes ClientCore user settings and translation (DXMainClient PreStartup, post-logger).</summary>
 public static class ClientCoreBootstrap
 {
     private static bool _initialized;
@@ -39,10 +39,31 @@ public static class ClientCoreBootstrap
             Environment.CurrentDirectory = gameRoot;
             ProgramConstants.SetHostedGameRoot(gameRoot);
 
-            _ = EncodingExt.UTF8NoBOM;
+            if (!ClientLogService.IsInitialized)
+            {
+                error = "Logger must be initialized before ClientCoreBootstrap.";
+                return false;
+            }
 
-            Translation.InitialUICulture = CultureInfo.CurrentUICulture;
-            CultureInfo.CurrentUICulture = new CultureInfo(ProgramConstants.HARDCODED_LOCALE_CODE);
+            if (!TryCompleteUserSettingsInitialization(out error))
+                return false;
+
+            _initialized = true;
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    public static bool TryCompleteUserSettingsInitialization(out string? error)
+    {
+        try
+        {
+            Logger.Log("Loading settings.");
 
             UserINISettings.Initialize(ClientConfiguration.Instance.SettingsIniName);
 
@@ -79,17 +100,28 @@ public static class ClientCoreBootstrap
 
             if (translationFile.Exists)
             {
+                Logger.Log($"Loading generic translation file at {translationFile.FullName}");
                 Translation translation = new(translationFile.FullName, UserINISettings.Instance.Translation.Value);
                 if (translationThemeFile.Exists)
+                {
+                    Logger.Log($"Loading theme-specific translation file at {translationThemeFile.FullName}");
                     translation.AppendValuesFromIniFile(translationThemeFile.FullName);
+                }
 
                 Translation.Instance = translation;
             }
             else
+            {
+                Logger.Log(
+                    $"Failed to load a translation file. Neither {translationThemeFile.FullName} nor {translationFile.FullName} exist.");
                 Translation.Instance = new Translation(UserINISettings.Instance.Translation.Value);
+            }
+
+            Logger.Log("Loaded translation: " + Translation.Instance.Name);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log("Failed to load the translation file. " + ex);
             Translation.Instance = new Translation(UserINISettings.Instance.Translation.Value);
         }
     }

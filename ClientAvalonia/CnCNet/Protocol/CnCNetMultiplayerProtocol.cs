@@ -6,6 +6,7 @@ using System.Linq;
 
 namespace ClientAvalonia.CnCNet.Protocol;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>
 /// CnCNet multiplayer CTCP parsing aligned with DXMainClient
 /// (<c>CnCNetLobby</c>, <c>CnCNetGameLobby</c>).
@@ -26,7 +27,7 @@ public static class CnCNetMultiplayerProtocol
     public static bool TryParseGameBroadcast(
         string hostName,
         string ctcpMessage,
-        IReadOnlyList<CnCNetTunnelEntry>? tunnels,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
         string sourceGameId,
         out CnCNetHostedGameSummary? game,
         out string? rejectReason)
@@ -66,14 +67,12 @@ public static class CnCNetMultiplayerProtocol
         bool isLoadedGame = Conversions.BooleanFromString(parts[5].Substring(3, 1), defaultValue: false);
         bool isLadder = Conversions.BooleanFromString(parts[5].Substring(4, 1), defaultValue: false);
 
-        string[] tunnelParts = parts[9].Split(':');
-        if (tunnelParts.Length < 2 || !int.TryParse(tunnelParts[1], out int tunnelPort))
+        if (!CnCNetPortValidator.TryParseEndpoint(parts[9], out string tunnelAddress, out ushort tunnelPort))
         {
             rejectReason = "invalid tunnel address";
             return false;
         }
 
-        string tunnelAddress = tunnelParts[0];
         if (tunnels != null)
         {
             if (tunnels.Count == 0)
@@ -133,7 +132,7 @@ public static class CnCNetMultiplayerProtocol
     public static bool TryParseLegacyGameBroadcast(
         string hostName,
         string ctcpMessage,
-        IReadOnlyList<CnCNetTunnelEntry>? tunnels,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
         string sourceGameId,
         out CnCNetHostedGameSummary? game,
         out string? rejectReason)
@@ -168,14 +167,12 @@ public static class CnCNetMultiplayerProtocol
         bool isLoadedGame = CnCNetGameFlags.ParseLoadedGame(flags);
         bool isLadder = CnCNetGameFlags.ParseLadder(flags);
 
-        string[] tunnelParts = parts[9].Split(':');
-        if (tunnelParts.Length < 2 || !int.TryParse(tunnelParts[1], out int tunnelPort))
+        if (!CnCNetPortValidator.TryParseEndpoint(parts[9], out string tunnelAddress, out ushort tunnelPort))
         {
             rejectReason = "invalid tunnel address";
             return false;
         }
 
-        string tunnelAddress = tunnelParts[0];
         if (tunnels != null)
         {
             if (tunnels.Count == 0)
@@ -236,7 +233,8 @@ public static class CnCNetMultiplayerProtocol
         string payload,
         string localPlayerName,
         IReadOnlyList<CnCNetGameRoomPlayer> knownPlayers,
-        IReadOnlyList<CnCNetTunnelEntry> tunnels,
+        IReadOnlyList<CnCNetTunnel> tunnels,
+        CnCNetTunnel? roomTunnel,
         out CnCNetStartParseResult result,
         out string? error)
     {
@@ -254,12 +252,14 @@ public static class CnCNetMultiplayerProtocol
         if (uniqueGameId < 0)
         {
             error = "START game id is invalid.";
+            Logger.Log($"CnCNet START: invalid game id in payload: {payload}");
             return false;
         }
 
-        var playerPorts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        CnCNetTunnelEntry? matchedTunnel = null;
-        int localPort = 0;
+        var playerPorts = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase);
+        CnCNetTunnel? matchedTunnel = null;
+        ushort localPort = CnCNetPortValidator.UnsetPort;
+        bool localPlayerSeen = false;
 
         for (int i = 1; i < parts.Length; i += 2)
         {
@@ -270,23 +270,20 @@ public static class CnCNetMultiplayerProtocol
             }
 
             string playerName = parts[i];
-            string[] ipAndPort = parts[i + 1].Split(':');
-            if (ipAndPort.Length < 2 || !int.TryParse(ipAndPort[1], out int port))
+            if (!TryParseStartAddressPort(parts[i + 1], out string tunnelAddress, out ushort port))
             {
                 error = $"START port for {playerName} is invalid.";
                 return false;
             }
 
-            if (playerName.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase)
-                || playerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase))
+            if (IsLocalStartPlayer(playerName, localPlayerName))
             {
-                matchedTunnel = tunnels.FirstOrDefault(t =>
-                    t.Address.Equals(ipAndPort[0], StringComparison.OrdinalIgnoreCase));
-
+                localPlayerSeen = true;
+                matchedTunnel = ResolveTunnelForStart(tunnelAddress, tunnels, roomTunnel);
                 if (matchedTunnel == null)
                 {
-                    error = $"Failed to match tunnel address: {ipAndPort[0]}";
-                    Logger.Log($"CnCNet START: failed to match tunnel address {ipAndPort[0]}");
+                    error = $"Failed to match tunnel address: {tunnelAddress}";
+                    Logger.Log($"CnCNet START: failed to match tunnel address {tunnelAddress} (payload: {payload})");
                     return false;
                 }
 
@@ -305,9 +302,9 @@ public static class CnCNetMultiplayerProtocol
             playerPorts[playerName] = port;
         }
 
-        if (!CnCNetPortValidator.IsValidPlayerPort(localPort))
+        if (!localPlayerSeen)
         {
-            error = $"START assigned invalid local port {localPort}.";
+            error = "START message does not include the local player.";
             return false;
         }
 
@@ -319,6 +316,64 @@ public static class CnCNetMultiplayerProtocol
             MatchedTunnel = matchedTunnel,
         };
         return true;
+    }
+
+    /// <summary>
+    /// DX loading lobby sends <c>0.0.0.0:port</c> (port only); regular lobby sends tunnel IP.
+    /// </summary>
+    private static bool IsPlaceholderStartAddress(string address)
+        => string.IsNullOrWhiteSpace(address)
+           || address.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLocalStartPlayer(string playerName, string localPlayerName)
+    {
+        if (playerName.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return playerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase)
+               && localPlayerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>DX <c>NonHostLaunchGame</c>: port via <c>int.TryParse</c>; address may be <c>0.0.0.0</c>.</summary>
+    private static bool TryParseStartAddressPort(string field, out string address, out ushort port)
+    {
+        address = string.Empty;
+        port = CnCNetPortValidator.UnsetPort;
+
+        int colon = field.LastIndexOf(':');
+        if (colon <= 0 || colon >= field.Length - 1)
+            return false;
+
+        address = field[..colon].Trim();
+        return CnCNetPortValidator.TryParse(field[(colon + 1)..], out port);
+    }
+
+    private static CnCNetTunnel? ResolveTunnelForStart(
+        string startAddress,
+        IReadOnlyList<CnCNetTunnel> tunnels,
+        CnCNetTunnel? roomTunnel)
+    {
+        if (!IsPlaceholderStartAddress(startAddress))
+        {
+            CnCNetTunnel? listed = tunnels.FirstOrDefault(t =>
+                t.Address.Equals(startAddress, StringComparison.OrdinalIgnoreCase));
+            if (listed != null)
+                return listed;
+
+            listed = CnCNetTunnelListLoader.Load().FirstOrDefault(t =>
+                t.Address.Equals(startAddress, StringComparison.OrdinalIgnoreCase));
+            if (listed != null)
+                return listed;
+        }
+
+        if (roomTunnel != null && !IsPlaceholderStartAddress(roomTunnel.Address))
+        {
+            Logger.Log(
+                $"CnCNet START: using room tunnel {roomTunnel.Address}:{roomTunnel.Port} (START listed {startAddress}).");
+            return roomTunnel;
+        }
+
+        return null;
     }
 
     /// <summary>DX <c>CnCNetGameLobby.ApplyPlayerOptions</c>.</summary>
@@ -495,9 +550,9 @@ public readonly struct CnCNetStartParseResult
 {
     public int UniqueGameId { get; init; }
 
-    public int LocalPlayerPort { get; init; }
+    public ushort LocalPlayerPort { get; init; }
 
-    public IReadOnlyDictionary<string, int> PlayerPorts { get; init; }
+    public IReadOnlyDictionary<string, ushort> PlayerPorts { get; init; }
 
-    public CnCNetTunnelEntry? MatchedTunnel { get; init; }
+    public CnCNetTunnel? MatchedTunnel { get; init; }
 }

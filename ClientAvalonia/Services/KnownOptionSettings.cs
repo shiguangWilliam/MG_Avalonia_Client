@@ -20,7 +20,6 @@ public static class KnownOptionSettings
     private static readonly Dictionary<string, (string Section, string Key)> Mappings =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["chkWindowedMode"] = ("Video", "Video.Windowed"),
             ["chkPlaySoundOnGameHosted"] = ("MultiPlayer", "PlaySoundOnGameHosted"),
             ["chkNotifyOnUserListChange"] = ("MultiPlayer", "NotifyOnUserListChange"),
             ["chkSkipLoginWindow"] = ("MultiPlayer", "SkipConnectDialog"),
@@ -34,9 +33,8 @@ public static class KnownOptionSettings
             ["ddAllowPrivateMessagesFrom"] = ("MultiPlayer", "AllowPrivateMessagesFromState"),
             ["chkStretchMovies"] = ("Video", "StretchMovies"),
             ["chkStopMusicOnMenu"] = ("Audio", "StopMusicOnMenu"),
-            ["chkBackBufferInVRAM"] = ("Video", "VideoBackBuffer"),
+            ["chkBorderlessClient"] = ("Video", "BorderlessWindowedClient"),
             ["ddDetailLevel"] = ("Options", "DetailLevel"),
-            ["ddClientResolution"] = ("Video", "ClientResolution"),
             ["tbPlayerName"] = ("MultiPlayer", "Handle"),
         };
 }

@@ -14,7 +14,6 @@ internal static class OptionsDisplayControlsBootstrap
     [
         new("ddIngameResolution", "800x600,1024x768,1280x720,1280x800,1920x1080"),
         new("ddDetailLevel", "低,中,高", 1),
-        new("ddRenderer", "Default,CNC-DDraw,TS-DDraw,TS-DDraw-2"),
         new("ddClientResolution", "(default),1280x720,1280x800,1920x1080"),
         new("ddClientTheme", "Moment of Genesis,Default"),
     ];

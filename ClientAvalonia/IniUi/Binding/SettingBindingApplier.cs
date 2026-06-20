@@ -116,6 +116,7 @@ public static class SettingBindingApplier
             Section = section,
             Key = key,
             DefaultIndex = ReadDefaultIndex(vm),
+            WriteItemValue = ReadBoolProp(vm, "WriteItemValue"),
         };
     }
 

@@ -37,6 +37,8 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <!-- Ensures ClientUpdater HTTP deps are copied on publish -->
     <PackageReference Include="Microsoft.AspNet.WebApi.Client" />
+    <PackageReference Include="System.DirectoryServices" />
+    <PackageReference Include="System.Management" />
   </ItemGroup>
 
   <ItemGroup>

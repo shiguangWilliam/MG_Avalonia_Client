@@ -1,9 +1,9 @@
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
+using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Rendering;
 using ClientCore;
 using Rampastring.Tools;
-using System.Linq;
 
 namespace ClientAvalonia.Services;
 
@@ -43,7 +43,11 @@ public static class CnCNetGameOptionsUiBridge
         };
     }
 
-    public static void Apply(UiNodeViewModel? root, CnCNetGameOptionsState state, GameResourceCatalog resources)
+    public static void Apply(
+        UiNodeViewModel? root,
+        CnCNetGameOptionsState state,
+        GameResourceCatalog resources,
+        LobbySessionState? session = null)
     {
         if (root == null)
             return;
@@ -54,62 +58,94 @@ public static class CnCNetGameOptionsUiBridge
         CnCNetGameOptionsCatalog.ApplyCheckBoxValues(checkBoxes, state.CheckBoxValues);
         CnCNetGameOptionsCatalog.ApplyDropDownIndices(dropDowns, state.DropDownIndices);
 
-        if (!string.IsNullOrWhiteSpace(state.MapSha1) || !string.IsNullOrWhiteSpace(state.MapUntranslatedName))
-        {
-            MapEntry? map = resources.Maps.FirstOrDefault(m =>
-                (!string.IsNullOrWhiteSpace(state.MapSha1) && m.Sha1.Equals(state.MapSha1, StringComparison.OrdinalIgnoreCase))
-                || m.UntranslatedName.Equals(state.MapUntranslatedName, StringComparison.OrdinalIgnoreCase));
-
-            if (map != null)
-            {
-                UiNodeViewModel? lbMapList = FindNode(root, "lbMapList");
-                int index = IndexOfMap(resources.Maps, map);
-                if (lbMapList != null && index >= 0)
-                    lbMapList.SelectedIndex = index;
-            }
-            else if (!state.MapOfficial && !string.IsNullOrWhiteSpace(state.MapSha1))
-            {
-                Logger.Log($"CnCNet GO: custom map {state.MapSha1} not installed.");
-            }
-        }
+        MapEntry? map = ResolveMap(resources, state);
+        if (map != null)
+            ApplyMapSelection(root, resources, session, map);
+        else if (!state.MapOfficial && !string.IsNullOrWhiteSpace(state.MapSha1))
+            Logger.Log($"CnCNet GO: custom map {state.MapSha1} not installed.");
 
         if (!string.IsNullOrWhiteSpace(state.GameModeName))
-        {
-            GameModeEntry? mode = resources.GameModes.FirstOrDefault(m =>
-                m.Name.Equals(state.GameModeName, StringComparison.OrdinalIgnoreCase)
-                || m.UntranslatedUIName.Equals(state.GameModeName, StringComparison.OrdinalIgnoreCase));
-
-            if (mode != null)
-            {
-                UiNodeViewModel? lbGameMode = FindNode(root, "lbGameMode");
-                int modeIndex = IndexOfGameMode(resources.GameModes, mode);
-                if (lbGameMode != null && modeIndex >= 0)
-                    lbGameMode.SelectedIndex = modeIndex;
-            }
-        }
+            ApplyGameModeSelection(root, resources, session, state.GameModeName);
     }
 
-    private static int IndexOfMap(IReadOnlyList<MapEntry> maps, MapEntry map)
+    private static MapEntry? ResolveMap(GameResourceCatalog resources, CnCNetGameOptionsState state)
     {
-        for (int i = 0; i < maps.Count; i++)
+        resources.EnsureLoaded();
+
+        if (!string.IsNullOrWhiteSpace(state.MapSha1))
         {
-            if (maps[i].Sha1.Equals(map.Sha1, StringComparison.OrdinalIgnoreCase)
-                && maps[i].BaseFilePath.Equals(map.BaseFilePath, StringComparison.OrdinalIgnoreCase))
-                return i;
+            MapEntry? byHash = resources.Maps.FirstOrDefault(m =>
+                m.Sha1.Equals(state.MapSha1, StringComparison.OrdinalIgnoreCase));
+            if (byHash != null)
+                return byHash;
         }
 
-        return -1;
+        if (!string.IsNullOrWhiteSpace(state.MapUntranslatedName))
+        {
+            return resources.Maps.FirstOrDefault(m =>
+                m.UntranslatedName.Equals(state.MapUntranslatedName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return null;
     }
 
-    private static int IndexOfGameMode(IReadOnlyList<GameModeEntry> modes, GameModeEntry mode)
+    private static void ApplyMapSelection(
+        UiNodeViewModel root,
+        GameResourceCatalog resources,
+        LobbySessionState? session,
+        MapEntry map)
     {
-        for (int i = 0; i < modes.Count; i++)
+        int filterIndex = resources.FindFilterIndexForMap(map);
+        UiNodeViewModel? ddGameMode = FindNode(root, "ddGameMode");
+        if (ddGameMode != null)
         {
-            if (modes[i].Name.Equals(mode.Name, StringComparison.OrdinalIgnoreCase))
-                return i;
+            ddGameMode.SetSelectedIndexSilent(filterIndex);
+            if (session != null)
+                session.FilterIndex = filterIndex;
         }
 
-        return -1;
+        if (session == null)
+            return;
+
+        IReadOnlyList<MapEntry> visible = resources.GetMapsForFilterIndex(filterIndex);
+        visible = resources.FilterMapsBySearch(visible, session.MapSearchText);
+        session.SetVisibleMaps(visible);
+
+        int visibleIndex = GameResourceCatalog.IndexOfMapInList(visible, map);
+        UiNodeViewModel? lbMapList = FindNode(root, "lbMapList");
+        if (lbMapList == null || visibleIndex < 0)
+            return;
+
+        lbMapList.SetListItems(visible.Select(m => m.DisplayName));
+        lbMapList.SetSelectedIndexSilent(visibleIndex);
+    }
+
+    private static void ApplyGameModeSelection(
+        UiNodeViewModel root,
+        GameResourceCatalog resources,
+        LobbySessionState? session,
+        string gameModeName)
+    {
+        GameModeEntry? mode = resources.GameModes.FirstOrDefault(m =>
+            m.Name.Equals(gameModeName, StringComparison.OrdinalIgnoreCase)
+            || m.UntranslatedUIName.Equals(gameModeName, StringComparison.OrdinalIgnoreCase));
+
+        if (mode == null)
+            return;
+
+        int modeIndex = resources.GameModes.ToList().FindIndex(m =>
+            m.Name.Equals(mode.Name, StringComparison.OrdinalIgnoreCase));
+        if (modeIndex < 0)
+            return;
+
+        int filterIndex = LobbySessionState.FavoriteFilterIndex + 1 + modeIndex;
+        UiNodeViewModel? ddGameMode = FindNode(root, "ddGameMode");
+        if (ddGameMode != null)
+        {
+            ddGameMode.SetSelectedIndexSilent(filterIndex);
+            if (session != null)
+                session.FilterIndex = filterIndex;
+        }
     }
 
     private static UiNodeViewModel? FindNode(UiNodeViewModel root, string id)

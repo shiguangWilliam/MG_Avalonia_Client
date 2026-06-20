@@ -107,6 +107,9 @@ namespace ClientCore
 
         public static bool IsInGame { get; set; }
 
+        /// <summary>True while spawn prep / Syringe startup is in progress (before game process is running).</summary>
+        public static bool IsLaunchingGame { get; set; }
+
         public static string GetResourcePath()
         {
             return SafePath.CombineDirectoryPath(GamePath, RESOURCES_DIR);

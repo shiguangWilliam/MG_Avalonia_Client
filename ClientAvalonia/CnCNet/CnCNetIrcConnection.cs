@@ -314,6 +314,12 @@ public sealed class CnCNetIrcConnection : IDisposable
         SendInstant($"PART {wire}");
     }
 
+    /// <summary>DX ConnectionManager SendCustomMessage AWAY / AWAY :In-game (immediate, not queued behind CTCP).</summary>
+    public void SendAway(string? reason = null)
+    {
+        SendInstant(string.IsNullOrWhiteSpace(reason) ? "AWAY" : $"AWAY :{reason}");
+    }
+
     public void KickFromChannel(string channel, string userName)
     {
         if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(userName))
@@ -812,6 +818,11 @@ public sealed class CnCNetIrcConnection : IDisposable
                 Register();
                 if (parameters.Count > 1)
                     ServerMessage?.Invoke(string.Join(' ', parameters.Skip(1)));
+                break;
+            // Expected AWAY confirmations — not user-facing errors.
+            case 301:
+            case 305:
+            case 306:
                 break;
             default:
                 if (parameters.Count > 1)

@@ -7,6 +7,7 @@ using System.Linq;
 
 namespace ClientAvalonia.IniUi.Overlays;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>INI-driven create-game overlay (when GameCreationWindow.ini defines controls).</summary>
 public static class GameCreationIniOverlayBehaviors
 {
@@ -21,7 +22,7 @@ public static class GameCreationIniOverlayBehaviors
     {
         if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
         {
-            host.ShowStatus("Joining game room â€” please wait...");
+            host.ShowStatus("Joining game room â€?please wait...");
             return;
         }
 
@@ -44,7 +45,7 @@ public static class GameCreationIniOverlayBehaviors
             return;
         }
 
-        CnCNetTunnelEntry tunnel = CnCNetSessionService.Instance.Tunnels.FirstOrDefault(t => t.Official)
+        CnCNetTunnel tunnel = CnCNetSessionService.Instance.Tunnels.FirstOrDefault(t => t.Official)
             ?? CnCNetSessionService.Instance.Tunnels[0];
 
         var request = new CnCNetGameCreationRequest

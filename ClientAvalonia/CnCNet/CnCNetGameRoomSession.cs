@@ -6,10 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>In-room CnCNet game lobby logic (XNA CnCNetGameLobby CTCP subset).</summary>
 public sealed class CnCNetGameRoomSession
 {
@@ -38,7 +40,7 @@ public sealed class CnCNetGameRoomSession
 
     public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts { get; set; }
 
-    public Func<IReadOnlyList<CnCNetTunnelEntry>>? AvailableTunnelsProvider { get; set; }
+    public Func<IReadOnlyList<CnCNetTunnel>>? AvailableTunnelsProvider { get; set; }
 
     public int PlayerOptionsMaxSideIndex { get; set; } = 10;
 
@@ -131,8 +133,16 @@ public sealed class CnCNetGameRoomSession
         }
 
         LogNotice(IsHost ? $"Hosting \"{Room.RoomName}\"." : $"Joined \"{Room.RoomName}\".");
-        if (!IsHost && _connection?.IsLocalOnChannel(Room.ChannelName) == true)
-            BroadcastLocalTunnelPingLocked();
+
+        if (_connection?.IsLocalOnChannel(Room.ChannelName) == true)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                Room.Tunnel.UpdatePing();
+                BroadcastLocalTunnelPingLocked();
+                StateChanged?.Invoke();
+            });
+        }
 
         StateChanged?.Invoke();
     }
@@ -228,7 +238,7 @@ public sealed class CnCNetGameRoomSession
             {
                 BroadcastPlayerOptionsLocked();
 
-                if (_locked && !ProgramConstants.IsInGame)
+                if (_locked && !ProgramConstants.IsInGame && !ProgramConstants.IsLaunchingGame)
                     SetLocked(false);
             }
         }
@@ -450,6 +460,27 @@ public sealed class CnCNetGameRoomSession
         StateChanged?.Invoke();
     }
 
+    /// <summary>Send TNLPNG without ICMP (launch keepalive synthetic mode).</summary>
+    public void BroadcastTunnelPingValue(int pingMs)
+    {
+        if (!_localJoined)
+            return;
+
+        lock (_sync)
+        {
+            if (_connection == null)
+                return;
+
+            SendCtcp($"TNLPNG {pingMs}");
+
+            CnCNetGameRoomPlayer? local = FindPlayerLocked(_localNick);
+            if (local != null)
+                local.Ping = pingMs;
+        }
+
+        StateChanged?.Invoke();
+    }
+
     public void UpdateGameLobbySettings(string roomName, int maxPlayers, int skillLevel, string? password)
     {
         if (!IsHost || _connection == null)
@@ -638,14 +669,21 @@ public sealed class CnCNetGameRoomSession
 
             if (humans.Count > 1)
             {
-                IReadOnlyList<int> ports = Room.Tunnel.RequestPlayerPorts(humans.Count);
+                if (string.IsNullOrWhiteSpace(Room.Tunnel.Address)
+                    || Room.Tunnel.Address.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase))
+                {
+                    message = "The selected tunnel server is invalid. Choose another tunnel and try again.";
+                    return false;
+                }
+
+                IReadOnlyList<ushort> ports = Room.Tunnel.GetPlayerPortInfo(humans.Count);
                 if (!CnCNetPortValidator.TryValidatePlayerPorts(ports, humans.Count, out string? portError))
                 {
                     message = portError ?? "Could not contact the CnCNet tunnel server. Try another tunnel.";
                     return false;
                 }
 
-                var playerPorts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var playerPorts = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase);
                 var sb = new StringBuilder("START ");
                 sb.Append(_uniqueGameId);
                 for (int i = 0; i < humans.Count; i++)
@@ -655,12 +693,15 @@ public sealed class CnCNetGameRoomSession
                     sb.Append(';');
                     sb.Append(humans[i].Name);
                     sb.Append(';');
-                    sb.Append(Room.Tunnel.Address);
-                    sb.Append(':');
+                    // DX CnCNetGameLoadingLobby / NonHostLaunchGame: only NAT port matters in START;
+                    // tunnel IP is taken from the game room (GAME/CHTNL).
+                    sb.Append("0.0.0.0:");
                     sb.Append(ports[i]);
                 }
 
-                SendCtcp(sb.ToString());
+                string startCtcp = sb.ToString();
+                Logger.Log($"CnCNet START: broadcasting via tunnel {Room.Tunnel.Address}:{Room.Tunnel.Port} ??{startCtcp}");
+                SendCtcp(startCtcp);
 
                 if (!TryBuildStartGameInfo(playerPorts, out CnCNetStartGameInfo? startInfo, out message)
                     || startInfo == null)
@@ -698,7 +739,7 @@ public sealed class CnCNetGameRoomSession
                 {
                     UniqueGameId = _uniqueGameId,
                     Tunnel = Room.Tunnel,
-                    LocalPlayerPort = 0,
+                    LocalPlayerPort = CnCNetPortValidator.UnsetPort,
                     IsHost = true,
                 });
             }
@@ -709,21 +750,21 @@ public sealed class CnCNetGameRoomSession
     }
 
     private bool TryBuildStartGameInfo(
-        IReadOnlyDictionary<string, int> playerPorts,
+        IReadOnlyDictionary<string, ushort> playerPorts,
         out CnCNetStartGameInfo? startInfo,
         out string message)
     {
         startInfo = null;
         message = string.Empty;
 
-        if (!playerPorts.TryGetValue(_localNick, out int localPort)
+        if (!playerPorts.TryGetValue(_localNick, out ushort localPort)
             && !playerPorts.TryGetValue(ProgramConstants.PLAYERNAME, out localPort))
         {
             message = "Local player port was not assigned by the tunnel server.";
             return false;
         }
 
-        if (!CnCNetPortValidator.IsValidPlayerPort(localPort))
+        if (!CnCNetPortValidator.IsValid(localPort))
         {
             message = $"Tunnel assigned invalid local port {localPort}. Try another tunnel server.";
             return false;
@@ -779,7 +820,7 @@ public sealed class CnCNetGameRoomSession
         if (IsHost || !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
             return;
 
-        IReadOnlyList<CnCNetTunnelEntry> tunnels = AvailableTunnelsProvider?.Invoke() ?? [];
+        IReadOnlyList<CnCNetTunnel> tunnels = AvailableTunnelsProvider?.Invoke() ?? [];
         IReadOnlyList<CnCNetGameRoomPlayer> knownPlayers;
         lock (_sync)
             knownPlayers = _players.ToList();
@@ -789,6 +830,7 @@ public sealed class CnCNetGameRoomSession
                 _localNick,
                 knownPlayers,
                 tunnels,
+                Room.Tunnel,
                 out CnCNetStartParseResult result,
                 out string? startError))
         {
@@ -800,7 +842,7 @@ public sealed class CnCNetGameRoomSession
         {
             _uniqueGameId = result.UniqueGameId;
 
-            foreach (KeyValuePair<string, int> pair in result.PlayerPorts)
+            foreach (KeyValuePair<string, ushort> pair in result.PlayerPorts)
             {
                 CnCNetGameRoomPlayer? player = FindPlayerLocked(pair.Key);
                 if (player != null)
@@ -967,7 +1009,7 @@ public sealed class CnCNetGameRoomSession
             _players.Clear();
             foreach (CnCNetGameRoomPlayer player in parsed)
             {
-                if (preservedPorts.TryGetValue(player.Name, out int port))
+                if (preservedPorts.TryGetValue(player.Name, out ushort port) && port != CnCNetPortValidator.UnsetPort)
                     player.Port = port;
 
                 _players.Add(player);
@@ -1081,16 +1123,15 @@ public sealed class CnCNetGameRoomSession
         if (IsHost || !sender.Equals(HostName, StringComparison.OrdinalIgnoreCase))
             return;
 
-        string[] split = tunnelAddressAndPort.Split(':');
-        if (split.Length < 2 || !int.TryParse(split[1], out int tunnelPort))
+        if (!CnCNetPortValidator.TryParseEndpoint(tunnelAddressAndPort, out string address, out ushort tunnelPort))
             return;
 
-        CnCNetTunnelEntry? tunnel = AvailableTunnelsProvider?.Invoke()
-            .FirstOrDefault(t => t.Address.Equals(split[0], StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
+        CnCNetTunnel? tunnel = AvailableTunnelsProvider?.Invoke()
+            .FirstOrDefault(t => t.Address.Equals(address, StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
 
         if (tunnel == null)
             tunnel = CnCNetTunnelListLoader.Load()
-                .FirstOrDefault(t => t.Address.Equals(split[0], StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
+                .FirstOrDefault(t => t.Address.Equals(address, StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
 
         if (tunnel == null)
         {

@@ -140,6 +140,7 @@ namespace ClientCore
             AlwaysDisplayTunnelList = new BoolSetting(iniFile, MULTIPLAYER, "AlwaysDisplayTunnelList", false);
             MapSortState = new IntSetting(iniFile, MULTIPLAYER, "MapSortState", (int)SortDirection.None);
             SearchAllGameModes = new BoolSetting(iniFile, MULTIPLAYER, "SearchAllGameModes", false);
+            LaunchPresenceKeepAlive = new BoolSetting(iniFile, MULTIPLAYER, "LaunchPresenceKeepAlive", false);
 
             CheckForUpdates = new BoolSetting(iniFile, OPTIONS, "CheckforUpdates", true);
 
@@ -251,6 +252,12 @@ namespace ClientCore
         public IntSetting MapSortState { get; private set; }
 
         public BoolSetting SearchAllGameModes { get; private set; }
+
+        /// <summary>
+        /// When true, send synthetic TNLPNG (and re-JOIN if needed) during slow game launch.
+        /// Off by default — workaround for yuanming mod marking absent players as Error/away.
+        /// </summary>
+        public BoolSetting LaunchPresenceKeepAlive { get; private set; }
 
         /*********************/
         /* GAME LIST FILTERS */

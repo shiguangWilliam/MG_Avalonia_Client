@@ -1,20 +1,17 @@
 using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Controls;
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Loading;
-using ClientAvalonia.Platform;
 using ClientCore;
-using ClientCore.Extensions;
-using ClientAvalonia.CnCNet;
-using ClientCore.INIProcessing;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.Services;
 
-/// <summary>Launches the mod game executable via ClientCore configuration (aligned with ClientGUI GameProcessLogic).</summary>
+/// <summary>
+/// Orchestrates spawn preparation + process launch for all game modes (DX <c>GameLobbyBase.StartGame</c>).
+/// </summary>
 public sealed class GameLaunchService
 {
     private Process? _runningProcess;
@@ -22,48 +19,183 @@ public sealed class GameLaunchService
     public bool IsRunning => _runningProcess is { HasExited: false };
 
     public event Action<string>? StatusChanged;
-
-    /// <summary>Raised after the game process starts (UI should minimize / show in-progress overlay).</summary>
+    public event Action? GameProcessStarting;
     public event Action? GameProcessStarted;
-
-    /// <summary>Raised after the game process exits; client must stay open (XNA GameInProgressWindow).</summary>
     public event Action? GameProcessExited;
+
+    public bool UseQres
+    {
+        get => GameProcessLauncher.UseQres;
+        set => GameProcessLauncher.UseQres = value;
+    }
+
+    public bool SingleCoreAffinity
+    {
+        get => GameProcessLauncher.SingleCoreAffinity;
+        set => GameProcessLauncher.SingleCoreAffinity = value;
+    }
+
+    public GameLaunchService()
+    {
+        GameProcessLauncher.GameProcessStarting += () =>
+        {
+            ProgramConstants.IsLaunchingGame = true;
+            CnCNetSessionService.Instance.BeginLaunchPresenceKeepAlive();
+            GameProcessStarting?.Invoke();
+        };
+        GameProcessLauncher.GameProcessStarted += () =>
+        {
+            ProgramConstants.IsInGame = true;
+            CnCNetSessionService.Instance.NotifyGameProcessStarted();
+            GameProcessStarted?.Invoke();
+        };
+        GameProcessLauncher.GameProcessExited += () =>
+        {
+            ProgramConstants.IsInGame = false;
+            ProgramConstants.IsLaunchingGame = false;
+            CnCNetSessionService.Instance.NotifyGameProcessExited();
+            OnLauncherProcessExited();
+        };
+    }
+
+    private void OnLauncherProcessExited()
+    {
+        _runningProcess = null;
+        StatusChanged?.Invoke("Game exited.");
+        GameProcessExited?.Invoke();
+    }
+
+    public bool TryLaunch(
+        ClientEnvironment environment,
+        IGameLaunchSession session,
+        out string message,
+        Window? errorOwner = null)
+    {
+        if (IsRunning)
+        {
+            message = "Game is already running.";
+            return false;
+        }
+
+        string launchMode = session.LaunchModeLabel;
+        var totalSw = Stopwatch.StartNew();
+        GameLaunchDiagnostics.LogLaunchStart(launchMode, session);
+
+        ProgramConstants.IsLaunchingGame = true;
+
+        try
+        {
+            var spawnSw = Stopwatch.StartNew();
+            Logger.Log($"GameLaunchService: preparing spawn files ({session.GetType().Name}, mode={launchMode}).");
+            session.PrepareSpawnFiles();
+            LogSpawnArtifacts();
+            spawnSw.Stop();
+            GameLaunchDiagnostics.LogAfterSpawnPrep(launchMode, spawnSw.ElapsedMilliseconds);
+
+            var prepSw = Stopwatch.StartNew();
+            if (!GameProcessLauncher.TryStart(environment, errorOwner, out Process? process, out message, out long prepMs)
+                || process == null)
+            {
+                ProgramConstants.IsLaunchingGame = false;
+                CnCNetSessionService.Instance.EndLaunchPresenceKeepAlive();
+                GameLaunchDiagnostics.LogCnCNetState("launch-failed");
+                return false;
+            }
+
+            prepSw.Stop();
+            GameLaunchDiagnostics.LogAfterPreparation(launchMode, prepMs > 0 ? prepMs : prepSw.ElapsedMilliseconds);
+
+            GameProcessLauncher.AttachExitHandler(process);
+            _runningProcess = process;
+
+            totalSw.Stop();
+            GameLaunchDiagnostics.LogProcessStarted(launchMode, totalSw.ElapsedMilliseconds);
+
+            StatusChanged?.Invoke(message);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ProgramConstants.IsLaunchingGame = false;
+            CnCNetSessionService.Instance.EndLaunchPresenceKeepAlive();
+            message = ex.Message;
+            GameLaunchDiagnostics.LogCnCNetState("launch-exception");
+            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
+            return false;
+        }
+    }
+
+    /// <summary>Spawn + launch on a worker thread so IRC/tunnel keepalive is not blocked on the UI thread.</summary>
+    public void BeginLaunch(
+        ClientEnvironment environment,
+        IGameLaunchSession session,
+        Action<bool, string> completion)
+    {
+        long queuedAt = Stopwatch.GetTimestamp();
+        Logger.Log($"GameLaunchService: BeginLaunch queued (mode={session.LaunchModeLabel}).");
+
+        Task.Run(() =>
+        {
+            long workerStartedAt = Stopwatch.GetTimestamp();
+            double queueMs = (workerStartedAt - queuedAt) * 1000.0 / Stopwatch.Frequency;
+            Logger.Log($"GameLaunchService: worker started after {queueMs:F1} ms (mode={session.LaunchModeLabel}).");
+
+            try
+            {
+                bool ok = TryLaunch(environment, session, out string message, errorOwner: null);
+                completion(ok, message);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("GameLaunchService.BeginLaunch failed: " + ex);
+                completion(false, ex.Message);
+            }
+        });
+    }
+
+    private static void LogSpawnArtifacts()
+    {
+        FileInfo spawnIni = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNER_SETTINGS);
+        FileInfo spawnMap = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI);
+
+        Logger.Log(spawnIni.Exists
+            ? $"GameLaunchService: spawn.ini ready ({spawnIni.Length} bytes) at {spawnIni.FullName}"
+            : $"GameLaunchService: spawn.ini MISSING at {spawnIni.FullName}");
+
+        Logger.Log(spawnMap.Exists
+            ? $"GameLaunchService: spawnmap.ini ready ({spawnMap.Length} bytes)"
+            : "GameLaunchService: spawnmap.ini MISSING");
+    }
 
     public bool TryLaunchSkirmish(
         ClientEnvironment environment,
         SkirmishLaunchRequest request,
         out string message,
         Window? errorOwner = null)
-    {
-        SkirmishSpawnWriter.Write(request.Map, request.GameMode, request.Players, request.LobbyRoot);
-        return LaunchGameProcess(environment, errorOwner, out message);
-    }
+        => TryLaunch(environment, new SkirmishLaunchSession(request), out message, errorOwner);
 
     public bool TryLaunchCampaign(
         ClientEnvironment environment,
         CampaignLaunchRequest request,
         out string message,
         Window? errorOwner = null)
-    {
-        if (request.Mission.IsHeader || string.IsNullOrWhiteSpace(request.Mission.Scenario))
-        {
-            message = "No playable mission selected.";
-            return false;
-        }
+        => TryLaunch(environment, new CampaignLaunchSession(request), out message, errorOwner);
 
-        if (!request.Mission.Enabled)
-        {
-            message = "Selected mission is disabled.";
-            return false;
-        }
+    public bool TryLaunchMultiplayer(
+        ClientEnvironment environment,
+        SkirmishLaunchRequest request,
+        out string message,
+        Window? errorOwner = null,
+        CnCNetStartGameInfo? cncNet = null,
+        IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
+        CnCNetGameOptionsState? gameOptions = null)
+        => TryLaunch(
+            environment,
+            new MultiplayerLaunchSession(request, cncNet, roomPlayers, gameOptions),
+            out message,
+            errorOwner);
 
-        CampaignSpawnWriter.Write(request.Mission, request.DifficultyIndex, request.OverlayRoot);
-        return LaunchGameProcess(environment, errorOwner, out message);
-    }
-
-    public bool TryLaunchSkirmish(ClientEnvironment environment, out string message, Window? errorOwner = null)
-        => LaunchGameProcess(environment, errorOwner, out message);
-
+    /// <summary>CnCNet join/host after START CTCP.</summary>
     public bool TryLaunchCnCNet(
         ClientEnvironment environment,
         CnCNetStartGameInfo startInfo,
@@ -72,200 +204,13 @@ public sealed class GameLaunchService
         Window? errorOwner = null,
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
         CnCNetGameOptionsState? gameOptions = null)
-    {
-        CnCNetMultiplayerSpawnWriter.Write(
-            request.Map,
-            request.GameMode,
-            startInfo,
-            request.Players,
-            request.LobbyRoot,
-            roomPlayers,
-            gameOptions);
-        return LaunchGameProcess(environment, errorOwner, out message);
-    }
+        => TryLaunchMultiplayer(environment, request, out message, errorOwner, startInfo, roomPlayers, gameOptions);
 
-    private bool LaunchGameProcess(ClientEnvironment environment, Window? errorOwner, out string message)
-    {
-        if (!ClientCoreBootstrap.IsInitialized)
-            ClientCoreBootstrap.EnsureInitialized(environment.GameRoot);
-
-        if (IsRunning)
-        {
-            message = "Game is already running.";
-            return false;
-        }
-
-        if (!WaitForIniPreprocessor(errorOwner))
-        {
-            message = "INI preprocessing not complete.";
-            return false;
-        }
-
-        OSVersion osVersion = ClientConfiguration.Instance.GetOperatingSystemVersion();
-        string gameExecutableName = ClientConfiguration.Instance.GetGameExecutableName();
-        if (string.IsNullOrWhiteSpace(gameExecutableName))
-        {
-            message = "Game executable is not configured (GameExecutableNames in ClientDefinitions.ini).";
-            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
-            return false;
-        }
-
-        string launcherExecutableName = string.Empty;
-        if (osVersion != OSVersion.UNIX)
-            launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName?.Trim() ?? string.Empty;
-
-        string launchExecutableName;
-        string additionalExecutableName = string.Empty;
-
-        if (osVersion == OSVersion.UNIX)
-        {
-            launchExecutableName = ClientConfiguration.Instance.UnixGameExecutableName;
-            if (string.IsNullOrWhiteSpace(launchExecutableName))
-                launchExecutableName = gameExecutableName;
-        }
-        else if (string.IsNullOrWhiteSpace(launcherExecutableName))
-        {
-            launchExecutableName = gameExecutableName;
-        }
-        else
-        {
-            launchExecutableName = launcherExecutableName;
-            additionalExecutableName = QuoteArgument(gameExecutableName) + " ";
-        }
-
-        string extraCommandLine = ClientConfiguration.Instance.ExtraExeCommandLineParameters?.Trim() ?? string.Empty;
-
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "DTA.LOG");
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TI.LOG");
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TS.LOG");
-
-        string arguments;
-        if (string.IsNullOrWhiteSpace(extraCommandLine))
-            arguments = additionalExecutableName + "-SPAWN";
-        else
-            arguments = " " + additionalExecutableName + "-SPAWN " + extraCommandLine;
-
-        if (!string.IsNullOrWhiteSpace(launcherExecutableName)
-            && string.IsNullOrWhiteSpace(additionalExecutableName))
-        {
-            message = "Syringe launch misconfigured: GameLauncherExecutableName is set but GameExecutableNames is missing. "
-                      + "Set GameExecutableNames=gamemd.exe and GameLauncherExecutableName=Syringe.exe in Resources/ClientDefinitions.ini.";
-            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
-            return false;
-        }
-
-        if (IsSyringeLauncher(launchExecutableName)
-            && !arguments.Contains(QuoteArgument(gameExecutableName), StringComparison.OrdinalIgnoreCase))
-        {
-            message = $"Syringe requires: Syringe.exe \"{gameExecutableName}\" -SPAWN … (got: {arguments.Trim()}). "
-                      + "Check GameExecutableNames in ClientDefinitions.ini.";
-            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
-            return false;
-        }
-
-        FileInfo gameFileInfo = SafePath.GetFile(ProgramConstants.GamePath, launchExecutableName);
-        if (!gameFileInfo.Exists)
-        {
-            message = $"Launch executable not found: {gameFileInfo.FullName}";
-            ClientDialogService.ShowError(errorOwner, "Error launching game", message);
-            return false;
-        }
-
-        try
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = gameFileInfo.FullName,
-                Arguments = arguments,
-                WorkingDirectory = ProgramConstants.GamePath,
-                UseShellExecute = false,
-            };
-
-            Logger.Log("Launch executable: " + startInfo.FileName);
-            Logger.Log("Launch arguments: " + startInfo.Arguments);
-
-            GameProcessStarting?.Invoke();
-
-            Process process = StartDetachedProcess(startInfo);
-            process.EnableRaisingEvents = true;
-            process.Exited += OnProcessExited;
-
-            _runningProcess = process;
-            ProgramConstants.IsInGame = true;
-            GameProcessStarted?.Invoke();
-
-            message = $"Launched {launchExecutableName}";
-            StatusChanged?.Invoke(message);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            string title = "Error launching game";
-            string text = $"Error launching {gameFileInfo.Name}. {ex.Message}";
-            ClientDialogService.ShowError(errorOwner, title, text);
-            message = text;
-            StatusChanged?.Invoke(message);
-            return false;
-        }
-    }
-
-    /// <summary>Aligned with XNA <see cref="ClientGUI.GameProcessLogic.GameProcessStarting"/>.</summary>
-    public event Action? GameProcessStarting;
-
-    private static Process StartDetachedProcess(ProcessStartInfo startInfo)
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return WindowsDetachedProcess.Start(startInfo);
-
-        var process = new Process { StartInfo = startInfo };
-        process.Start();
-        return process;
-    }
-
-    private void OnProcessExited(object? sender, EventArgs e)
-    {
-        if (sender is Process process)
-        {
-            process.Exited -= OnProcessExited;
-            try
-            {
-                process.Dispose();
-            }
-            catch
-            {
-            }
-        }
-
-        _runningProcess = null;
-        ProgramConstants.IsInGame = false;
-
-        Logger.Log("GameLaunchService: game process exited.");
-        GameProcessExited?.Invoke();
-        StatusChanged?.Invoke("Game exited.");
-    }
-
-    private static bool WaitForIniPreprocessor(Window? errorOwner)
-    {
-        int waitTimes = 0;
-        while (PreprocessorBackgroundTask.Instance.IsRunning)
-        {
-            Thread.Sleep(1000);
-            waitTimes++;
-            if (waitTimes <= 10)
-                continue;
-
-            ClientDialogService.ShowError(
-                errorOwner,
-                "INI preprocessing not complete",
-                "INI preprocessing not complete. Please try launching the game again.");
-            return false;
-        }
-
-        return true;
-    }
-
-    private static string QuoteArgument(string value) => "\"" + value + "\"";
-
-    private static bool IsSyringeLauncher(string launchExecutableName)
-        => launchExecutableName.Contains("syringe", StringComparison.OrdinalIgnoreCase);
+    /// <summary>LAN host/join — same spawn+launch pipeline as CnCNet until LAN-specific spawn exists.</summary>
+    public bool TryLaunchLan(
+        ClientEnvironment environment,
+        SkirmishLaunchRequest request,
+        out string message,
+        Window? errorOwner = null)
+        => TryLaunchMultiplayer(environment, request, out message, errorOwner);
 }

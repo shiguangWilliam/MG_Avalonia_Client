@@ -4,6 +4,7 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Parsed CTCP GAME broadcast (CnCNet lobby game list entry).</summary>
 public sealed class CnCNetHostedGameSummary
 {
@@ -36,7 +37,7 @@ public sealed class CnCNetHostedGameSummary
 
     public string TunnelAddress { get; init; } = string.Empty;
 
-    public int TunnelPort { get; init; }
+    public ushort TunnelPort { get; init; }
 
     public string MapName { get; init; } = string.Empty;
 
@@ -66,7 +67,7 @@ public static class CnCNetGameMessageParser
     public static CnCNetHostedGameSummary? TryParse(
         string hostName,
         string ctcpMessage,
-        IReadOnlyList<CnCNetTunnelEntry>? tunnels,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
         out string? rejectReason,
         string sourceGameId = "")
     {
@@ -90,6 +91,6 @@ public static class CnCNetGameMessageParser
     public static CnCNetHostedGameSummary? TryParse(
         string hostName,
         string ctcpMessage,
-        IReadOnlyList<CnCNetTunnelEntry>? tunnels = null)
+        IReadOnlyList<CnCNetTunnel>? tunnels = null)
         => TryParse(hostName, ctcpMessage, tunnels, out _);
 }

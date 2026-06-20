@@ -4,6 +4,7 @@ using System.Linq;
 
 namespace ClientAvalonia.Services;
 
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Avalonia controller: marshals <see cref="CnCNetSession"/> (ClientAvalonia.CnCNet) to UI thread.</summary>
 public sealed class CnCNetSessionService : IDisposable
 {
@@ -45,7 +46,7 @@ public sealed class CnCNetSessionService : IDisposable
 
     public int OnlinePlayerCount => _session.OnlinePlayerCount;
 
-    public IReadOnlyList<CnCNetTunnelEntry> Tunnels => _session.Tunnels;
+    public IReadOnlyList<CnCNetTunnel> Tunnels => _session.Tunnels;
 
     public CnCNetIrcConnection? Connection => _session.Connection;
 
@@ -109,7 +110,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€” please wait.";
+            message = "Already joining a game room â€?please wait.";
             return false;
         }
 
@@ -120,7 +121,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€” please wait.";
+            message = "Already joining a game room â€?please wait.";
             return false;
         }
 
@@ -131,7 +132,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€” please wait.";
+            message = "Already joining a game room â€?please wait.";
             return false;
         }
 
@@ -193,6 +194,14 @@ public sealed class CnCNetSessionService : IDisposable
     public void SetGameRoomLocked(bool locked) => _session.SetGameRoomLocked(locked);
 
     public void SendChatMessage(string message) => _session.SendChatMessage(message);
+
+    public void NotifyGameProcessStarted() => _session.NotifyGameProcessStarted();
+
+    public void NotifyGameProcessExited() => _session.NotifyGameProcessExited();
+
+    public void BeginLaunchPresenceKeepAlive() => _session.BeginLaunchPresenceKeepAlive();
+
+    public void EndLaunchPresenceKeepAlive() => _session.EndLaunchPresenceKeepAlive();
 
     public void SetChatColorIndex(int index) => _session.SetChatColorIndex(index);
 
