@@ -60,6 +60,15 @@ public static class PreStartup
         Environment.CurrentDirectory = gameRoot;
         ProgramConstants.SetHostedGameRoot(gameRoot);
 
+        // Validate every candidate registry key against the freshly-discovered root and repair
+        // (rewrite or clear) any stale/wrong entry. This must happen BEFORE any INI-driven check
+        // so subsequent launches can relocate the install even when CWD is unreliable (e.g. launched
+        // from System32). The legacy post-bootstrap write in Startup.cs honors the
+        // WritePathToRegistry user toggle; here we self-heal unconditionally because without a
+        // trustworthy registry entry the next launch cannot even read that toggle.
+        InstallationRegistry.TryRepairAllCandidates(gameRoot);
+        Logger.Log($"PreStartup: game root resolved and registry validated = {gameRoot}");
+
         _ = EncodingExt.UTF8NoBOM;
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

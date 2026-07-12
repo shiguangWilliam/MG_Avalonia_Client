@@ -2,6 +2,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.Services;
 using ClientCore;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.IniUi.Loading;
 
@@ -337,8 +338,47 @@ public sealed class ClientEnvironment
     }
 
     public static string FindGameRoot(string startDirectory)
+        => FindGameRoot(startDirectory, registryCandidates: null);
+
+    /// <summary>Test seam: <paramref name="registryCandidates"/> overrides the hard-coded list.</summary>
+    internal static string FindGameRoot(string startDirectory, string[]? registryCandidates)
     {
-        string current = Path.GetFullPath(startDirectory);
+        // Bootstrap priority (highest first):
+        //   1. Registry hint (HKCU\SOFTWARE\<candidate>\InstallPath) — survives unrelated CWD
+        //      (e.g. C:\Windows\System32 when launched via shortcut/start-menu without a working dir)
+        //   2. Walk upward from <startDirectory> (usually CWD)
+        //   3. Walk upward from AppContext.BaseDirectory (exe folder) — covers single-file publish
+        //      where CWD has nothing to do with the install
+        //
+        // The previous implementation returned <startDirectory> as-is when nothing matched, which
+        // silently produced invalid roots like System32\Resources. Now we only return a directory
+        // after confirming Resources/ClientDefinitions.ini is reachable; otherwise we fall through
+        // and let the caller surface a clear FileNotFoundException.
+
+        string? registryRoot = registryCandidates != null
+            ? InstallationRegistry.TryReadEarlyBoundInstallPath(registryCandidates, validateFilePresence: true)
+            : InstallationRegistry.TryReadEarlyBoundInstallPath(validateFilePresence: true);
+        if (!string.IsNullOrWhiteSpace(registryRoot))
+            return registryRoot!;
+
+        string? fromStart = WalkUpForGameRoot(Path.GetFullPath(startDirectory));
+        if (fromStart != null)
+            return fromStart;
+
+        string? fromExe = WalkUpForGameRoot(AppContext.BaseDirectory);
+        if (fromExe != null)
+            return fromExe;
+
+        // Last-resort: return the start directory unchanged so the downstream
+        // ClientConfiguration error message points at the actual probed location
+        // (mirrors legacy behaviour for diagnostics) rather than masking it.
+        Logger.Log($"ClientEnvironment: FindGameRoot could not locate Resources/ClientDefinitions.ini from start='{startDirectory}' or exe='{AppContext.BaseDirectory}'.");
+        return Path.GetFullPath(startDirectory);
+    }
+
+    private static string? WalkUpForGameRoot(string start)
+    {
+        string current = start;
         for (int i = 0; i < 8; i++)
         {
             if (File.Exists(Path.Combine(current, "Resources", "ClientDefinitions.ini")))
@@ -354,7 +394,7 @@ public sealed class ClientEnvironment
             current = parent.FullName;
         }
 
-        return Path.GetFullPath(startDirectory);
+        return null;
     }
 
     private static IniDocument? TryLoadClientDefinitions(string gameRoot)

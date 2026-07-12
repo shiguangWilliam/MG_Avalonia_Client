@@ -26,8 +26,8 @@ public sealed class CnCNetHostedGameSummary
 
     public bool Locked { get; init; }
 
-    /// <summary>DXMain <c>HostedCnCNetGame.Passworded</c> (GAME flags byte 2).</summary>
-    public bool Passworded { get; init; }
+    /// <summary>Join-side: parsed from GAME CTCP flags index 1 (DX <c>isCustomPassword</c>).</summary>
+    public bool RequiresPassword { get; init; }
 
     public bool IsLoadedGame { get; init; }
 

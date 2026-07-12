@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Override the engine-variant Directory.Build.props: this project uses plain Debug/Release. -->
+    <Configurations>Debug;Release</Configurations>
+    <Engine />
+    <DefineConstants />
+    <OutputPath />
+    <IntermediateOutputPath />
+    <ArtifactsPivots />
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>true</GenerateProgramFile>
+    <!-- This project does NOT participate in GitVersion. -->
+    <DisableGitVersionTask>true</DisableGitVersionTask>
+    <GitVersion_MsBuildTask_Disabled>true</GitVersion_MsBuildTask_Disabled>
+    <!-- Test SDK auto-generates a Program entry; nothing to clash here, but keep explicit. -->
+    <OutputType>Library</OutputType>
+    <!-- Local package references (don't force CPM entries in Directory.Packages.props). -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <RootNamespace>ClientAvalonia.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="FluentAssertions" Version="6.12.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClientAvalonia\ClientAvalonia.csproj" />
+    <ProjectReference Include="..\ClientCore\ClientCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\DXMainClient\Resources\DTA\MainMenu.ini" Link="Fixtures\MainMenu.ini" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

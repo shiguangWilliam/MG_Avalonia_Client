@@ -3,6 +3,10 @@
     <DisableGitVersionTask>true</DisableGitVersionTask>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClientAvalonia.Tests" />
+  </ItemGroup>
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>

@@ -8,10 +8,10 @@ public sealed class CnCNetGameCreationRequest
 
     public required int MaxPlayers { get; init; }
 
-    public string Password { get; init; } = string.Empty;
+    /// <summary>Host-side: user chose to protect the room (create dialog checkbox).</summary>
+    public bool RequiresPassword { get; init; }
 
-    /// <summary>DXMain: empty password â†?channel SHA1 key; non-empty â†?custom IRC key.</summary>
-    public bool Passworded => !string.IsNullOrWhiteSpace(Password);
+    public string Password { get; init; } = string.Empty;
 
     public required CnCNetTunnel Tunnel { get; init; }
 

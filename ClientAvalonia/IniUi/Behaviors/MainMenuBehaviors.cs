@@ -1,4 +1,6 @@
 using ClientAvalonia.Rendering;
+using ClientCore;
+using System.Diagnostics;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -25,9 +27,31 @@ public static class MainMenuBehaviors
 
         registry.Register("btnExit", _ => host.ExitApplication());
 
-        registry.Register("lblVersion", vm =>
-            host.ShowStatus("Click: version info (stub)"));
+        // Aligned with DX MainMenu.LblVersion_LeftClick: opens ChangelogURL.
+        // ProcessLauncher guards empty URLs (MG ClientDefinitions.ini has ChangelogURL=)
+        // so the client no longer crashes when the URL is unconfigured.
+        registry.Register("lblVersion", vm => OpenChangelogUrl(host));
         registry.Register("lblUpdateStatus", _ => host.CheckForUpdates());
+    }
+
+    private static void OpenChangelogUrl(IUiNavigationHost host)
+    {
+        string url = ClientConfiguration.Instance.ChangelogURL ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            host.ShowStatus("Changelog URL is not configured.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            host.ShowStatus($"Opened: {url}");
+        }
+        catch (Exception ex)
+        {
+            host.ShowStatus($"Failed to open changelog: {ex.Message}");
+        }
     }
 
     private static void RegisterOpen(BehaviorRegistry registry, IUiNavigationHost host, string controlId, string windowName)

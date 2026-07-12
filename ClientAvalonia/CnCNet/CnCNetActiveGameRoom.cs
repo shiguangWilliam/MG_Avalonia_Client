@@ -20,7 +20,7 @@ public sealed class CnCNetActiveGameRoom
 
     public int SkillLevel { get; set; }
 
-    /// <summary>DXMain <c>HostedCnCNetGame.Passworded</c> / CnCNetGameLobby <c>isCustomPassword</c>.</summary>
+    /// <summary>Host-side isCustomPassword; set at create, used for GAME/GSETTINGS broadcast only.</summary>
     public bool Passworded { get; set; }
 }
 

@@ -7,8 +7,22 @@ public static class CnCNetGameFlags
 {
     public const int ExpectedLength = 5;
 
+    /// <summary>DX GAME flags index 1 (isCustomPassword). Only <c>1</c> means passworded.</summary>
     public static bool ParsePassworded(string? flags)
-        => ParseFlag(flags, 1, defaultValue: false);
+    {
+        flags = Normalize(flags);
+        return flags[1] == '1';
+    }
+
+    public static string Normalize(string? flags)
+    {
+        if (string.IsNullOrEmpty(flags))
+            return new string('0', ExpectedLength);
+
+        return flags.Length >= ExpectedLength
+            ? flags[..ExpectedLength]
+            : flags.PadRight(ExpectedLength, '0');
+    }
 
     public static bool ParseLocked(string? flags)
         => ParseFlag(flags, 0, defaultValue: true);

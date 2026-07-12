@@ -39,6 +39,8 @@ public sealed class CnCNetSession : IDisposable
     private int _namesRetryCount;
     private bool _gameRoomJoinPending;
     private int _gameRoomJoinRetryCount;
+    private IReadOnlyList<string>? _gameRoomJoinPasswordCandidates;
+    private int _gameRoomJoinPasswordCandidateIndex;
     private Timer? _gameRoomJoinTimeoutTimer;
     private bool _tunnelRefreshInProgress;
     private uint _tunnelMaintenanceCycle;
@@ -553,6 +555,15 @@ public sealed class CnCNetSession : IDisposable
         }
     }
 
+    public void BeginDefaultPasswordJoinCandidates(IReadOnlyList<string>? candidates)
+    {
+        lock (_gameRoomGate)
+        {
+            _gameRoomJoinPasswordCandidates = candidates;
+            _gameRoomJoinPasswordCandidateIndex = 0;
+        }
+    }
+
     public void SetActiveGameRoom(CnCNetActiveGameRoom room)
     {
         lock (_gameRoomGate)
@@ -809,7 +820,7 @@ public sealed class CnCNetSession : IDisposable
         _gameBroadcast.UpdateListing(mapName, gameModeName, mapSha1, playerNames, locked, closed);
     }
 
-    public void JoinGameChannel(string channelName, string password, out string? error)
+    public void JoinGameChannel(string channelName, string password, out string? error, string? roomNameHint = null)
     {
         error = null;
         if (_connection is not { IsConnected: true })
@@ -822,11 +833,24 @@ public sealed class CnCNetSession : IDisposable
         lock (_gameRoomGate)
         {
             _connection.PrepareChannelJoin(wire);
-            // XNA: JOIN channelName password ??preserve exact channel name from GAME payload.
+            // MG: JOIN channelName password — preserve exact channel name from GAME payload.
             _connection.SendInstant($"JOIN {wire} {password}");
         }
 
-        LogActivity($"? JOIN game channel {wire}", notifyUi: false);
+        if (!string.IsNullOrEmpty(password) && _gameRoomJoinPasswordCandidates is { Count: > 0 })
+        {
+            // MG actual SHA1 input is channelName + GameRoomName (ASCII, then SHA1, then first 10 hex chars).
+            string inputHint = string.IsNullOrEmpty(roomNameHint)
+                ? wire
+                : $"{wire}+{roomNameHint}";
+            LogActivity(
+                $"JOIN game channel {wire} (default +k candidate {_gameRoomJoinPasswordCandidateIndex + 1}/{_gameRoomJoinPasswordCandidates.Count}, MG SHA1 input: \"{inputHint}\")",
+                notifyUi: false);
+        }
+        else
+        {
+            LogActivity($"? JOIN game channel {wire}", notifyUi: false);
+        }
     }
 
     private void ArmGameRoomJoinTimeout()
@@ -853,6 +877,8 @@ public sealed class CnCNetSession : IDisposable
         LogActivity($"Join failed: {message}");
         _gameRoomJoinPending = false;
         _gameRoomJoinRetryCount = 0;
+        _gameRoomJoinPasswordCandidates = null;
+        _gameRoomJoinPasswordCandidateIndex = 0;
         GameRoomJoinFailed?.Invoke(message);
         LeaveGameRoom();
     }
@@ -865,6 +891,8 @@ public sealed class CnCNetSession : IDisposable
         DisarmGameRoomJoinTimeout();
         _gameRoomJoinPending = false;
         _gameRoomJoinRetryCount = 0;
+        _gameRoomJoinPasswordCandidates = null;
+        _gameRoomJoinPasswordCandidateIndex = 0;
 
         if (_activeGameRoom.IsHost)
             EnsureGameBroadcastChannelsJoined();
@@ -913,6 +941,20 @@ public sealed class CnCNetSession : IDisposable
                 NormalizeIrcChannel(_activeGameRoom.ChannelName),
                 StringComparison.OrdinalIgnoreCase))
             return;
+
+        if (code == 475
+            && !_activeGameRoom.Passworded
+            && _gameRoomJoinPasswordCandidates is { Count: > 0 } candidates
+            && _gameRoomJoinPasswordCandidateIndex + 1 < candidates.Count)
+        {
+            _gameRoomJoinPasswordCandidateIndex++;
+            _activeGameRoom.Password = candidates[_gameRoomJoinPasswordCandidateIndex];
+            LogActivity(
+                $"IRC +k rejected — trying alternate default key ({_gameRoomJoinPasswordCandidateIndex + 1}/{candidates.Count}).",
+                notifyUi: false);
+            JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _, _activeGameRoom.RoomName);
+            return;
+        }
 
         string message = code switch
         {
@@ -989,7 +1031,7 @@ public sealed class CnCNetSession : IDisposable
                 LogActivity(
                     $"Not on game room channel {normalized} yet ??retrying JOIN ({_gameRoomJoinRetryCount}/{MaxGameRoomJoinRetries}).",
                     notifyUi: false);
-                JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _);
+                JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _, _activeGameRoom.RoomName);
                 return;
             }
 
@@ -1284,6 +1326,8 @@ public sealed class CnCNetSession : IDisposable
         _activeGameRoom = null;
         _gameRoomJoinPending = false;
         _gameRoomJoinRetryCount = 0;
+        _gameRoomJoinPasswordCandidates = null;
+        _gameRoomJoinPasswordCandidateIndex = 0;
         DisarmGameRoomJoinTimeout();
     }
 
@@ -1301,21 +1345,23 @@ public sealed class CnCNetSession : IDisposable
             HostName = _activeGameRoom.HostName,
             RoomName = _activeGameRoom.RoomName,
             ChannelName = _activeGameRoom.ChannelName,
-            Passworded = _activeGameRoom.Passworded,
+            RequiresPassword = _activeGameRoom.Passworded,
         };
 
         if (CnCNetLobbyOperations.TryResolveJoinPassword(
                 gameSummary,
                 _activeGameRoom.Passworded ? _activeGameRoom.Password : null,
                 out string joinPassword,
+                out IReadOnlyList<string>? defaultPasswordCandidates,
                 out _))
         {
             _activeGameRoom.Password = joinPassword;
+            BeginDefaultPasswordJoinCandidates(defaultPasswordCandidates);
         }
 
         _gameRoomJoinPending = true;
         _gameRoomJoinRetryCount = 0;
-        JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _);
+        JoinGameChannel(_activeGameRoom.ChannelName, _activeGameRoom.Password, out _, _activeGameRoom.RoomName);
         AttachGameRoomSession();
         ArmGameRoomJoinTimeout();
         LogActivity($"Rejoining game room \"{_activeGameRoom.RoomName}\"...");

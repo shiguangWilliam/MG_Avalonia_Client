@@ -18,6 +18,8 @@ public sealed class GameCreationOverlayContext
 
     public required ComboBox SkillLevelBox { get; init; }
 
+    public required CheckBox RequiresPasswordCheckBox { get; init; }
+
     public required TextBox PasswordBox { get; init; }
 
     public required Button CreateButton { get; init; }
@@ -70,6 +72,21 @@ public static class GameCreationOverlayBuilder
         skillLevel.SelectedIndex = Math.Clamp(ClientConfiguration.Instance.DefaultSkillLevelIndex, 0, Math.Max(0, skillOptions.Length - 1));
 
         var password = CreateTextBox(string.Empty);
+        password.IsEnabled = false;
+        var requiresPassword = new CheckBox
+        {
+            Content = "Password protect this game",
+            Foreground = TitleBrush,
+            FontSize = 12,
+            IsChecked = false,
+        };
+        requiresPassword.IsCheckedChanged += (_, _) =>
+        {
+            bool enabled = requiresPassword.IsChecked == true;
+            password.IsEnabled = enabled;
+            if (!enabled)
+                password.Text = string.Empty;
+        };
         var createButton = CreatePrimaryButton("Create Game");
         var cancelButton = CreateSecondaryButton("Cancel");
         var moreOptionsButton = CreateSecondaryButton("More options...");
@@ -86,6 +103,7 @@ public static class GameCreationOverlayBuilder
             RoomNameBox = roomName,
             MaxPlayersBox = maxPlayers,
             SkillLevelBox = skillLevel,
+            RequiresPasswordCheckBox = requiresPassword,
             PasswordBox = password,
             CreateButton = createButton,
             CancelButton = cancelButton,
@@ -121,7 +139,7 @@ public static class GameCreationOverlayBuilder
                 CreateField("Game room name", roomName),
                 CreateField("Maximum players", maxPlayers),
                 CreateField("Skill level", skillLevel),
-                CreateField("Password (optional)", password),
+                CreatePasswordSection(requiresPassword, password),
                 CreateSectionTitle("Tunnel server"),
                 CreateTunnelSummaryRow(tunnelSummary, moreOptionsButton),
             },
@@ -217,13 +235,44 @@ public static class GameCreationOverlayBuilder
             return null;
         }
 
+        bool requiresPassword = context.RequiresPasswordCheckBox.IsChecked == true;
+        string password = (context.PasswordBox.Text ?? string.Empty).Trim();
+        if (requiresPassword && string.IsNullOrWhiteSpace(password))
+        {
+            message = "Enter a password or disable password protection.";
+            return null;
+        }
+
         return new CnCNetGameCreationRequest
         {
             RoomName = roomName,
             MaxPlayers = maxPlayers,
-            Password = (context.PasswordBox.Text ?? string.Empty).Trim(),
+            RequiresPassword = requiresPassword,
+            Password = requiresPassword ? password : string.Empty,
             Tunnel = context.SelectedTunnel,
             SkillLevel = Math.Max(0, context.SkillLevelBox.SelectedIndex),
+        };
+    }
+
+    private static StackPanel CreatePasswordSection(CheckBox requiresPassword, TextBox passwordBox)
+    {
+        var caption = new TextBlock
+        {
+            Text = "Password",
+            FontSize = 12,
+            Foreground = MutedTextBrush,
+            Margin = new Thickness(0, 0, 0, 6),
+        };
+
+        return new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                requiresPassword,
+                caption,
+                passwordBox,
+            },
         };
     }
 
@@ -356,7 +405,7 @@ public static class GameCreationOverlayBuilder
     private static void UpdateTunnelSummary(GameCreationOverlayContext context)
     {
         context.TunnelSummaryText.Text = context.SelectedTunnel == null
-            ? "No tunnel server selected â€?open More options to choose one."
+            ? "No tunnel server selected ??open More options to choose one."
             : $"{context.SelectedTunnel.Name}  ({context.SelectedTunnel.Address}:{context.SelectedTunnel.Port})";
     }
 

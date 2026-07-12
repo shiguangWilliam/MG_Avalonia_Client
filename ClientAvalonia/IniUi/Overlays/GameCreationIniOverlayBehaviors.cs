@@ -22,7 +22,7 @@ public static class GameCreationIniOverlayBehaviors
     {
         if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
         {
-            host.ShowStatus("Joining game room ‚Ä?please wait...");
+            host.ShowStatus("Joining game room ù?please wait...");
             return;
         }
 
@@ -35,7 +35,15 @@ public static class GameCreationIniOverlayBehaviors
         }
 
         string roomName = ReadText(root, "tbGameName", "tbRoomName") ?? $"{ProgramConstants.PLAYERNAME}'s Game";
+        bool requiresPassword = ReadCheckBox(root, "chkRequiresPassword", "chkPasswordProtect");
         string password = (ReadText(root, "tbPassword") ?? string.Empty).Trim();
+        if (!requiresPassword && !string.IsNullOrWhiteSpace(password))
+            requiresPassword = true;
+        if (requiresPassword && string.IsNullOrWhiteSpace(password))
+        {
+            host.ShowStatus("Enter a password or disable password protection.");
+            return;
+        }
         int maxPlayers = ReadComboInt(root, "ddMaxPlayers", 8);
         int skillLevel = ReadComboIndex(root, "ddSkillLevel");
 
@@ -52,7 +60,8 @@ public static class GameCreationIniOverlayBehaviors
         {
             RoomName = roomName.Trim(),
             MaxPlayers = maxPlayers,
-            Password = password,
+            RequiresPassword = requiresPassword,
+            Password = requiresPassword ? password : string.Empty,
             Tunnel = tunnel,
             SkillLevel = skillLevel,
         };
@@ -67,6 +76,18 @@ public static class GameCreationIniOverlayBehaviors
 
         host.EnterCnCNetGameLobbyConnecting();
         host.ShowStatus(message);
+    }
+
+    private static bool ReadCheckBox(UiNodeViewModel root, params string[] ids)
+    {
+        foreach (string id in ids)
+        {
+            UiNodeViewModel? vm = FindVm(root, id);
+            if (vm != null)
+                return vm.IsChecked;
+        }
+
+        return false;
     }
 
     private static string? ReadText(UiNodeViewModel root, params string[] ids)

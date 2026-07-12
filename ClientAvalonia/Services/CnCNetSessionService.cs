@@ -168,7 +168,7 @@ public sealed class CnCNetSessionService : IDisposable
     public bool SelectedGameRequiresPassword()
     {
         CnCNetHostedGameSummary? game = ResolveSelectedGameForJoin();
-        return game is { Passworded: true };
+        return game is { RequiresPassword: true };
     }
 
     public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);

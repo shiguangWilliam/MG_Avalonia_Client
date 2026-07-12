@@ -24,6 +24,28 @@ jobs:
       run: ./Scripts/build.ps1
       shell: pwsh
 
+    - name: Test ClientAvalonia (unit tests, no integration)
+      run: |
+        dotnet test ClientAvalonia.Tests/ClientAvalonia.Tests.csproj `
+          -c Debug `
+          --filter "Category!=Integration" `
+          --collect:"XPlat Code Coverage" `
+          -- RunConfiguration.TreatNoTestsAsError=false
+      shell: pwsh
+
+    - name: Build ClientAvalonia (for integration smoke tests)
+      run: dotnet build ClientAvalonia/ClientAvalonia.csproj -c Debug
+      shell: pwsh
+
+    - name: Test ClientAvalonia (integration smoke tests, optional)
+      continue-on-error: true
+      run: |
+        dotnet test ClientAvalonia.Tests/ClientAvalonia.Tests.csproj `
+          -c Debug `
+          --filter "Category=Integration" `
+          -- RunConfiguration.TreatNoTestsAsError=false
+      shell: pwsh
+
     - uses: actions/upload-artifact@v4
       name: Upload Artifacts
       with:

@@ -49,8 +49,11 @@ public static class ClientDialogService
         var ok = new Button { Content = "OK", MinWidth = 80, IsDefault = true };
         ok.Click += (_, _) =>
         {
+            if (string.IsNullOrWhiteSpace(passwordBox.Text))
+                return;
+
             confirmed = true;
-            result = passwordBox.Text;
+            result = passwordBox.Text.Trim();
             window.Close();
         };
 
@@ -82,12 +85,15 @@ public static class ClientDialogService
 
         passwordBox.KeyDown += (_, e) =>
         {
-            if (e.Key == Avalonia.Input.Key.Enter)
-            {
-                confirmed = true;
-                result = passwordBox.Text;
-                window.Close();
-            }
+            if (e.Key != Avalonia.Input.Key.Enter)
+                return;
+
+            if (string.IsNullOrWhiteSpace(passwordBox.Text))
+                return;
+
+            confirmed = true;
+            result = passwordBox.Text.Trim();
+            window.Close();
         };
 
         if (owner != null)

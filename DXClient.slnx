@@ -24,6 +24,7 @@
   </Folder>
   <Project Path="ClientCore/ClientCore.csproj" />
   <Project Path="ClientAvalonia/ClientAvalonia.csproj" />
+  <Project Path="ClientAvalonia.Tests/ClientAvalonia.Tests.csproj" />
   <Project Path="ClientGUI/ClientGUI.csproj">
     <Platform Solution="WindowsXNADebug|*" Project="x86" />
     <Platform Solution="WindowsXNARelease|*" Project="x86" />

@@ -55,17 +55,12 @@ public static class CnCNetMultiplayerProtocol
             return false;
         }
 
-        if (parts[5].Length < CnCNetGameFlags.ExpectedLength)
-        {
-            rejectReason = "invalid flags field";
-            return false;
-        }
-
-        bool locked = Conversions.BooleanFromString(parts[5].Substring(0, 1), defaultValue: true);
-        bool passworded = Conversions.BooleanFromString(parts[5].Substring(1, 1), defaultValue: false);
-        bool isClosed = Conversions.BooleanFromString(parts[5].Substring(2, 1), defaultValue: true);
-        bool isLoadedGame = Conversions.BooleanFromString(parts[5].Substring(3, 1), defaultValue: false);
-        bool isLadder = Conversions.BooleanFromString(parts[5].Substring(4, 1), defaultValue: false);
+        string flags = CnCNetGameFlags.Normalize(parts[5]);
+        bool locked = Conversions.BooleanFromString(flags.Substring(0, 1), defaultValue: true);
+        bool passworded = CnCNetGameFlags.ParsePassworded(flags);
+        bool isClosed = Conversions.BooleanFromString(flags.Substring(2, 1), defaultValue: true);
+        bool isLoadedGame = Conversions.BooleanFromString(flags.Substring(3, 1), defaultValue: false);
+        bool isLadder = Conversions.BooleanFromString(flags.Substring(4, 1), defaultValue: false);
 
         if (!CnCNetPortValidator.TryParseEndpoint(parts[9], out string tunnelAddress, out ushort tunnelPort))
         {
@@ -109,7 +104,7 @@ public static class CnCNetMultiplayerProtocol
             Players = players,
             IsClosed = isClosed,
             Locked = listingLocked,
-            Passworded = passworded,
+            RequiresPassword = passworded,
             IsLoadedGame = isLoadedGame,
             IsLadder = isLadder,
             GameVersion = parts[1],
@@ -157,9 +152,7 @@ public static class CnCNetMultiplayerProtocol
             return false;
         }
 
-        string flags = parts[5];
-        if (flags.Length < CnCNetGameFlags.ExpectedLength)
-            flags = flags.PadRight(CnCNetGameFlags.ExpectedLength, '0');
+        string flags = CnCNetGameFlags.Normalize(parts[5]);
 
         bool locked = CnCNetGameFlags.ParseLocked(flags);
         bool passworded = CnCNetGameFlags.ParsePassworded(flags);
@@ -209,7 +202,7 @@ public static class CnCNetMultiplayerProtocol
             Players = players,
             IsClosed = isClosed,
             Locked = listingLocked,
-            Passworded = passworded,
+            RequiresPassword = passworded,
             IsLoadedGame = isLoadedGame,
             IsLadder = isLadder,
             GameVersion = parts[1],

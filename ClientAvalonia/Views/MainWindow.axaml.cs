@@ -117,6 +117,34 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         NavigateTo("MainMenu");
+
+        // Aligned with DX LoadingScreen.Finish / MainMenu.PostInit: when the user has
+        // "AutomaticCnCNetLogin" enabled, connect IRC right after the main menu shows
+        // so that broadcast channel GAME CTCPs accumulate before the user opens the
+        // CnCNet lobby. Otherwise the lobby list is empty until the next 30s broadcast.
+        TryAutomaticCnCNetLogin();
+    }
+
+    private static void TryAutomaticCnCNetLogin()
+    {
+        try
+        {
+            if (!UserINISettings.Instance.AutomaticCnCNetLogin)
+                return;
+
+            if (NameValidator.IsNameValid(ProgramConstants.PLAYERNAME, out _) != NameValidationError.None)
+            {
+                Logger.Log("AutomaticCnCNetLogin: skipping — player name is not valid.");
+                return;
+            }
+
+            Logger.Log("AutomaticCnCNetLogin: connecting CnCNet session at startup.");
+            CnCNetSessionService.Instance.ConnectIfNeeded();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"AutomaticCnCNetLogin failed: {ex.Message}");
+        }
     }
 
     public void NavigateTo(string windowName) => NavigateTo(windowName, fromBack: false);
@@ -960,7 +988,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         string? password = null;
-        if (game.Passworded)
+        if (game.RequiresPassword)
         {
             password = await ClientDialogService.ShowPasswordPromptAsync(this, game.RoomName);
             if (string.IsNullOrWhiteSpace(password))

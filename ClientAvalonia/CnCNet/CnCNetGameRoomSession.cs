@@ -500,16 +500,26 @@ public sealed class CnCNetGameRoomSession
         Room.MaxPlayers = maxPlayers;
         Room.SkillLevel = skillLevel;
 
+        bool passwordSettingsChanged = false;
         if (password != null)
         {
-            string actualPassword = string.IsNullOrEmpty(password)
-                ? CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName)
-                : password;
+            string currentUserPassword = Room.Passworded ? Room.Password : string.Empty;
+            passwordSettingsChanged = !string.Equals(currentUserPassword, password, StringComparison.Ordinal);
 
-            Room.Passworded = !string.IsNullOrWhiteSpace(password);
-            Room.Password = actualPassword;
-            string wire = CnCNetIrcChannelNames.Preserve(Room.ChannelName);
-            _connection.TrySendInstantOnChannel(wire, $"MODE {wire} +k {actualPassword}");
+            if (passwordSettingsChanged)
+            {
+                bool newCustomPassword = !string.IsNullOrEmpty(password);
+                string actualPassword = newCustomPassword
+                    ? password
+                    : CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName, Room.RoomName);
+                string oldPassword = Room.Password;
+                Room.Passworded = newCustomPassword;
+                Room.Password = actualPassword;
+
+                string wire = CnCNetIrcChannelNames.Preserve(Room.ChannelName);
+                string mode = CnCNetLobbyOperations.BuildChannelPasswordModeCommand(wire, oldPassword, actualPassword);
+                _connection.TrySendInstantOnChannel(wire, mode);
+            }
         }
 
         BroadcastGameLobbySettings();
@@ -520,7 +530,7 @@ public sealed class CnCNetGameRoomSession
         if (oldMaxPlayers != maxPlayers)
             LogNotice($"Maximum players changed to {maxPlayers}.");
 
-        if (password != null)
+        if (passwordSettingsChanged)
         {
             if (string.IsNullOrEmpty(password))
                 LogNotice("Password removed from the game.");
@@ -1077,7 +1087,7 @@ public sealed class CnCNetGameRoomSession
         Room.SkillLevel = newSkillLevel;
         Room.Passworded = newPassworded;
         if (!newPassworded)
-            Room.Password = CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName);
+            Room.Password = CnCNetLobbyOperations.GetDefaultChannelPassword(Room.ChannelName, Room.RoomName);
 
         if (nameChanged)
             LogNotice($"{sender} changed game room name to \"{newRoomName}\".");
