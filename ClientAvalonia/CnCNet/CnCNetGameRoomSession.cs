@@ -7,6 +7,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using Avalonia.Media;
+using Avalonia.Threading;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
@@ -27,8 +30,23 @@ public sealed class CnCNetGameRoomSession
     private string _localNick = ProgramConstants.PLAYERNAME;
     private int _randomSeed;
     private bool _removeStartingLocations;
+    private int _frameSendRate = ClientConfiguration.Instance.DefaultFrameSendRate;
+    private int _maxAhead = ClientConfiguration.Instance.DefaultMaxAhead;
+    private int _protocolVersion = ClientConfiguration.Instance.DefaultProtocolVersion;
     private bool _tunnelErrorMode;
     private bool _localJoined;
+    private string? _pendingGameOptionsBody;
+    private bool _hostLaunchInFlight;
+    private CancellationTokenSource? _lobbyPrewarmCts;
+
+    /// <summary>
+    /// In-room chat timeline (PRIVMSG on the room channel + system notices).
+    /// Kept independent of <see cref="CnCNetLobbyState"/>'s lobby timeline to mirror
+    /// DX's two-channel split (lobby Channel vs in-room Channel).
+    /// </summary>
+    private readonly List<CnCNetChatLine> _chatLines = [];
+    private const int MaxRoomChatLines = 200;
+    private GameRoomChatCommandDispatcher? _chatCommands;
 
     public bool TunnelErrorMode => _tunnelErrorMode;
 
@@ -49,6 +67,42 @@ public sealed class CnCNetGameRoomSession
     public int RandomSeed => _randomSeed;
 
     public bool RemoveStartingLocations => _removeStartingLocations;
+
+    public int FrameSendRate => _frameSendRate;
+
+    public int MaxAhead => _maxAhead;
+
+    public int ProtocolVersion => _protocolVersion;
+
+    /// <summary>
+    /// Host broadcasts current game options (GO) to everyone already in the room.
+    /// Call after lobby option controls change (DX <c>OnGameOptionChanged</c>).
+    /// </summary>
+    public void BroadcastGameOptions()
+    {
+        if (!IsHost || !_localJoined)
+            return;
+
+        BroadcastGameOptionsLocked();
+    }
+
+    /// <summary>
+    /// Replay a GO that arrived before lobby option controls were wired.
+    /// </summary>
+    public void TryFlushPendingGameOptions()
+    {
+        string? pending;
+        lock (_sync)
+        {
+            pending = _pendingGameOptionsBody;
+            _pendingGameOptionsBody = null;
+        }
+
+        if (pending == null)
+            return;
+
+        ApplyGameOptions(HostName, pending);
+    }
 
     public event Action? HostAbandoned;
 
@@ -84,6 +138,12 @@ public sealed class CnCNetGameRoomSession
     public event Action? StateChanged;
 
     public event Action<string>? NoticeLogged;
+
+    /// <summary>
+    /// Raised whenever the in-room chat timeline changes (new user message, system notice,
+    /// or clear on leave). Mirrors DX's <c>Channel.MessageAdded</c> for the game-room channel.
+    /// </summary>
+    public event Action? ChatChanged;
 
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
@@ -208,14 +268,15 @@ public sealed class CnCNetGameRoomSession
             {
                 AddOrRefreshHumanPlayerLocked(name, name.Equals(_localNick, StringComparison.OrdinalIgnoreCase));
                 BroadcastPlayerOptionsLocked();
+                // DX ChangeMap → OnGameOptionChanged: push current GO so the joiner syncs options.
+                BroadcastGameOptionsLocked();
 
                 int humanCount = _players.Count(p => !p.IsAi);
                 if (!name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)
                     && humanCount >= Room.MaxPlayers
                     && !_locked)
                 {
-                    LogNotice("Player limit reached. The game room has been locked.");
-                    SetLocked(true);
+                    SetLocked(true, autoPlayerLimit: true);
                 }
             }
         }
@@ -382,14 +443,19 @@ public sealed class CnCNetGameRoomSession
         return space > 0 ? ctcp[..space] : ctcp;
     }
 
-    public void SetLocked(bool locked)
+    /// <param name="autoPlayerLimit">
+    /// When true, room notice matches DX "Player limit reached…" wording (vs host manual lock).
+    /// </param>
+    public void SetLocked(bool locked, bool autoPlayerLimit = false)
     {
+        bool changed = false;
         lock (_sync)
         {
             if (_locked == locked)
                 return;
 
             _locked = locked;
+            changed = true;
 
             if (IsHost && _connection != null)
             {
@@ -399,8 +465,86 @@ public sealed class CnCNetGameRoomSession
             }
         }
 
+        if (!changed)
+            return;
+
         if (IsHost)
-            LogNotice(locked ? "You've locked the game room." : "The game room has been unlocked.");
+        {
+            RefreshGameListingLockedFlag();
+            if (locked && autoPlayerLimit)
+                AddRoomNotice("Player limit reached. The game room has been locked.");
+            else if (locked)
+                AddRoomNotice("You've locked the game room.");
+            else
+                AddRoomNotice("The game room has been unlocked.");
+        }
+
+        if (locked)
+            RequestLobbyPrewarm();
+        else
+            CancelLobbyPrewarm();
+
+        StateChanged?.Invoke();
+    }
+
+    private void RefreshGameListingLockedFlag()
+    {
+        if (_gameBroadcast == null || !IsHost)
+            return;
+
+        List<string> names;
+        lock (_sync)
+            names = GetHumanPlayerNamesLocked();
+
+        _gameBroadcast.UpdateListing(
+            _gameBroadcastListingMapName,
+            _gameBroadcastListingGameMode,
+            _gameBroadcastListingMapSha1,
+            names,
+            _locked,
+            closed: false);
+    }
+
+    /// <summary>
+    /// Joiner/host sync when IRC <c>MODE +i/-i</c> arrives (DX <c>Channel_ChannelModesChanged</c>).
+    /// </summary>
+    public void OnChannelModesChanged(string channel, string modeString)
+    {
+        if (!IsGameChannel(channel) || string.IsNullOrWhiteSpace(modeString))
+            return;
+
+        bool lockRoom = modeString.Contains("+i", StringComparison.Ordinal);
+        bool unlockRoom = modeString.Contains("-i", StringComparison.Ordinal);
+        if (!lockRoom && !unlockRoom)
+            return;
+
+        bool next = lockRoom;
+        lock (_sync)
+        {
+            if (_locked == next)
+                return;
+            _locked = next;
+        }
+
+        if (IsHost)
+        {
+            // Host already issued MODE and notices from SetLocked; avoid duplicate chat lines.
+            StateChanged?.Invoke();
+            return;
+        }
+
+        if (next)
+        {
+            int humans = Players.Count(p => !p.IsAi);
+            if (humans >= Room.MaxPlayers)
+                AddRoomNotice("Player limit reached. The game room has been locked.");
+            else
+                AddRoomNotice("The game host has locked the game room.");
+        }
+        else
+        {
+            AddRoomNotice("The game room has been unlocked.");
+        }
 
         StateChanged?.Invoke();
     }
@@ -421,6 +565,9 @@ public sealed class CnCNetGameRoomSession
                 local.AutoReady = autoReady;
             }
         }
+
+        if (readyState > 0)
+            RequestLobbyPrewarm();
 
         StateChanged?.Invoke();
     }
@@ -487,9 +634,9 @@ public sealed class CnCNetGameRoomSession
             return;
 
         int occupiedCount = _players.Count;
-        if (maxPlayers < occupiedCount)
+        if (!GameLobbySettingsRules.CanSetMaxPlayers(maxPlayers, occupiedCount, out string? reject))
         {
-            LogNotice($"Cannot reduce maximum players to {maxPlayers} with {occupiedCount} players currently in game.");
+            LogNotice(reject!);
             return;
         }
 
@@ -550,6 +697,45 @@ public sealed class CnCNetGameRoomSession
             closed: false);
 
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Host changes the room tunnel and broadcasts <c>CHTNL address:port</c>
+    /// (DX <c>TunnelSelectionWindow_TunnelSelected</c>).
+    /// </summary>
+    public bool TryHostChangeTunnel(CnCNetTunnel tunnel)
+    {
+        if (!IsHost || tunnel == null || _connection == null || !_localJoined)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(tunnel.Address) || tunnel.Port == 0)
+            return false;
+
+        Room.Tunnel = tunnel;
+        _tunnelErrorMode = false;
+
+        SendCtcp(CnCNetTunnelChangeProtocol.FormatChtnl(tunnel.Address, tunnel.Port));
+        LogNotice($"The game host has changed the tunnel server to: {tunnel.Name}");
+
+        lock (_sync)
+        {
+            foreach (CnCNetGameRoomPlayer player in _players)
+            {
+                if (!player.IsAi)
+                    player.Ping = -1;
+            }
+        }
+
+        StateChanged?.Invoke();
+        return true;
+    }
+
+    /// <summary>Current tunnel summary for <c>/tunnelinfo</c>.</summary>
+    public string FormatTunnelInfoNotice()
+    {
+        CnCNetTunnel tunnel = Room.Tunnel;
+        string ping = tunnel.PingInMs >= 0 ? $"{tunnel.PingInMs} ms" : "n/a";
+        return $"Tunnel: {tunnel.Name} ({tunnel.Address}:{tunnel.Port}), ping {ping}";
     }
 
     private string _gameBroadcastListingMapName = string.Empty;
@@ -650,12 +836,19 @@ public sealed class CnCNetGameRoomSession
             return false;
         }
 
+        List<CnCNetGameRoomPlayer> humans;
         lock (_sync)
         {
+            if (_hostLaunchInFlight)
+            {
+                message = "Already contacting the tunnel server…";
+                return false;
+            }
+
             if (_players.Count == 0)
                 EnsureHostPlayerLocked();
 
-            var humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+            humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
             if (humans.Count == 0)
             {
                 message = "No players in the room.";
@@ -664,7 +857,7 @@ public sealed class CnCNetGameRoomSession
 
             foreach (CnCNetGameRoomPlayer human in humans)
             {
-                if (human.IsHost || (IsHost && human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)))
+                if (human.IsHost || human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
                 {
                     human.Ready = true;
                     continue;
@@ -677,72 +870,10 @@ public sealed class CnCNetGameRoomSession
                 }
             }
 
-            if (humans.Count > 1)
-            {
-                if (string.IsNullOrWhiteSpace(Room.Tunnel.Address)
-                    || Room.Tunnel.Address.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase))
-                {
-                    message = "The selected tunnel server is invalid. Choose another tunnel and try again.";
-                    return false;
-                }
-
-                IReadOnlyList<ushort> ports = Room.Tunnel.GetPlayerPortInfo(humans.Count);
-                if (!CnCNetPortValidator.TryValidatePlayerPorts(ports, humans.Count, out string? portError))
-                {
-                    message = portError ?? "Could not contact the CnCNet tunnel server. Try another tunnel.";
-                    return false;
-                }
-
-                var playerPorts = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase);
-                var sb = new StringBuilder("START ");
-                sb.Append(_uniqueGameId);
-                for (int i = 0; i < humans.Count; i++)
-                {
-                    humans[i].Port = ports[i];
-                    playerPorts[humans[i].Name] = ports[i];
-                    sb.Append(';');
-                    sb.Append(humans[i].Name);
-                    sb.Append(';');
-                    // DX CnCNetGameLoadingLobby / NonHostLaunchGame: only NAT port matters in START;
-                    // tunnel IP is taken from the game room (GAME/CHTNL).
-                    sb.Append("0.0.0.0:");
-                    sb.Append(ports[i]);
-                }
-
-                string startCtcp = sb.ToString();
-                Logger.Log($"CnCNet START: broadcasting via tunnel {Room.Tunnel.Address}:{Room.Tunnel.Port} ??{startCtcp}");
-                SendCtcp(startCtcp);
-
-                if (!TryBuildStartGameInfo(playerPorts, out CnCNetStartGameInfo? startInfo, out message)
-                    || startInfo == null)
-                    return false;
-
-                var fhc = new FileHashCalculator();
-                fhc.CalculateHashes();
-                if (_gameFilesHash != fhc.GetCompleteHash())
-                {
-                    Logger.Log("Game files modified during client session!");
-                    SendCtcp("CD");
-                    LogNotice($"{_localNick} has modified game files during the client session. They are likely attempting to cheat!");
-                }
-
-                _gameBroadcast?.MarkGameStarting();
-                SendCtcp("STRTD");
-                GameStarting?.Invoke(startInfo);
-            }
-            else
+            if (humans.Count == 1)
             {
                 Logger.Log("One player MP -- starting!");
-
-                var fhc = new FileHashCalculator();
-                fhc.CalculateHashes();
-                if (_gameFilesHash != fhc.GetCompleteHash())
-                {
-                    Logger.Log("Game files modified during client session!");
-                    SendCtcp("CD");
-                    LogNotice($"{_localNick} has modified game files during the client session. They are likely attempting to cheat!");
-                }
-
+                EmitHostStartingCheatCheck();
                 _gameBroadcast?.MarkGameStarting();
                 SendCtcp("STRTD");
                 GameStarting?.Invoke(new CnCNetStartGameInfo
@@ -752,11 +883,172 @@ public sealed class CnCNetGameRoomSession
                     LocalPlayerPort = CnCNetPortValidator.UnsetPort,
                     IsHost = true,
                 });
+                message = "Starting game...";
+                return true;
             }
+
+            if (string.IsNullOrWhiteSpace(Room.Tunnel.Address)
+                || Room.Tunnel.Address.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase))
+            {
+                message = "The selected tunnel server is invalid. Choose another tunnel and try again.";
+                return false;
+            }
+
+            _hostLaunchInFlight = true;
         }
 
-        message = "Starting game...";
+        int playerCount = humans.Count;
+        string[] playerNames = humans.Select(h => h.Name).ToArray();
+        CnCNetTunnel tunnel = Room.Tunnel;
+
+        // Tunnel HTTP can take several seconds — never block the UI/IRC pump.
+        Task.Run(() =>
+        {
+            IReadOnlyList<ushort> ports;
+            try
+            {
+                ports = tunnel.GetPlayerPortInfo(playerCount);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"CnCNet TryHostLaunch: GetPlayerPortInfo failed: {ex.Message}");
+                ports = [];
+            }
+
+            Dispatcher.UIThread.Post(() => CompleteHostLaunchWithPorts(playerNames, ports));
+        });
+
+        message = "Contacting tunnel server...";
         return true;
+    }
+
+    private void CompleteHostLaunchWithPorts(string[] expectedPlayerNames, IReadOnlyList<ushort> ports)
+    {
+        try
+        {
+            if (!IsHost || _connection == null || !_connection.IsConnected || !_locked)
+            {
+                AddRoomNotice("Game launch cancelled.");
+                return;
+            }
+
+            List<CnCNetGameRoomPlayer> humans;
+            lock (_sync)
+            {
+                humans = _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+                if (humans.Count != expectedPlayerNames.Length
+                    || !humans.Select(h => h.Name).SequenceEqual(expectedPlayerNames, StringComparer.OrdinalIgnoreCase))
+                {
+                    AddRoomNotice("Player list changed while contacting the tunnel. Launch cancelled.");
+                    return;
+                }
+
+                foreach (CnCNetGameRoomPlayer human in humans)
+                {
+                    if (human.IsHost || human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
+                    {
+                        human.Ready = true;
+                        continue;
+                    }
+
+                    if (!human.Ready)
+                    {
+                        AddRoomNotice("Not all players are ready. Launch cancelled.");
+                        return;
+                    }
+                }
+            }
+
+            if (!CnCNetPortValidator.TryValidatePlayerPorts(ports, humans.Count, out string? portError))
+            {
+                AddRoomNotice(portError ?? "Could not contact the CnCNet tunnel server. Try another tunnel.");
+                return;
+            }
+
+            var playerPorts = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase);
+            var sb = new StringBuilder("START ");
+            sb.Append(_uniqueGameId);
+            for (int i = 0; i < humans.Count; i++)
+            {
+                humans[i].Port = ports[i];
+                playerPorts[humans[i].Name] = ports[i];
+                sb.Append(';');
+                sb.Append(humans[i].Name);
+                sb.Append(';');
+                // DX CnCNetGameLoadingLobby / NonHostLaunchGame: only NAT port matters in START;
+                // tunnel IP is taken from the game room (GAME/CHTNL).
+                sb.Append("0.0.0.0:");
+                sb.Append(ports[i]);
+            }
+
+            string startCtcp = sb.ToString();
+            Logger.Log($"CnCNet START: broadcasting via tunnel {Room.Tunnel.Address}:{Room.Tunnel.Port} — {startCtcp}");
+            SendCtcp(startCtcp);
+
+            if (!TryBuildStartGameInfo(playerPorts, out CnCNetStartGameInfo? startInfo, out string buildError)
+                || startInfo == null)
+            {
+                AddRoomNotice(string.IsNullOrWhiteSpace(buildError) ? "Failed to build start info." : buildError);
+                return;
+            }
+
+            EmitHostStartingCheatCheck();
+            _gameBroadcast?.MarkGameStarting();
+            SendCtcp("STRTD");
+            GameStarting?.Invoke(startInfo);
+        }
+        finally
+        {
+            lock (_sync)
+                _hostLaunchInFlight = false;
+        }
+    }
+
+    private void EmitHostStartingCheatCheck()
+    {
+        var fhc = new FileHashCalculator();
+        fhc.CalculateHashes();
+        if (_gameFilesHash != fhc.GetCompleteHash())
+        {
+            Logger.Log("Game files modified during client session!");
+            SendCtcp("CD");
+            LogNotice($"{_localNick} has modified game files during the client session. They are likely attempting to cheat!");
+        }
+    }
+
+    private void RequestLobbyPrewarm()
+    {
+        CancelLobbyPrewarm();
+        _lobbyPrewarmCts = new CancellationTokenSource();
+        GameLaunchPreparation.BeginLobbyPrewarm(_lobbyPrewarmCts.Token);
+    }
+
+    private void CancelLobbyPrewarm()
+    {
+        try
+        {
+            _lobbyPrewarmCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+
+        _lobbyPrewarmCts?.Dispose();
+        _lobbyPrewarmCts = null;
+    }
+
+    private bool AreAllHumansReadyLocked()
+    {
+        foreach (CnCNetGameRoomPlayer human in _players.Where(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name)))
+        {
+            if (human.IsHost || human.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!human.Ready)
+                return false;
+        }
+
+        return _players.Any(p => !p.IsAi && !string.IsNullOrWhiteSpace(p.Name));
     }
 
     private bool TryBuildStartGameInfo(
@@ -813,6 +1105,10 @@ public sealed class CnCNetGameRoomSession
         if (_connection == null)
             return;
 
+        CancelLobbyPrewarm();
+        lock (_sync)
+            _hostLaunchInFlight = false;
+
         string wire = CnCNetIrcChannelNames.Preserve(Room.ChannelName);
         _gameBroadcast?.Stop();
 
@@ -823,6 +1119,10 @@ public sealed class CnCNetGameRoomSession
 
         _localJoined = false;
         _connection = null;
+
+        // Drop the in-room timeline on leave — rejoining later starts a fresh history,
+        // matching DX behavior where a new Channel instance is created per room session.
+        ClearChat();
     }
 
     private void HandleStart(string sender, string payload)
@@ -910,6 +1210,7 @@ public sealed class CnCNetGameRoomSession
         if (!int.TryParse(payload, out int readyState))
             return;
 
+        bool allReady = false;
         lock (_sync)
         {
             CnCNetGameRoomPlayer? player = FindPlayerLocked(sender);
@@ -919,7 +1220,11 @@ public sealed class CnCNetGameRoomSession
             player.Ready = readyState > 0;
             player.AutoReady = readyState > 1;
             BroadcastPlayerOptionsLocked();
+            allReady = AreAllHumansReadyLocked();
         }
+
+        if (allReady)
+            RequestLobbyPrewarm();
 
         StateChanged?.Invoke();
     }
@@ -1037,21 +1342,25 @@ public sealed class CnCNetGameRoomSession
         (int checkBoxCount, int dropDownCount) = GameOptionsControlCounts?.Invoke() ?? (0, 0);
         if (checkBoxCount == 0 && dropDownCount == 0)
         {
-            LogNotice("Game options updated by host.");
-            StateChanged?.Invoke();
+            lock (_sync)
+                _pendingGameOptionsBody = message;
+            Logger.Log("CnCNet GO: deferred until lobby game-option controls are initialized.");
             return;
         }
 
         if (!CnCNetGameOptionsCodec.TryParseBody(message, checkBoxCount, dropDownCount, out CnCNetGameOptionsState? parsed, out string? error)
             || parsed == null)
         {
-            LogNotice("The game host has sent an invalid game options message! The game host's game version might be different from yours.");
+            AddRoomNotice("The game host has sent an invalid game options message! The game host's game version might be different from yours.");
             Logger.Log($"CnCNet GO parse failed: {error}");
             return;
         }
 
         _randomSeed = parsed.RandomSeed;
         _removeStartingLocations = parsed.RemoveStartingLocations;
+        _frameSendRate = parsed.FrameSendRate;
+        _maxAhead = parsed.MaxAhead;
+        _protocolVersion = parsed.ProtocolVersion;
         try
         {
             GameOptionsReceiver?.Invoke(parsed);
@@ -1060,7 +1369,8 @@ public sealed class CnCNetGameRoomSession
         {
             Logger.Log($"CnCNet GO UI apply failed: {ex.Message}");
         }
-        LogNotice("Game options updated by host.");
+
+        AddRoomNotice("Game options updated by host.");
         StateChanged?.Invoke();
     }
 
@@ -1248,6 +1558,9 @@ public sealed class CnCNetGameRoomSession
         {
             _randomSeed = state.RandomSeed;
             _removeStartingLocations = state.RemoveStartingLocations;
+            _frameSendRate = state.FrameSendRate;
+            _maxAhead = state.MaxAhead;
+            _protocolVersion = state.ProtocolVersion;
         }
 
         SendCtcp("GO " + CnCNetGameOptionsCodec.BuildBody(state, checkBoxCount, dropDownCount));
@@ -1323,6 +1636,154 @@ public sealed class CnCNetGameRoomSession
     }
 
     private void LogNotice(string message) => NoticeLogged?.Invoke(message);
+
+    /// <summary>Room chat timeline (in arrival order). Empty when not in a room.</summary>
+    public IReadOnlyList<CnCNetChatLine> ChatLines
+    {
+        get
+        {
+            lock (_sync)
+                return _chatLines.ToList();
+        }
+    }
+
+    /// <summary>Result of attempting to send/handle room chat input.</summary>
+    public enum RoomChatSendResult
+    {
+        Failed = 0,
+        SentAsChat = 1,
+        HandledAsCommand = 2,
+    }
+
+    /// <summary>
+    /// Room chat-box command dispatcher (lazy). Host-only checks use <see cref="IsHost"/>.
+    /// Notices land in the room timeline via <see cref="AddRoomNotice"/>.
+    /// </summary>
+    public GameRoomChatCommandDispatcher ChatCommands
+        => _chatCommands ??= new GameRoomChatCommandDispatcher(
+            isHost: () => IsHost,
+            addNotice: AddRoomNotice,
+            onChangeTunnelRequested: () => ChangeTunnelRequested?.Invoke(),
+            tunnelInfoProvider: FormatTunnelInfoNotice);
+
+    /// <summary>Raised when the host runs <c>/changetunnel</c> so UI can open a tunnel picker.</summary>
+    public event Action? ChangeTunnelRequested;
+
+    /// <summary>
+    /// Send a user chat message to the room channel, or handle a slash command.
+    /// Mirrors DX <c>TbChatInput_EnterPressed</c> + <c>SendChatMessage</c>.
+    /// </summary>
+    public RoomChatSendResult TrySendChat(string message, int ircColorId)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return RoomChatSendResult.Failed;
+
+        string trimmed = message.Trim();
+        if (trimmed.StartsWith('/'))
+            return ChatCommands.TryHandle(trimmed)
+                ? RoomChatSendResult.HandledAsCommand
+                : RoomChatSendResult.Failed;
+
+        if (_connection == null || !_connection.IsConnected || !_localJoined)
+            return RoomChatSendResult.Failed;
+
+        if (!_connection.IsLocalOnChannel(Room.ChannelName))
+            return RoomChatSendResult.Failed;
+
+        _connection.SendChatMessage(Room.ChannelName, trimmed, ircColorId);
+        return RoomChatSendResult.SentAsChat;
+    }
+
+    /// <summary>
+    /// Append a remote message (PRIVMSG from another user) to the room timeline.
+    /// Called by <c>CnCNetSession</c> after resolving that the message belongs to this room.
+    /// </summary>
+    public void AppendRemoteChat(
+        string sender,
+        string displayText,
+        bool isSystem = false,
+        Color? textColor = null)
+    {
+        if (string.IsNullOrWhiteSpace(displayText))
+            return;
+
+        lock (_sync)
+        {
+            _chatLines.Add(new CnCNetChatLine
+            {
+                Scope = CnCNetChatScope.GameRoom,
+                Sender = sender ?? string.Empty,
+                DisplayText = displayText,
+                IsSystem = isSystem,
+                TextColor = textColor
+                    ?? (isSystem ? CnCNetIrcChatText.SystemNoticeColor : CnCNetIrcChatText.DefaultChatColor),
+            });
+            TrimRoomChatLocked();
+        }
+        ChatChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Append the local user's just-sent message as an echo into the room timeline.
+    /// Mirrors DX's <c>Channel.SendChatMessage</c> which calls <c>AddMessage</c> before
+    /// sending the IRC line, so the writer sees their own text immediately.
+    /// </summary>
+    public void AppendLocalChat(string displayText, Color? textColor = null)
+    {
+        if (string.IsNullOrWhiteSpace(displayText))
+            return;
+
+        lock (_sync)
+        {
+            _chatLines.Add(new CnCNetChatLine
+            {
+                Scope = CnCNetChatScope.GameRoom,
+                Sender = _localNick,
+                DisplayText = displayText,
+                TextColor = textColor ?? CnCNetIrcChatText.DefaultChatColor,
+            });
+            TrimRoomChatLocked();
+        }
+        ChatChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// System notice appended to the room timeline. Mirrors DX
+    /// <c>CnCNetGameLobby.AddNotice -> channel.AddMessage(new ChatMessage(color, message))</c>.
+    /// </summary>
+    public void AddRoomNotice(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        lock (_sync)
+        {
+            _chatLines.Add(new CnCNetChatLine
+            {
+                Scope = CnCNetChatScope.GameRoom,
+                Sender = string.Empty,
+                DisplayText = message.Trim(),
+                IsSystem = true,
+                TextColor = CnCNetIrcChatText.SystemNoticeColor,
+            });
+            TrimRoomChatLocked();
+        }
+        ChatChanged?.Invoke();
+    }
+
+    /// <summary>Clear the room chat timeline (called when leaving the room).</summary>
+    public void ClearChat()
+    {
+        lock (_sync)
+            _chatLines.Clear();
+        ChatChanged?.Invoke();
+    }
+
+    private void TrimRoomChatLocked()
+    {
+        while (_chatLines.Count > MaxRoomChatLines)
+            _chatLines.RemoveAt(0);
+    }
 
     private static string NormalizeChannel(string channel)
         => CnCNetIrcChannelNames.Normalize(channel);

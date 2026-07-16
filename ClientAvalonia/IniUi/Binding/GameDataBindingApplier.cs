@@ -62,14 +62,42 @@ public static class GameDataBindingApplier
             lbMapList.SetSelectedIndexSilent(selectedIndex);
         }
 
-        UpdateMapSelectionDisplay(root, maps, selectedIndex, resources);
+        ResolveStartInteractionFlags(session.PlayerState, out bool canAssign, out bool canSelectLocal);
+        UpdateMapSelectionDisplay(
+            root,
+            maps,
+            selectedIndex,
+            resources,
+            session.PlayerState,
+            canAssign,
+            canSelectLocal);
+    }
+
+    public static void ResolveStartInteractionFlags(
+        LobbyPlayerState playerState,
+        out bool canAssign,
+        out bool canSelectLocal)
+    {
+        // Skirmish: local player is always the host. Multiplayer: host Assign / joiner Select.
+        if (playerState.Mode == LobbyPlayerMode.Skirmish || playerState.AllowHostPlayerOptions)
+        {
+            canAssign = true;
+            canSelectLocal = false;
+            return;
+        }
+
+        canAssign = false;
+        canSelectLocal = true;
     }
 
     public static void UpdateMapSelectionDisplay(
         UiNodeViewModel root,
         IReadOnlyList<MapEntry> maps,
         int selectedIndex,
-        ResourceResolver resources)
+        ResourceResolver resources,
+        LobbyPlayerState? playerState = null,
+        bool canAssignStarts = false,
+        bool canSelectLocalStart = false)
     {
         MapEntry? map = selectedIndex >= 0 && selectedIndex < maps.Count ? maps[selectedIndex] : null;
 
@@ -84,7 +112,33 @@ public static class GameDataBindingApplier
                 map?.PreviewRelativePath,
                 previewBox);
             previewBox.SetPreviewImage(preview);
+            MapPreviewOverlayApplier.Apply(
+                previewBox,
+                map,
+                playerState,
+                canAssignStarts,
+                canSelectLocalStart);
         }
+    }
+
+    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
+    public static void RefreshMapStartMarkers(
+        UiNodeViewModel root,
+        MapEntry? map,
+        LobbyPlayerState playerState,
+        bool canAssignStarts,
+        bool canSelectLocalStart)
+    {
+        UiNodeViewModel? previewBox = FindVm(root, "MapPreviewBox");
+        if (previewBox == null)
+            return;
+
+        MapPreviewOverlayApplier.Apply(
+            previewBox,
+            map,
+            playerState,
+            canAssignStarts,
+            canSelectLocalStart);
     }
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
@@ -213,6 +267,9 @@ public static class GameDataBindingApplier
                     if (all[i].Name == name)
                     {
                         CnCNetSessionService.Instance.SetChatColorIndex(i);
+                        UiNodeViewModel? tbChat = FindVm(root, "tbChatInput");
+                        if (tbChat != null)
+                            ApplyChatInputColor(tbChat);
                         break;
                     }
                 }
@@ -242,14 +299,17 @@ public static class GameDataBindingApplier
         if (lbChat == null)
             return;
 
-        var lines = state.ChatLines.Count > 0
-            ? state.ChatLines.Select(c => c.DisplayText).ToList()
-            : state.ConnectionLog.Count > 0
-                ? state.ConnectionLog.ToList()
-                : new List<string> { "CnCNet connection log will appear here..." };
+        if (state.ChatLines.Count > 0)
+        {
+            ApplyColoredChatLines(lbChat, state.ChatLines);
+            return;
+        }
 
-        lbChat.SetListItems(lines);
-        lbChat.SelectedIndex = lines.Count > 0 ? lines.Count - 1 : -1;
+        var fallback = state.ConnectionLog.Count > 0
+            ? state.ConnectionLog.ToList()
+            : new List<string> { "CnCNet connection log will appear here..." };
+        lbChat.SetListItems(fallback);
+        lbChat.SelectedIndex = fallback.Count > 0 ? fallback.Count - 1 : -1;
     }
 
     private static void WireChatInput(UiNodeViewModel root)
@@ -259,6 +319,16 @@ public static class GameDataBindingApplier
             return;
 
         tbChat.IsEnabled = CnCNetSessionService.Instance.Connection?.IsConnected == true;
+        ApplyChatInputColor(tbChat);
+    }
+
+    private static void ApplyChatInputColor(UiNodeViewModel tbChat)
+    {
+        int colorIndex = CnCNetSessionService.Instance.LobbyState.SelectedChatColorIndex;
+        if (colorIndex < 0)
+            colorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
+
+        tbChat.SetForeground(CnCNetChatColorCatalog.GetEntry(colorIndex).DisplayColor);
     }
 
     public static void SyncChannelGameSelection(UiNodeViewModel root, MultiplayerLobbyState state)
@@ -269,6 +339,51 @@ public static class GameDataBindingApplier
 
         int idx = lbGames.SelectedIndex;
         state.SelectedGameIndex = idx >= 0 && idx < state.HostedGameDetails.Count ? idx : 0;
+    }
+
+    /// <summary>
+    /// Push the in-room chat timeline into the game-room lobby's <c>lbChatMessages</c> +
+    /// enable <c>tbChatInput</c>. Mirrors DX <c>CnCNetGameLobby.Channel_MessageAdded
+    /// -> lbChatMessages.AddMessage</c>. Falls back to a friendly placeholder when the room
+    /// has no chat yet so the UI never looks broken.
+    /// </summary>
+    public static void ApplyGameRoomChat(UiNodeViewModel root, CnCNetGameRoomSession? gameRoom)
+    {
+        UiNodeViewModel? lbChat = FindVm(root, "lbChatMessages");
+        if (lbChat != null)
+        {
+            IReadOnlyList<CnCNetChatLine> lines = gameRoom?.ChatLines ?? [];
+            if (lines.Count > 0)
+            {
+                ApplyColoredChatLines(lbChat, lines);
+            }
+            else
+            {
+                lbChat.SetListItems(new List<string> { "Type / to view a list of available chat commands." });
+                lbChat.SelectedIndex = 0;
+            }
+        }
+
+        UiNodeViewModel? tbChat = FindVm(root, "tbChatInput");
+        if (tbChat != null)
+        {
+            // Chat input is enabled when we are joined to the room AND connected to IRC.
+            bool enabled = gameRoom is { IsLocalJoined: true }
+                           && CnCNetSessionService.Instance.Connection?.IsConnected == true;
+            tbChat.IsEnabled = enabled;
+            ApplyChatInputColor(tbChat);
+        }
+    }
+
+    private static void ApplyColoredChatLines(UiNodeViewModel lbChat, IReadOnlyList<CnCNetChatLine> lines)
+    {
+        var items = lines.Select(line => new CatalogListItemViewModel
+        {
+            Text = line.DisplayText,
+            ForegroundBrush = new SolidColorBrush(line.TextColor),
+        }).ToList();
+        lbChat.SetCatalogListItems(items);
+        lbChat.SelectedIndex = items.Count > 0 ? items.Count - 1 : -1;
     }
 
     private static void ApplyChannelLobbyButtonLabels(UiNodeViewModel root)
@@ -313,8 +428,53 @@ public static class GameDataBindingApplier
 
         ApplyCampaignSideTabState(root, sideFilter);
         ApplyCampaignDifficulty(root, resources);
+        EnsureCampaignControlSizes(root);
         GameAssetResolver.ApplyCampaignSideIcons(root, resources);
         GameAssetResolver.ApplyCampaignActionButtonTextures(root, resources);
+    }
+
+    /// <summary>
+    /// MG CampaignSelector.ini omits Size for faction tabs / difficulty chrome; DX relied on
+    /// missing button textures that never shipped. Give Avalonia themed fallbacks real bounds
+    /// so the option boxes stay visible without those assets.
+    /// </summary>
+    private static void EnsureCampaignControlSizes(UiNodeViewModel root)
+    {
+        foreach (string id in new[] { "GDI", "Nod", "ThirdSide", "FourthSide" })
+        {
+            UiNodeViewModel? tab = FindVm(root, id);
+            if (tab == null)
+                continue;
+
+            if (tab.Width <= 1)
+                tab.Node.Props["Width"] = 148d;
+            if (tab.Height <= 1)
+                tab.Node.Props["Height"] = 56d;
+            tab.RefreshLayout();
+        }
+
+        UiNodeViewModel? trackbar = FindVm(root, "trbDifficultySelector");
+        if (trackbar != null)
+        {
+            if (trackbar.Width <= 1)
+                trackbar.Node.Props["Width"] = 280d;
+            if (trackbar.Height <= 1)
+                trackbar.Node.Props["Height"] = 36d;
+            trackbar.RefreshLayout();
+        }
+
+        foreach (string id in new[] { "btnLaunch", "btnCancel" })
+        {
+            UiNodeViewModel? button = FindVm(root, id);
+            if (button == null)
+                continue;
+
+            if (button.Width <= 1)
+                button.Node.Props["Width"] = 147d;
+            if (button.Height <= 1)
+                button.Node.Props["Height"] = 23d;
+            button.RefreshLayout();
+        }
     }
 
     public static void WireCampaignSelection(

@@ -55,38 +55,16 @@ internal static class OptionsCnCNetControlsBootstrap
         if (panel == null)
             return;
 
-        UiNode? label = tree.FindNode("lblAllowPrivateMessagesFrom");
-        if (label == null)
-        {
-            label = new UiNode
-            {
-                Id = "lblAllowPrivateMessagesFrom",
-                ControlType = "XNALabel",
-                TemplateKey = "DxLabel",
-                WindowName = "OptionsWindow",
-                Parent = panel,
-            };
-            panel.Children.Add(label);
-        }
-
+        UiNode label = EnsureOnPanel(tree, panel, "lblAllowPrivateMessagesFrom", "XNALabel", "DxLabel");
         if (!HasDisplayText(label))
             label.Props["Text"] = "Allow Private Messages From:".L10N("Client:DTAConfig:AllowPMFrom");
 
-        UiNode? dropdown = tree.FindNode("ddAllowPrivateMessagesFrom");
-        if (dropdown == null)
-        {
-            dropdown = new UiNode
-            {
-                Id = "ddAllowPrivateMessagesFrom",
-                ControlType = "XNAClientDropDown",
-                TemplateKey = "DxComboBox",
-                WindowName = "OptionsWindow",
-                Parent = panel,
-            };
-            panel.Children.Add(dropdown);
-        }
+        UiNode dropdown = EnsureOnPanel(tree, panel, "ddAllowPrivateMessagesFrom", "XNAClientDropDown", "DxComboBox");
+        dropdown.TemplateKey = "DxComboBox";
+        dropdown.Props["Width"] = 240.0;
+        dropdown.Props["Height"] = 24.0;
 
-        if (!dropdown.Props.ContainsKey("Items"))
+        if (!dropdown.Props.ContainsKey("Items") || string.IsNullOrWhiteSpace(dropdown.Props["Items"]?.ToString()))
         {
             dropdown.Props["Items"] =
                 "All".L10N("Client:DTAConfig:PMAll") + "," +
@@ -94,6 +72,41 @@ internal static class OptionsCnCNetControlsBootstrap
                 "Friends".L10N("Client:DTAConfig:PMFriends") + "," +
                 "None".L10N("Client:DTAConfig:PMNone");
         }
+    }
+
+    /// <summary>Find-or-create and always reparent onto the CnCNet panel (INI often leaves the dropdown on root).</summary>
+    private static UiNode EnsureOnPanel(
+        UiNodeTree tree,
+        UiNode panel,
+        string id,
+        string controlType,
+        string templateKey)
+    {
+        UiNode? node = tree.FindNode(id);
+        if (node == null)
+        {
+            node = new UiNode
+            {
+                Id = id,
+                ControlType = controlType,
+                TemplateKey = templateKey,
+                WindowName = "OptionsWindow",
+                Parent = panel,
+            };
+            panel.Children.Add(node);
+            return node;
+        }
+
+        if (node.Parent != panel)
+        {
+            node.Parent?.Children.Remove(node);
+            node.Parent = panel;
+            if (!panel.Children.Contains(node))
+                panel.Children.Add(node);
+        }
+
+        node.TemplateKey = templateKey;
+        return node;
     }
 
     private static bool HasDisplayText(UiNode node)

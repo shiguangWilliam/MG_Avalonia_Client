@@ -3,6 +3,7 @@ using ClientAvalonia.Domain;
 using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
+using System.Globalization;
 
 namespace ClientAvalonia.Services;
 
@@ -124,6 +125,7 @@ public static class MapCatalogLoader
 
             string previewRelative = BuildOfficialPreviewPath(mapFile, ini, mapPath);
             string sha1 = Utilities.CalculateSHA1ForFile(mapFile.FullName);
+            MapGeometryPayload geometry = ReadOfficialMapGeometry(ini, mapPath);
 
             maps.Add(new MapEntry
             {
@@ -141,10 +143,76 @@ public static class MapCatalogLoader
                 MaxPlayers = maxPlayers,
                 EnforceMaxPlayers = enforceMaxPlayers,
                 CompleteFilePath = mapFile.FullName,
+                Waypoints = geometry.Waypoints,
+                ActualSize = geometry.ActualSize,
+                LocalSize = geometry.LocalSize,
+                MapX = geometry.MapX,
+                MapY = geometry.MapY,
+                MapWidth = geometry.MapWidth,
+                MapHeight = geometry.MapHeight,
             });
         }
 
         return maps;
+    }
+
+    private readonly record struct MapGeometryPayload(
+        IReadOnlyList<string> Waypoints,
+        IReadOnlyList<string> ActualSize,
+        IReadOnlyList<string> LocalSize,
+        int MapX,
+        int MapY,
+        int MapWidth,
+        int MapHeight);
+
+    private static MapGeometryPayload ReadOfficialMapGeometry(IniFile ini, string mapPath)
+    {
+        var waypoints = new List<string>(StartingLocationProjector.MaxPlayers);
+        for (int i = 0; i < StartingLocationProjector.MaxPlayers; i++)
+        {
+            string waypoint = ini.GetStringValue(mapPath, "Waypoint" + i, string.Empty);
+            if (string.IsNullOrEmpty(waypoint))
+                break;
+            waypoints.Add(waypoint);
+        }
+
+        string[] actualSize = SplitCsv4(ini.GetStringValue(mapPath, "Size", "0,0,0,0"));
+        string[] localSize = SplitCsv4(ini.GetStringValue(mapPath, "LocalSize", "0,0,0,0"));
+        int mapX = ini.GetIntValue(mapPath, "X", 0);
+        int mapY = ini.GetIntValue(mapPath, "Y", 0);
+        int mapWidth = ini.GetIntValue(mapPath, "Width", 0);
+        int mapHeight = ini.GetIntValue(mapPath, "Height", 0);
+
+        return new MapGeometryPayload(waypoints, actualSize, localSize, mapX, mapY, mapWidth, mapHeight);
+    }
+
+    private static MapGeometryPayload ReadCustomMapGeometry(IniFile customMapIni)
+    {
+        var waypoints = new List<string>(StartingLocationProjector.MaxPlayers);
+        for (int i = 0; i < StartingLocationProjector.MaxPlayers; i++)
+        {
+            string waypoint = customMapIni.GetStringValue("Waypoints", i.ToString(CultureInfo.InvariantCulture), string.Empty);
+            if (string.IsNullOrEmpty(waypoint))
+                break;
+            waypoints.Add(waypoint);
+        }
+
+        string[] actualSize = SplitCsv4(customMapIni.GetStringValue("Map", "Size", "0,0,0,0"));
+        string[] localSize = SplitCsv4(customMapIni.GetStringValue("Map", "LocalSize", "0,0,0,0"));
+        int mapX = customMapIni.GetIntValue("Map", "X", 0);
+        int mapY = customMapIni.GetIntValue("Map", "Y", 0);
+        int mapWidth = customMapIni.GetIntValue("Map", "Width", 0);
+        int mapHeight = customMapIni.GetIntValue("Map", "Height", 0);
+
+        return new MapGeometryPayload(waypoints, actualSize, localSize, mapX, mapY, mapWidth, mapHeight);
+    }
+
+    private static string[] SplitCsv4(string raw)
+    {
+        string[] parts = raw.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length >= 4)
+            return [parts[0], parts[1], parts[2], parts[3]];
+        return ["0", "0", "0", "0"];
     }
 
     private static string BuildOfficialPreviewPath(FileInfo mapFile, IniFile mpMapsIni, string mapPath)
@@ -225,6 +293,7 @@ public static class MapCatalogLoader
             if (string.IsNullOrEmpty(previewRelative))
                 previewRelative = Path.ChangeExtension(baseFilePath, ".png")!.Replace('\\', '/');
             string sha1 = Utilities.CalculateSHA1ForFile(mapFile.FullName);
+            MapGeometryPayload geometry = ReadCustomMapGeometry(customMapIni);
 
             return new MapEntry
             {
@@ -241,6 +310,13 @@ public static class MapCatalogLoader
                 MaxPlayers = maxPlayers,
                 EnforceMaxPlayers = enforceMaxPlayers,
                 CompleteFilePath = mapFile.FullName,
+                Waypoints = geometry.Waypoints,
+                ActualSize = geometry.ActualSize,
+                LocalSize = geometry.LocalSize,
+                MapX = geometry.MapX,
+                MapY = geometry.MapY,
+                MapWidth = geometry.MapWidth,
+                MapHeight = geometry.MapHeight,
             };
         }
         catch (Exception ex)

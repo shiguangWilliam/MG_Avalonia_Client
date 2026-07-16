@@ -193,6 +193,12 @@ public sealed class CnCNetSessionService : IDisposable
 
     public void SetGameRoomLocked(bool locked) => _session.SetGameRoomLocked(locked);
 
+    public bool TryHostChangeTunnel(CnCNetTunnel tunnel)
+        => _session.GameRoom?.TryHostChangeTunnel(tunnel) == true;
+
+    public void UpdateGameLobbySettings(string roomName, int maxPlayers, int skillLevel, string? password)
+        => _session.GameRoom?.UpdateGameLobbySettings(roomName, maxPlayers, skillLevel, password);
+
     public void SendChatMessage(string message) => _session.SendChatMessage(message);
 
     public void NotifyGameProcessStarted() => _session.NotifyGameProcessStarted();

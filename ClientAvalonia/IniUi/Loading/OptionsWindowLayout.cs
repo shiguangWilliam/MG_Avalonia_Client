@@ -65,7 +65,11 @@ internal static class OptionsWindowLayout
         RendererOptionsBootstrap.Apply(tree);
         OptionsGameControlsBootstrap.Apply(tree);
         OptionsCnCNetControlsBootstrap.Apply(tree);
+        OptionsAudioControlsBootstrap.Apply(tree);
+        OptionsUpdaterControlsBootstrap.Apply(tree);
+        OptionsComponentsControlsBootstrap.Apply(tree);
         OptionsPanelStackLayout.Apply(tree);
+        OptionsFooterChrome.ApplyToTree(tree);
         SetActiveTab(root, 0);
     }
 
@@ -157,12 +161,13 @@ internal static class OptionsWindowLayout
     private static void EnsureFooterButtons(UiNode root)
     {
         // MG OptionsWindow.ini omits footer buttons; XNA OptionsWindow creates them in code.
-        EnsureFooterButton(root, "btnSave", "保存");
-        EnsureFooterButton(root, "btnCancel", "取消");
+        EnsureFooterButton(root, "btnSave", OptionsFooterChrome.ResolveSaveText());
+        EnsureFooterButton(root, "btnCancel", OptionsFooterChrome.ResolveCancelText());
     }
 
     private static void EnsureFooterButton(UiNode root, string id, string text)
     {
+        // Prefer a root-level footer button (not a nested Campaign/other btnCancel).
         UiNode? btn = root.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
         if (btn == null)
         {
@@ -170,40 +175,45 @@ internal static class OptionsWindowLayout
             btn.Parent = root;
             root.Children.Add(btn);
         }
+        else if (btn.Parent != root)
+        {
+            btn.Parent?.Children.Remove(btn);
+            btn.Parent = root;
+            if (!root.Children.Contains(btn))
+                root.Children.Add(btn);
+        }
 
         btn.TemplateKey = "DxButton";
-        if (!btn.Props.ContainsKey("Text") || string.IsNullOrWhiteSpace(btn.Props["Text"]?.ToString()))
-            btn.Props["Text"] = text;
-        if (btn.GetIntProp("Width") <= 0)
-            btn.Props["Width"] = 92.0;
-        if (btn.GetIntProp("Height") <= 0)
-            btn.Props["Height"] = 23.0;
+        btn.Props["Text"] = text;
+        btn.Props["IsVisible"] = true;
+        btn.Props["Width"] = 92.0;
+        btn.Props["Height"] = 23.0;
     }
 
     private static void PositionFooterButtons(UiNodeTree tree)
     {
-        UiNode? btnSave = tree.FindNode("btnSave");
+        UiNode? btnSave = tree.Root.Children.FirstOrDefault(c =>
+            c.Id.Equals("btnSave", StringComparison.OrdinalIgnoreCase));
         if (btnSave != null)
         {
             btnSave.Props["CanvasLeft"] = 12.0;
             btnSave.Props["CanvasTop"] = (double)(DialogHeight - 35);
             btnSave.Props["IsVisible"] = true;
-            if (btnSave.GetIntProp("Width") <= 0)
-                btnSave.Props["Width"] = 92.0;
-            if (btnSave.GetIntProp("Height") <= 0)
-                btnSave.Props["Height"] = 23.0;
+            btnSave.Props["Text"] = OptionsFooterChrome.ResolveSaveText();
+            btnSave.Props["Width"] = 92.0;
+            btnSave.Props["Height"] = 23.0;
         }
 
-        UiNode? btnCancel = tree.FindNode("btnCancel");
+        UiNode? btnCancel = tree.Root.Children.FirstOrDefault(c =>
+            c.Id.Equals("btnCancel", StringComparison.OrdinalIgnoreCase));
         if (btnCancel != null)
         {
             btnCancel.Props["CanvasLeft"] = (double)(DialogWidth - 104);
             btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 35);
             btnCancel.Props["IsVisible"] = true;
-            if (btnCancel.GetIntProp("Width") <= 0)
-                btnCancel.Props["Width"] = 92.0;
-            if (btnCancel.GetIntProp("Height") <= 0)
-                btnCancel.Props["Height"] = 23.0;
+            btnCancel.Props["Text"] = OptionsFooterChrome.ResolveCancelText();
+            btnCancel.Props["Width"] = 92.0;
+            btnCancel.Props["Height"] = 23.0;
         }
     }
 
@@ -372,8 +382,8 @@ internal static class OptionsWindowLayout
         {
             "chkWindowedMode", "lblIngameResolution", "ddIngameResolution", "lblDetailLevel", "ddDetailLevel",
             "lblRenderer", "ddRenderer", "chkBorderlessWindowedMode", "chkBackBufferInVRAM", "lblClientResolution",
-            "ddClientResolution", "chkBorderlessClient", "lblClientTheme", "ddClientTheme", "chkStretchMovies",
-            "chkStopMusicOnMenu", "chkMEDDraw", "ddReShade", "lblReShade",
+            "ddClientResolution",             "chkBorderlessClient", "lblClientTheme", "ddClientTheme", "chkStretchMovies",
+            "chkMEDDraw", "ddReShade", "lblReShade",
         })
             map[id] = "DisplayOptionsPanel";
 
@@ -391,6 +401,24 @@ internal static class OptionsWindowLayout
 
         foreach (string id in new[] { "lblPlayerName", "tbPlayerName", "lblPlayerNameNotice" })
             map[id] = "GameOptionsPanel";
+
+        foreach (string id in new[]
+        {
+            "lblScoreVolume", "lblScoreVolumeValue", "trbScoreVolume",
+            "lblSoundVolume", "lblSoundVolumeValue", "trbSoundVolume",
+            "lblVoiceVolume", "lblVoiceVolumeValue", "trbVoiceVolume",
+            "chkScoreShuffle",
+            "lblClientVolume", "lblClientVolumeValue", "trbClientVolume",
+            "chkMainMenuMusic", "chkStopMusicOnMenu", "chkStopGameLobbyMessageAudio",
+        })
+            map[id] = "AudioOptionsPanel";
+
+        foreach (string id in new[]
+        {
+            "lblUpdaterDescription", "lbUpdateServerList", "btnMoveUp", "btnMoveDown",
+            "chkAutoCheck", "btnForceUpdate",
+        })
+            map[id] = "UpdaterOptionsPanel";
 
         return map;
     }

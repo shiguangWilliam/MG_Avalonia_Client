@@ -19,6 +19,11 @@ public static class FloatingOverlayLayout
 
     public static (int Width, int Height) ResolveOverlaySize(string iniPath, string windowSectionName)
     {
+        // Options chrome (tabs + footer Save/Cancel) is laid out against fixed constants.
+        // Preferring a smaller INI Height clips/hides the Cancel button.
+        if (windowSectionName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+            return (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height);
+
         if (ClientEnvironment.ReadWindowSize(iniPath, windowSectionName) is { } fromIni)
             return fromIni;
 

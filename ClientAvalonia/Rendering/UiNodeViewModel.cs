@@ -32,7 +32,8 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
         _behaviors = behaviors;
         Children = new ObservableCollection<UiNodeViewModel>(children ?? []);
         ClickCommand = behaviors.CreateClickCommand(this);
-        ComboItems = BuildComboItems();
+        ComboItems = [];
+        InitializeComboFromIni();
         _isChecked = ReadInitialIsChecked();
         _isEnabled = ReadInitialIsEnabled();
         _selectedIndex = ReadInitialSelectedIndex();
@@ -62,6 +63,9 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     public bool UseCatalogListItems { get; private set; }
 
     public event Action? SelectionChanged;
+
+    /// <summary>Raised when <see cref="IsChecked"/> changes via user/UI (not <see cref="SetIsCheckedSilent"/>).</summary>
+    public event Action? CheckedChanged;
 
     public event Action? InputTextChanged;
 
@@ -97,6 +101,18 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
             return Math.Max(w, 120);
         }
     }
+
+    /// <summary>Slider range (DX XNATrackbar MinValue/MaxValue). Defaults suit campaign difficulty (0–2).</summary>
+    public double SliderMinimum => Node.GetNumericProp("MinValue", 0);
+
+    public double SliderMaximum
+    {
+        get
+        {
+            double max = Node.GetNumericProp("MaxValue", 0);
+            return max > 0 ? max : 2;
+        }
+    }
     public int ZIndex => Node.Props.TryGetValue("ZIndex", out object? z) && z is int i ? i : 0;
 
     public bool IsVisible
@@ -126,15 +142,22 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     public bool IsChecked
     {
         get => _isChecked;
-        set
-        {
-            if (_isChecked == value)
-                return;
+        set => SetIsChecked(value, notify: true);
+    }
 
-            _isChecked = value;
-            Node.Props["IsChecked"] = value;
-            OnPropertyChanged();
-        }
+    public void SetIsCheckedSilent(bool value) => SetIsChecked(value, notify: false);
+
+    private void SetIsChecked(bool value, bool notify)
+    {
+        if (_isChecked == value)
+            return;
+
+        _isChecked = value;
+        Node.Props["IsChecked"] = value;
+        OnPropertyChanged(nameof(IsChecked));
+
+        if (notify)
+            CheckedChanged?.Invoke();
     }
 
     public int SelectedIndex
@@ -219,6 +242,39 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     public bool HasThumbImage => ThumbImage != null;
 
+    /// <summary>Starting-location markers rendered over the map preview.</summary>
+    public ObservableCollection<MapStartMarkerVm> StartMarkers { get; } = [];
+
+    public bool HasStartMarkers => StartMarkers.Count > 0;
+
+    /// <summary>Host can open an assign menu on marker left-click.</summary>
+    public bool MapPreviewCanAssign { get; set; }
+
+    /// <summary>Joiner can claim a free starting location by left-click.</summary>
+    public bool MapPreviewCanSelectLocal { get; set; }
+
+    /// <summary>Copied from the active <see cref="Domain.MapEntry.EnforceMaxPlayers"/>.</summary>
+    public bool MapPreviewEnforceMaxPlayers { get; set; }
+
+    public event Action<int>? StartMarkerLeftClicked;
+
+    public event Action<int>? StartMarkerRightClicked;
+
+    public void SetStartMarkers(IEnumerable<MapStartMarkerVm> markers)
+    {
+        StartMarkers.Clear();
+        foreach (MapStartMarkerVm marker in markers)
+            StartMarkers.Add(marker);
+        OnPropertyChanged(nameof(StartMarkers));
+        OnPropertyChanged(nameof(HasStartMarkers));
+    }
+
+    public void NotifyStartMarkerLeftClick(int startLocation1Based)
+        => StartMarkerLeftClicked?.Invoke(startLocation1Based);
+
+    public void NotifyStartMarkerRightClick(int startLocation1Based)
+        => StartMarkerRightClicked?.Invoke(startLocation1Based);
+
     public IBrush? BackgroundBrush
     {
         get
@@ -277,6 +333,8 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     {
         _displayTextOverride = text;
         OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(ShowButtonText));
+        OnPropertyChanged(nameof(ButtonLabel));
     }
 
     public void SetComboItems(IEnumerable<string> items)
@@ -386,6 +444,8 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsEnabled));
         OnPropertyChanged(nameof(IsTabSelected));
         OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(ShowButtonText));
+        OnPropertyChanged(nameof(ButtonLabel));
         OnPropertyChanged(nameof(ForegroundBrush));
         LoadImages();
 
@@ -401,13 +461,78 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CanvasTop));
     }
 
-    private ObservableCollection<string> BuildComboItems()
+    /// <summary>
+    /// Build combo contents from INI <c>Items</c> / <c>ItemLabels</c>, matching DX
+    /// <c>GameSessionDropDown</c>: labels for display, raw Items values kept in
+    /// <see cref="ComboItemViewModel.Tag"/> for spawn/map-code writes.
+    /// </summary>
+    private void InitializeComboFromIni()
     {
         if (!Node.Props.TryGetValue("Items", out object? itemsObj) || itemsObj is not string itemsText)
-            return [];
+            return;
 
-        string[] parts = itemsText.Split(',');
-        return new ObservableCollection<string>(parts.Select(p => p.Trim()).Where(p => p.Length > 0));
+        string[] items = SplitCommaList(itemsText);
+        if (items.Length == 0)
+            return;
+
+        string[] labels = [];
+        if (Node.Props.TryGetValue("ItemLabels", out object? labelsObj) && labelsObj is string labelsText)
+            labels = SplitCommaList(labelsText);
+
+        bool hasLabels = labels.Length > 0 && labels.Any(static l => l.Length > 0);
+        if (!hasLabels)
+        {
+            foreach (string item in items)
+                ComboItems.Add(item);
+            return;
+        }
+
+        UseComboItemIcons = true;
+        for (int i = 0; i < items.Length; i++)
+        {
+            string label = i < labels.Length && labels[i].Length > 0 ? labels[i] : items[i];
+            var entry = new ComboItemViewModel
+            {
+                Text = label,
+                Tag = items[i],
+            };
+            ComboItemEntries.Add(entry);
+            ComboItems.Add(label);
+        }
+    }
+
+    private static string[] SplitCommaList(string text)
+        => text.Split(',')
+            .Select(static p => p.Trim())
+            .Where(static p => p.Length > 0)
+            .ToArray();
+
+    /// <summary>
+    /// Value used for spawn.ini / map-code writes. Prefers <see cref="ComboItemViewModel.Tag"/>
+    /// (raw INI Items path) when ItemLabels drove the display text.
+    /// </summary>
+    public string? GetSelectedComboValue()
+    {
+        if (SelectedIndex < 0)
+            return null;
+
+        if (UseComboItemIcons
+            && SelectedIndex < ComboItemEntries.Count
+            && !string.IsNullOrEmpty(ComboItemEntries[SelectedIndex].Tag))
+        {
+            return ComboItemEntries[SelectedIndex].Tag;
+        }
+
+        if (SelectedIndex < ComboItems.Count)
+            return ComboItems[SelectedIndex];
+
+        return null;
+    }
+
+    public void SetForeground(Color color)
+    {
+        Node.Props["Foreground"] = color;
+        OnPropertyChanged(nameof(ForegroundBrush));
     }
 
     private bool ReadInitialIsChecked()

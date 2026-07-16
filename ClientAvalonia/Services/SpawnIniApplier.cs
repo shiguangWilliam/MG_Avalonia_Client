@@ -91,7 +91,7 @@ public static class SpawnIniApplier
             case "MAPCODE":
                 break;
             default:
-                string raw = vm.ComboItems[vm.SelectedIndex];
+                string raw = vm.GetSelectedComboValue() ?? vm.ComboItems[vm.SelectedIndex];
                 spawnIni.SetStringValue("Settings", spawnKey, raw);
                 Logger.Log($"SpawnIniApplier: {vm.Id} → Settings.{spawnKey}={raw}");
                 break;
@@ -103,7 +103,10 @@ public static class SpawnIniApplier
         if (vm.SelectedIndex < 0 || vm.SelectedIndex >= vm.ComboItems.Count)
             return;
 
-        string customIniPath = vm.ComboItems[vm.SelectedIndex];
+        string? customIniPath = vm.GetSelectedComboValue();
+        if (string.IsNullOrWhiteSpace(customIniPath))
+            return;
+
         MapCodeHelper.ApplyMapCode(mapIni, customIniPath, gameMode);
         Logger.Log($"SpawnIniApplier: {vm.Id} map code → {customIniPath}");
     }

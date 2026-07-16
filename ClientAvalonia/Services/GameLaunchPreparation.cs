@@ -6,6 +6,8 @@ using ClientCore.Settings;
 using Rampastring.Tools;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ClientAvalonia.Services;
 
@@ -16,6 +18,39 @@ namespace ClientAvalonia.Services;
 public static class GameLaunchPreparation
 {
     internal const string PipelineVersion = "2025-06-19-r17";
+
+    /// <summary>
+    /// Idempotent subset run while players wait in a locked/ready room so START is less cold.
+    /// Does not reload/save settings (those stay on the real launch path).
+    /// </summary>
+    public static void BeginLobbyPrewarm(CancellationToken cancellationToken)
+    {
+        Task.Run(() =>
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            Logger.Log("GameLaunchPreparation: lobby prewarm started.");
+            var sw = Stopwatch.StartNew();
+            long translationMs = TimedStep("SyncTranslationFiles", () =>
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                    SyncTranslationGameFilesIfNeeded();
+            });
+            long rendererMs = TimedStep("ApplyRenderer", () =>
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                    GameRendererBootstrap.RefreshBeforeLaunch();
+            });
+            sw.Stop();
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                Logger.Log(
+                    $"GameLaunchPreparation: lobby prewarm done in {sw.ElapsedMilliseconds} ms " +
+                    $"(translation={translationMs}, renderer={rendererMs}).");
+            }
+        }, cancellationToken);
+    }
 
     public static long PrepareForLaunch()
     {

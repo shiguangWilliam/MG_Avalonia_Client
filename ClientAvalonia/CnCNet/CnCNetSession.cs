@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Avalonia.Media;
 using ClientCore;
 using ClientCore.Settings;
 using Rampastring.Tools;
@@ -714,7 +715,7 @@ public sealed class CnCNetSession : IDisposable
 
     public void SendChatMessage(string message)
     {
-        if (_connection == null || !_connection.IsConnected || _currentGame == null)
+        if (_connection == null || !_connection.IsConnected)
             return;
 
         if (string.IsNullOrWhiteSpace(message))
@@ -725,12 +726,40 @@ public sealed class CnCNetSession : IDisposable
             colorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
 
         CnCNetChatColorEntry color = CnCNetChatColorCatalog.GetEntry(colorIndex);
-        _connection.SendChatMessage(_currentGame.ChatChannel, message, color.IrcColorId);
+
+        // Route priority mirrors DX: when the player is inside a CnCNet game room,
+        // the in-room channel owns the chat send target (see DX CnCNetGameLobby.SendChatMessage
+        // -> channel.SendChatMessage). Otherwise we fall back to the lobby channel.
+        string trimmedMessage = message.Trim();
+        if (_gameRoom is { IsLocalJoined: true })
+        {
+            CnCNetGameRoomSession.RoomChatSendResult result =
+                _gameRoom.TrySendChat(trimmedMessage, color.IrcColorId);
+            if (result == CnCNetGameRoomSession.RoomChatSendResult.Failed)
+                return;
+
+            if (result == CnCNetGameRoomSession.RoomChatSendResult.SentAsChat)
+            {
+                _gameRoom.AppendLocalChat(
+                    FormatChatLine(LocalNick, trimmedMessage, DateTime.Now),
+                    color.DisplayColor);
+            }
+
+            StateChanged?.Invoke();
+            return;
+        }
+
+        if (_currentGame == null)
+            return;
+
+        _connection.SendChatMessage(_currentGame.ChatChannel, trimmedMessage, color.IrcColorId);
 
         LobbyState.AddChatLine(new CnCNetChatLine
         {
+            Scope = CnCNetChatScope.LobbyChannel,
             Sender = LocalNick,
-            DisplayText = FormatChatLine(LocalNick, message, DateTime.Now),
+            DisplayText = FormatChatLine(LocalNick, trimmedMessage, DateTime.Now),
+            TextColor = color.DisplayColor,
         });
         StateChanged?.Invoke();
     }
@@ -1012,7 +1041,14 @@ public sealed class CnCNetSession : IDisposable
         connection.ChannelNamesComplete += OnChannelNamesComplete;
         connection.ChannelJoinFailed += OnChannelJoinFailed;
         connection.NotOnChannel += OnNotOnChannel;
+        connection.ChannelModeChanged += OnChannelModeChanged;
         connection.ActivityLogged += msg => LogActivity(msg, notifyUi: false);
+    }
+
+    private void OnChannelModeChanged(object? sender, Online.EventArguments.ChannelModeEventArgs e)
+    {
+        _gameRoom?.OnChannelModesChanged(e.ChannelName, e.ModeString);
+        StateChanged?.Invoke();
     }
 
     private void OnNotOnChannel(string channel)
@@ -1527,31 +1563,39 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnChatMessageReceived(string channel, string sender, string message)
     {
+        // Route to the in-room timeline when the message arrived on the active game-room channel.
+        // This mirrors DX: the room Channel.MessageAdded feeds CnCNetGameLobby.Channel_MessageAdded
+        // -> lbChatMessages, independent of the lobby channel.
+        if (_gameRoom != null
+            && _activeGameRoom != null
+            && NormalizeIrcChannel(channel).Equals(
+                NormalizeIrcChannel(_activeGameRoom.ChannelName),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            (string roomText, Color roomColor) = CnCNetIrcChatText.Parse(
+                message, CnCNetIrcChatText.DefaultChatColor);
+            _gameRoom.AppendRemoteChat(
+                sender,
+                FormatChatLine(sender, roomText, DateTime.Now),
+                isSystem: false,
+                roomColor);
+            StateChanged?.Invoke();
+            return;
+        }
+
         if (_currentGame == null || !IsChatChannel(channel))
             return;
 
-        string text = ParseIncomingChatText(message);
+        (string text, Color color) = CnCNetIrcChatText.Parse(
+            message, CnCNetIrcChatText.DefaultChatColor);
         LobbyState.AddChatLine(new CnCNetChatLine
         {
+            Scope = CnCNetChatScope.LobbyChannel,
             Sender = sender,
             DisplayText = FormatChatLine(sender, text, DateTime.Now),
+            TextColor = color,
         });
         StateChanged?.Invoke();
-    }
-
-    private static string ParseIncomingChatText(string message)
-    {
-        if (message.Contains('\u0003') && message.Length >= 3)
-        {
-            string colorString = message.Substring(1, 2);
-            if (int.TryParse(colorString, out _))
-                message = message.Length > 3 ? message[3..] : string.Empty;
-        }
-
-        if (message.Length > 0 && message[^1] == '\u001f')
-            message = message[..^1];
-
-        return message.Replace('\r', ' ').Trim();
     }
 
     private static string FormatChatLine(string sender, string message, DateTime time)

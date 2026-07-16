@@ -1,0 +1,95 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Controls.MapPreviewBoxView"
+             x:DataType="vm:UiNodeViewModel"
+             Width="{Binding Width}"
+             Height="{Binding Height}"
+             IsVisible="{Binding IsVisible}"
+             ClipToBounds="True"
+             PointerPressed="OnBackgroundPointerPressed">
+  <Panel>
+    <Border Background="#CC0E0C0A"
+            CornerRadius="6"
+            BorderBrush="#6B4E2E"
+            BorderThickness="1"
+            IsHitTestVisible="False" />
+    <Border Margin="1"
+            CornerRadius="5"
+            BorderBrush="#20FFA648"
+            BorderThickness="0,1,0,0"
+            IsHitTestVisible="False" />
+    <Image Source="{Binding PreviewImage}"
+           Stretch="{Binding PreviewImageStretch}"
+           IsVisible="{Binding HasPreviewImage}"
+           IsHitTestVisible="False" />
+    <TextBlock Text="No preview"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center"
+               Foreground="#666"
+               FontSize="11"
+               IsVisible="{Binding !HasPreviewImage}"
+               IsHitTestVisible="False" />
+
+    <ItemsControl ItemsSource="{Binding StartMarkers}"
+                  IsHitTestVisible="True">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <Canvas />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:MapStartMarkerVm">
+          <Border Width="{Binding Width}"
+                  Height="{Binding Height}"
+                  Background="Transparent"
+                  Cursor="Hand"
+                  PointerPressed="OnMarkerPointerPressed"
+                  ToolTip.Tip="{Binding OccupantText}">
+            <Panel>
+              <Ellipse Width="{Binding Width}"
+                       Height="{Binding Height}"
+                       Stroke="{Binding RingBrush}"
+                       StrokeThickness="2"
+                       Fill="#66000000"
+                       IsHitTestVisible="False" />
+              <Ellipse Width="18"
+                       Height="18"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Fill="{Binding FillBrush}"
+                       Opacity="0.85"
+                       IsHitTestVisible="False" />
+              <TextBlock Text="{Binding Label}"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         FontSize="11"
+                         FontWeight="Bold"
+                         Foreground="#111"
+                         IsHitTestVisible="False" />
+              <Border IsVisible="{Binding HasOccupantText}"
+                      Background="#90000000"
+                      Padding="3,1"
+                      Margin="34,0,0,0"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Center"
+                      CornerRadius="2"
+                      IsHitTestVisible="False">
+                <TextBlock Text="{Binding OccupantText}"
+                           FontSize="10"
+                           Foreground="#F2E6D8"
+                           TextWrapping="NoWrap" />
+              </Border>
+            </Panel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+      <ItemsControl.Styles>
+        <Style Selector="ContentPresenter" x:DataType="vm:MapStartMarkerVm">
+          <Setter Property="Canvas.Left" Value="{Binding Left}" />
+          <Setter Property="Canvas.Top" Value="{Binding Top}" />
+        </Style>
+      </ItemsControl.Styles>
+    </ItemsControl>
+  </Panel>
+</UserControl>

@@ -14,13 +14,12 @@ public static class CnCNetGameLobbyBehaviors
             bool locked = CnCNetSessionService.Instance.GameRoom?.Locked == true;
             CnCNetSessionService.Instance.SetGameRoomLocked(!locked);
             host.ShowStatus(locked ? "Game unlocked." : "Game locked.");
+            host.RefreshCnCNetGameRoomPlayers();
         });
 
-        registry.Register("btnChangeTunnel", _ =>
-            host.ShowStatus("Tunnel selection UI pending — using default tunnel from create/join."));
+        registry.Register("btnChangeTunnel", _ => host.OpenGameRoomTunnelSelection());
 
-        registry.Register("btnGameLobbySettings", _ =>
-            host.ShowStatus("Game lobby settings UI pending."));
+        registry.Register("btnGameLobbySettings", _ => host.OpenGameLobbySettingsOverlay());
 
         registry.Register("chkAutoReady", _ =>
         {

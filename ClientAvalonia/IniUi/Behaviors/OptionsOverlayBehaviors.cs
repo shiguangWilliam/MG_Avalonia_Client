@@ -1,3 +1,7 @@
+using ClientAvalonia.IniUi.Binding;
+using ClientAvalonia.Rendering;
+using ClientUpdater;
+
 namespace ClientAvalonia.IniUi.Behaviors;
 
 /// <summary>Save/Cancel on the options floating panel (does not replace main-window navigation).</summary>
@@ -16,6 +20,28 @@ public static class OptionsOverlayBehaviors
 
         RegisterClose(registry, host, "btnOK", commit: true);
         RegisterClose(registry, host, "btnCancel", discard: true);
+
+        registry.Register("btnMoveUp", _ =>
+        {
+            if (host.IsOptionsOverlayOpen && host.OverlayRoot is UiNodeViewModel root)
+                UpdaterOptionsApplier.MoveSelectedMirrorUp(root);
+        });
+        registry.Register("btnMoveDown", _ =>
+        {
+            if (host.IsOptionsOverlayOpen && host.OverlayRoot is UiNodeViewModel root)
+                UpdaterOptionsApplier.MoveSelectedMirrorDown(root);
+        });
+        registry.Register("btnForceUpdate", _ =>
+        {
+            if (!host.IsFloatingOverlayOpen)
+                return;
+
+            host.CommitSettings();
+            Updater.ClearVersionInfo();
+            host.CloseFloatingOverlay();
+            host.CheckForUpdates();
+            host.ShowStatus("Force update: checking for updates…");
+        });
     }
 
     private static void RegisterClose(

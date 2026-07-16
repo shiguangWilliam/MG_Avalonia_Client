@@ -173,17 +173,19 @@ public sealed class IniUiTreeBuilder
         {
             if (section.KeyExists("SettingSection") || section.KeyExists("SettingKey") || section.KeyExists("DefaultValue"))
                 return "SettingCheckBox";
-            return section.KeyExists("SpawnIniOption") ? "GameLobbyCheckBox" : "XNAClientCheckBox";
+            return IsGameLobbyOptionSection(section) ? "GameLobbyCheckBox" : "XNAClientCheckBox";
         }
 
-        if (id.StartsWith("dd", StringComparison.OrdinalIgnoreCase) || section.KeyExists("Items"))
+        if (id.StartsWith("dd", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("cmb", StringComparison.OrdinalIgnoreCase)
+            || section.KeyExists("Items"))
         {
             if (section.KeyExists("SettingSection") || section.KeyExists("SettingKey"))
                 return "SettingDropDown";
-            return section.KeyExists("SpawnIniOption") ? "GameLobbyDropDown" : "XNAClientDropDown";
+            return IsGameLobbyOptionSection(section) ? "GameLobbyDropDown" : "XNAClientDropDown";
         }
 
-        if (section.KeyExists("Checked") || section.KeyExists("SpawnIniOption"))
+        if (section.KeyExists("Checked") || IsGameLobbyOptionSection(section))
             return "GameLobbyCheckBox";
 
         if (id.StartsWith("btn", StringComparison.OrdinalIgnoreCase))
@@ -304,6 +306,15 @@ public sealed class IniUiTreeBuilder
         return section.Keys.Any(k => k.Key is "IdleTexture" or "BackgroundTexture" or "Text" or "$X" or "Location" or "Checked" or "Items"
             or "DistanceFromRightBorder" or "DistanceFromBottomBorder" or "FillWidth" or "FillHeight" or "Enabled" or "Visible");
     }
+
+    /// <summary>
+    /// SpawnIni / MapCode / CustomIni game-option controls (DX GameLobbyCheckBox/DropDown).
+    /// </summary>
+    private static bool IsGameLobbyOptionSection(IniSection section)
+        => section.KeyExists("SpawnIniOption")
+           || section.KeyExists("CustomIniPath")
+           || section.KeyExists("OptionName")
+           || section.KeyExists("DataWriteMode");
 
     /// <summary>
     /// Controls created in XNA code (CnCNetLobby.cs) with layout-only INI sections — must be adopted as real widgets.

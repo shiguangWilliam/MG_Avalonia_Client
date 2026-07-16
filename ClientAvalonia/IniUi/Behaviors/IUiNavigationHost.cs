@@ -35,6 +35,12 @@ public interface IUiNavigationHost
 
     void CloseGameCreationOverlay();
 
+    /// <summary>Host-only: open tunnel picker for the active CnCNet game room.</summary>
+    void OpenGameRoomTunnelSelection();
+
+    /// <summary>Host-only: open room name / max players / password settings.</summary>
+    void OpenGameLobbySettingsOverlay();
+
     void ShowStatus(string message);
 
     void ExitApplication();

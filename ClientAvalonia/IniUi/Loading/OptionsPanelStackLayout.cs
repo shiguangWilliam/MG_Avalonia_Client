@@ -59,14 +59,225 @@ internal static class OptionsPanelStackLayout
         "chkBuildingPlacement",
     ];
 
+    private static readonly string[] AudioOrder =
+    [
+        "lblScoreVolume", "trbScoreVolume", "lblScoreVolumeValue",
+        "lblSoundVolume", "trbSoundVolume", "lblSoundVolumeValue",
+        "lblVoiceVolume", "trbVoiceVolume", "lblVoiceVolumeValue",
+        "chkScoreShuffle",
+        "lblClientVolume", "trbClientVolume", "lblClientVolumeValue",
+        "chkMainMenuMusic",
+        "chkStopMusicOnMenu",
+        "chkStopGameLobbyMessageAudio",
+    ];
+
     public static void Apply(UiNodeTree tree)
     {
         StackFormPanel(tree, tree.FindNode("DisplayOptionsPanel"), DisplayOrder);
         StackTwoColumnPanel(tree.FindNode("CnCNetOptionsPanel"), CnCNetLeftColumn, CnCNetRightColumn);
         StackFormPanel(tree, tree.FindNode("GameOptionsPanel"), GameOrder);
-        StackAutoPanel(tree.FindNode("AudioOptionsPanel"));
-        StackAutoPanel(tree.FindNode("UpdaterOptionsPanel"));
-        StackAutoPanel(tree.FindNode("ComponentsPanel"));
+        StackAudioPanel(tree.FindNode("AudioOptionsPanel"), AudioOrder);
+        StackUpdaterPanel(tree.FindNode("UpdaterOptionsPanel"));
+        StackComponentsPanel(tree.FindNode("ComponentsPanel"));
+    }
+
+    private static void StackUpdaterPanel(UiNode? panel)
+    {
+        if (panel == null)
+            return;
+
+        int y = MarginTop;
+        UiNode? description = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals("lblUpdaterDescription", StringComparison.OrdinalIgnoreCase));
+        if (description != null)
+        {
+            // Two-line tip must reserve enough vertical space or the list paints over it.
+            description.Props["CanvasLeft"] = (double)MarginLeft;
+            description.Props["CanvasTop"] = (double)y;
+            description.Props["Width"] = 520.0;
+            description.Props["Height"] = 56.0;
+            y += 56 + 16;
+        }
+
+        UiNode? list = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals("lbUpdateServerList", StringComparison.OrdinalIgnoreCase));
+        if (list != null)
+        {
+            list.Props["CanvasLeft"] = (double)MarginLeft;
+            list.Props["CanvasTop"] = (double)y;
+            list.Props["Width"] = 520.0;
+            list.Props["Height"] = 120.0;
+            y += 120 + RowGap;
+        }
+
+        UiNode? moveUp = panel.Children.FirstOrDefault(c => c.Id.Equals("btnMoveUp", StringComparison.OrdinalIgnoreCase));
+        UiNode? moveDown = panel.Children.FirstOrDefault(c => c.Id.Equals("btnMoveDown", StringComparison.OrdinalIgnoreCase));
+        if (moveUp != null)
+        {
+            moveUp.Props["CanvasLeft"] = (double)MarginLeft;
+            moveUp.Props["CanvasTop"] = (double)y;
+            moveUp.Props["Width"] = 133.0;
+        }
+
+        if (moveDown != null)
+        {
+            moveDown.Props["CanvasLeft"] = (double)(MarginLeft + 520 - 133);
+            moveDown.Props["CanvasTop"] = (double)y;
+            moveDown.Props["Width"] = 133.0;
+        }
+
+        if (moveUp != null || moveDown != null)
+            y += 23 + 24;
+
+        UiNode? autoCheck = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals("chkAutoCheck", StringComparison.OrdinalIgnoreCase));
+        if (autoCheck != null)
+            y = PlaceBlock(autoCheck, MarginLeft, y);
+
+        UiNode? force = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals("btnForceUpdate", StringComparison.OrdinalIgnoreCase));
+        if (force != null)
+        {
+            force.Props["CanvasLeft"] = (double)(MarginLeft + 520 - 133);
+            force.Props["CanvasTop"] = (double)y;
+            force.Props["Width"] = 133.0;
+            y += 23 + RowGap;
+        }
+
+        panel.Props["ScrollContentHeight"] = (double)(y + 8);
+    }
+
+    private static void StackComponentsPanel(UiNode? panel)
+    {
+        if (panel == null)
+            return;
+
+        int y = MarginTop;
+        var handled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        UiNode? empty = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals("lblNoComponents", StringComparison.OrdinalIgnoreCase));
+        if (empty != null)
+        {
+            y = PlaceBlock(empty, MarginLeft, y);
+            panel.Props["ScrollContentHeight"] = (double)(y + 8);
+            return;
+        }
+
+        foreach (UiNode label in panel.Children
+                     .Where(c => c.Id.StartsWith("lblComponent_", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(c => c.Id))
+        {
+            string suffix = label.Id["lblComponent_".Length..];
+            UiNode? button = panel.Children.FirstOrDefault(c =>
+                c.Id.Equals("btnComponent_" + suffix, StringComparison.OrdinalIgnoreCase));
+
+            label.Props["CanvasLeft"] = (double)MarginLeft;
+            label.Props["CanvasTop"] = (double)(y + 2);
+            label.Props["Width"] = 360.0;
+            handled.Add(label.Id);
+
+            if (button != null)
+            {
+                button.Props["CanvasLeft"] = (double)(MarginLeft + 520 - 133);
+                button.Props["CanvasTop"] = (double)y;
+                button.Props["Width"] = 133.0;
+                handled.Add(button.Id);
+            }
+
+            y += 35;
+        }
+
+        foreach (UiNode extra in panel.Children.Where(c => !handled.Contains(c.Id) && IsVisible(c)))
+            y = PlaceBlock(extra, MarginLeft, y);
+
+        panel.Props["ScrollContentHeight"] = (double)(y + 8);
+    }
+
+    private static void StackAudioPanel(UiNode? panel, IReadOnlyList<string> _)
+    {
+        if (panel == null)
+            return;
+
+        const int labelWidth = 140;
+        const int valueWidth = 28;
+        const int trackLeft = MarginLeft + labelWidth + 8;
+        const int trackWidth = 280;
+        const int valueLeft = trackLeft + trackWidth + 8;
+        int y = MarginTop;
+        var handled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void PlaceVolumeRow(string labelId, string trackId, string valueId)
+        {
+            UiNode? label = panel.Children.FirstOrDefault(c => c.Id.Equals(labelId, StringComparison.OrdinalIgnoreCase));
+            UiNode? track = panel.Children.FirstOrDefault(c => c.Id.Equals(trackId, StringComparison.OrdinalIgnoreCase));
+            UiNode? value = panel.Children.FirstOrDefault(c => c.Id.Equals(valueId, StringComparison.OrdinalIgnoreCase));
+            if (label != null)
+            {
+                label.Props["CanvasLeft"] = (double)MarginLeft;
+                label.Props["CanvasTop"] = (double)y;
+                label.Props["Width"] = (double)labelWidth;
+                handled.Add(label.Id);
+            }
+
+            if (track != null)
+            {
+                track.Props["CanvasLeft"] = (double)trackLeft;
+                track.Props["CanvasTop"] = (double)y;
+                track.Props["Width"] = (double)trackWidth;
+                handled.Add(track.Id);
+            }
+
+            if (value != null)
+            {
+                value.Props["CanvasLeft"] = (double)valueLeft;
+                value.Props["CanvasTop"] = (double)y;
+                value.Props["Width"] = (double)valueWidth;
+                handled.Add(value.Id);
+            }
+
+            y += 34;
+        }
+
+        PlaceVolumeRow("lblScoreVolume", "trbScoreVolume", "lblScoreVolumeValue");
+        PlaceVolumeRow("lblSoundVolume", "trbSoundVolume", "lblSoundVolumeValue");
+        PlaceVolumeRow("lblVoiceVolume", "trbVoiceVolume", "lblVoiceVolumeValue");
+
+        foreach (string id in new[] { "chkScoreShuffle" })
+        {
+            UiNode? node = panel.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (node == null)
+                continue;
+            node.Props["CanvasLeft"] = (double)MarginLeft;
+            node.Props["CanvasTop"] = (double)y;
+            handled.Add(node.Id);
+            y += 28;
+        }
+
+        y += 8;
+        PlaceVolumeRow("lblClientVolume", "trbClientVolume", "lblClientVolumeValue");
+
+        foreach (string id in new[] { "chkMainMenuMusic", "chkStopMusicOnMenu", "chkStopGameLobbyMessageAudio" })
+        {
+            UiNode? node = panel.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (node == null)
+                continue;
+            node.Props["CanvasLeft"] = (double)MarginLeft;
+            node.Props["CanvasTop"] = (double)y;
+            handled.Add(node.Id);
+            y += 28;
+        }
+
+        foreach (UiNode child in panel.Children)
+        {
+            if (handled.Contains(child.Id) || !IsVisible(child))
+                continue;
+            child.Props["CanvasLeft"] = (double)MarginLeft;
+            child.Props["CanvasTop"] = (double)y;
+            y += Math.Max(24, (int)child.GetNumericProp("Height", 24)) + RowGap;
+        }
+
+        panel.Props["ScrollContentHeight"] = (double)Math.Max(y + 16, panel.GetNumericProp("Height", 400));
     }
 
     private static void StackFormPanel(UiNodeTree tree, UiNode? panel, IReadOnlyList<string> order)
@@ -129,7 +340,7 @@ internal static class OptionsPanelStackLayout
             {
                 UiNode? dropdown = panel.Children.FirstOrDefault(c =>
                     c.Id.Equals("ddAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase));
-                leftY = PlaceLabelDropdownRow(node, dropdown, leftY);
+                leftY = PlacePrivateMessagesRow(node, dropdown, leftY);
                 continue;
             }
 
@@ -159,6 +370,32 @@ internal static class OptionsPanelStackLayout
             y = PlaceBlock(child, MarginLeft, y);
 
         panel.Props["ScrollContentHeight"] = (double)(y + 8);
+    }
+
+    /// <summary>
+    /// Keep PM label + dropdown entirely in the left column (stacked), never between columns.
+    /// Same-row layout at x≈176 overlaps the right column ("Current channel" bug).
+    /// </summary>
+    private static int PlacePrivateMessagesRow(UiNode label, UiNode? dropdown, int y)
+    {
+        const int leftColumnWidth = RightColumnLeft - MarginLeft - 16; // ~256px, clear of right column
+
+        label.Props["CanvasLeft"] = (double)MarginLeft;
+        label.Props["CanvasTop"] = (double)y;
+        label.Props["Width"] = (double)leftColumnWidth;
+        label.Props["Height"] = 22.0;
+        y += 22 + 4;
+
+        if (dropdown != null && IsVisible(dropdown))
+        {
+            dropdown.Props["CanvasLeft"] = (double)MarginLeft;
+            dropdown.Props["CanvasTop"] = (double)y;
+            dropdown.Props["Width"] = (double)Math.Min(240, leftColumnWidth);
+            dropdown.Props["Height"] = 24.0;
+            y += 24 + RowGap;
+        }
+
+        return y;
     }
 
     private static int PlaceLabelDropdownRow(UiNode label, UiNode? dropdown, int y)

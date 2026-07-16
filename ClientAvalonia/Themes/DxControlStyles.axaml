@@ -22,35 +22,7 @@
   </DataTemplate>
 
   <DataTemplate x:Key="MapPreviewBox" DataType="vm:UiNodeViewModel">
-    <Button Background="Transparent"
-            BorderThickness="0"
-            Padding="0"
-            Width="{Binding Width}"
-            Height="{Binding Height}"
-            Command="{Binding ClickCommand}"
-            ToolTip.Tip="Click to toggle favorite map">
-      <Panel ClipToBounds="True">
-        <Border Background="#CC0E0C0A"
-                CornerRadius="6"
-                BorderBrush="#6B4E2E"
-                BorderThickness="1" />
-        <Border Margin="1"
-                CornerRadius="5"
-                BorderBrush="#20FFA648"
-                BorderThickness="0,1,0,0"
-                IsHitTestVisible="False" />
-        <Image Source="{Binding PreviewImage}"
-               Stretch="{Binding PreviewImageStretch}"
-               IsVisible="{Binding HasPreviewImage}"
-               IsHitTestVisible="False" />
-        <TextBlock Text="No preview"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"
-                   Foreground="#666"
-                   FontSize="11"
-                   IsVisible="{Binding !HasPreviewImage}" />
-      </Panel>
-    </Button>
+    <ctrl:MapPreviewBoxView />
   </DataTemplate>
 
   <DataTemplate x:Key="DxPanel" DataType="vm:UiNodeViewModel">
@@ -297,7 +269,8 @@
                 IsHitTestVisible="False" />
         <TextBox Background="Transparent"
                  BorderThickness="0"
-                 Foreground="{StaticResource DxTextPrimaryBrush}"
+                 Foreground="{Binding ForegroundBrush}"
+                 CaretBrush="{Binding ForegroundBrush}"
                  FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
                  FontSize="12.5"
                  Padding="10,8"
@@ -317,36 +290,72 @@
             Background="#CC14100C"
             ClipToBounds="True"
             IsVisible="{Binding IsVisible}">
-      <ListBox Background="Transparent"
-               BorderThickness="0"
-               Padding="4,4"
-               ItemsSource="{Binding ListItems}"
-               SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
-               IsEnabled="{Binding IsEnabled}">
-        <ListBox.ItemTemplate>
-          <DataTemplate>
-            <TextBlock Text="{Binding}"
-                       FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
-                       FontSize="12.5"
-                       Foreground="{StaticResource DxTextPrimaryBrush}"
-                       TextWrapping="Wrap"
-                       Padding="8,6" />
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-        <ListBox.Styles>
-          <Style Selector="ListBoxItem">
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="0,1" />
-            <Setter Property="CornerRadius" Value="4" />
-          </Style>
-          <Style Selector="ListBoxItem:pointerover">
-            <Setter Property="Background" Value="#28FFFFFF" />
-          </Style>
-          <Style Selector="ListBoxItem:selected">
-            <Setter Property="Background" Value="#383020" />
-          </Style>
-        </ListBox.Styles>
-      </ListBox>
+      <Panel>
+        <!-- Plain string list (games list, player list, …) -->
+        <ListBox Background="Transparent"
+                 BorderThickness="0"
+                 Padding="4,4"
+                 ItemsSource="{Binding ListItems}"
+                 SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                 IsEnabled="{Binding IsEnabled}"
+                 IsVisible="{Binding UseCatalogListItems, Converter={x:Static BoolConverters.Not}}">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding}"
+                         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                         FontSize="12.5"
+                         Foreground="{StaticResource DxTextPrimaryBrush}"
+                         TextWrapping="Wrap"
+                         Padding="8,6" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="Margin" Value="0,1" />
+              <Setter Property="CornerRadius" Value="4" />
+            </Style>
+            <Style Selector="ListBoxItem:pointerover">
+              <Setter Property="Background" Value="#28FFFFFF" />
+            </Style>
+            <Style Selector="ListBoxItem:selected">
+              <Setter Property="Background" Value="#383020" />
+            </Style>
+          </ListBox.Styles>
+        </ListBox>
+        <!-- Colored catalog items (CnCNet chat lines with per-message IRC color) -->
+        <ListBox Background="Transparent"
+                 BorderThickness="0"
+                 Padding="4,4"
+                 ItemsSource="{Binding CatalogListItems}"
+                 SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                 IsEnabled="{Binding IsEnabled}"
+                 IsVisible="{Binding UseCatalogListItems}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:CatalogListItemViewModel">
+              <TextBlock Text="{Binding Text}"
+                         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                         FontSize="12.5"
+                         Foreground="{Binding ForegroundBrush}"
+                         TextWrapping="Wrap"
+                         Padding="8,6" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="Margin" Value="0,1" />
+              <Setter Property="CornerRadius" Value="4" />
+            </Style>
+            <Style Selector="ListBoxItem:pointerover">
+              <Setter Property="Background" Value="#28FFFFFF" />
+            </Style>
+            <Style Selector="ListBoxItem:selected">
+              <Setter Property="Background" Value="#383020" />
+            </Style>
+          </ListBox.Styles>
+        </ListBox>
+      </Panel>
     </Border>
   </DataTemplate>
 
@@ -358,8 +367,8 @@
 
   <DataTemplate x:Key="DxSlider" DataType="vm:UiNodeViewModel">
     <Slider Width="{Binding Width}"
-            Minimum="0"
-            Maximum="2"
+            Minimum="{Binding SliderMinimum}"
+            Maximum="{Binding SliderMaximum}"
             Value="{Binding SelectedIndex, Mode=TwoWay}"
             TickFrequency="1"
             IsSnapToTickEnabled="True"

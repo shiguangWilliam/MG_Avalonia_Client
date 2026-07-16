@@ -278,7 +278,14 @@ public partial class MainWindow : Window, IUiNavigationHost
             _floatingOverlayWindow = windowName;
 
             if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+            {
                 DisplayOptionsApplier.Apply(_overlayRoot);
+                AudioOptionsApplier.Apply(_overlayRoot);
+                UpdaterOptionsApplier.Apply(_overlayRoot);
+                ComponentsOptionsApplier.Apply(_overlayRoot);
+                // After INI/setting binds: force footer labels (empty Translation keys must not win).
+                OptionsFooterChrome.ApplyToViewModel(_overlayRoot);
+            }
 
             if (windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
                 ApplyCampaignOverlay(_overlayRoot);
@@ -343,6 +350,94 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         string fallbackNote = string.IsNullOrWhiteSpace(iniFailure) ? "programmatic UI" : $"programmatic UI ({iniFailure})";
         ShowGameCreationOverlay(root, preferredSize.Width, preferredSize.Height, fallbackNote);
+    }
+
+    public void OpenGameRoomTunnelSelection()
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room is not { IsHost: true })
+        {
+            ShowStatus("Only the game host can change the tunnel.");
+            return;
+        }
+
+        var tunnels = CnCNetSessionService.Instance.Tunnels;
+        if (tunnels.Count == 0)
+        {
+            ShowStatus("No NAT tunnels available.");
+            return;
+        }
+
+        if (IsFloatingOverlayOpen)
+            CloseFloatingOverlaySilently();
+
+        (Control root, Size size) = RoomHostOverlayBuilder.BuildTunnelPicker(
+            tunnels,
+            tunnel =>
+            {
+                if (CnCNetSessionService.Instance.TryHostChangeTunnel(tunnel))
+                {
+                    ShowStatus($"Tunnel changed to {tunnel.Name}.");
+                    CloseFloatingOverlaySilently();
+                }
+                else
+                {
+                    ShowStatus("Failed to change tunnel (not joined / not host).");
+                }
+            },
+            CloseFloatingOverlaySilently);
+
+        ShowRawHostOverlay(root, size.Width, size.Height, "Select tunnel");
+    }
+
+    public void OpenGameLobbySettingsOverlay()
+    {
+        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        if (room is not { IsHost: true })
+        {
+            ShowStatus("Only the game host can change room settings.");
+            return;
+        }
+
+        if (IsFloatingOverlayOpen)
+            CloseFloatingOverlaySilently();
+
+        (Control root, Size size) = RoomHostOverlayBuilder.BuildGameLobbySettings(
+            room,
+            (name, max, skill, password) =>
+            {
+                CnCNetSessionService.Instance.UpdateGameLobbySettings(name, max, skill, password);
+                ShowStatus("Room settings updated.");
+                CloseFloatingOverlaySilently();
+            },
+            CloseFloatingOverlaySilently);
+
+        ShowRawHostOverlay(root, size.Width, size.Height, "Game lobby settings");
+    }
+
+    private void ShowRawHostOverlay(Control content, double width, double height, string title)
+    {
+        PART_OverlayPanel.Width = width + 16;
+        PART_OverlayPanel.Height = height + 16;
+        PART_OverlayPanel.Padding = new Thickness(8);
+        PART_OverlayPanel.Background = Brushes.Transparent;
+        PART_OverlayPanel.BorderBrush = new SolidColorBrush(Color.FromRgb(255, 140, 50));
+        PART_OverlayPanel.BorderThickness = new Thickness(2);
+
+        _overlayRoot = null;
+        PART_OverlayView.IsVisible = false;
+        PART_OverlayView.Content = null;
+        PART_OverlayRawView.ContentTemplate = null;
+        PART_OverlayRawView.Width = width;
+        PART_OverlayRawView.Height = height;
+        PART_OverlayRawView.Content = content;
+        PART_OverlayRawView.IsVisible = true;
+
+        PART_FloatingOverlay.IsVisible = true;
+        PART_FloatingOverlay.IsHitTestVisible = true;
+        PART_RootView.IsHitTestVisible = false;
+        _floatingOverlayWindow = "GameRoomHostOverlay";
+        ShowStatus(title);
     }
 
     private void ShowGameCreationOverlay(object content, double width, double height, string sourceNote)
@@ -419,7 +514,17 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private bool IsCnCNetLobbyActive()
         => IsChannelLobbyWindow(CurrentWindow)
+           || IsCnCNetGameRoomChatEligible()
            || (_activeRoot != null && FindVm(_activeRoot, "ddCurrentChannel") != null);
+
+    /// <summary>
+    /// True when the active window is the CnCNet game-room lobby AND we are currently joined
+    /// to the room channel. Used to enable Enter-to-send for in-room chat (mirrors DX
+    /// CnCNetGameLobby where tbChatInput.EnterPressed fires inside the room window).
+    /// </summary>
+    private bool IsCnCNetGameRoomChatEligible()
+        => CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+           && CnCNetSessionService.Instance.GameRoom is { IsLocalJoined: true };
 
     public void OpenOptionsOverlay() => OpenFloatingOverlay("OptionsWindow");
 
@@ -511,7 +616,11 @@ public partial class MainWindow : Window, IUiNavigationHost
         _bindingSession.CommitSettings();
 
         if (IsOptionsOverlayOpen && _overlayRoot != null)
+        {
             DisplayOptionsApplier.Save(_overlayRoot);
+            AudioOptionsApplier.Save(_overlayRoot);
+            UpdaterOptionsApplier.Save(_overlayRoot);
+        }
 
         _environment = ClientEnvironment.Discover(_environment.GameRoot);
         ShowStatus($"Settings saved: {_bindingSession.Settings.SettingsPath}");
@@ -522,7 +631,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         _bindingSession.DiscardSettings();
 
         if (IsOptionsOverlayOpen && _overlayRoot != null)
+        {
             DisplayOptionsApplier.Apply(_overlayRoot);
+            AudioOptionsApplier.Apply(_overlayRoot);
+            UpdaterOptionsApplier.Apply(_overlayRoot);
+            ComponentsOptionsApplier.Apply(_overlayRoot);
+        }
 
         ShowStatus("Settings changes discarded");
     }
@@ -753,7 +867,18 @@ public partial class MainWindow : Window, IUiNavigationHost
             lbMapList.SelectedIndex = index;
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
-        GameDataBindingApplier.UpdateMapSelectionDisplay(_activeRoot, _lobbySession.VisibleMaps, index, resources);
+        GameDataBindingApplier.ResolveStartInteractionFlags(
+            _lobbySession.PlayerState,
+            out bool canAssign,
+            out bool canSelectLocal);
+        GameDataBindingApplier.UpdateMapSelectionDisplay(
+            _activeRoot,
+            _lobbySession.VisibleMaps,
+            index,
+            resources,
+            _lobbySession.PlayerState,
+            canAssign,
+            canSelectLocal);
         UpdateLaunchButtonState();
         ShowStatus($"Random map: {_lobbySession.GetSelectedMap(index)?.DisplayName ?? "none"}");
     }
@@ -876,15 +1001,24 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             lbMapList.SelectionChanged += () =>
             {
+                GameDataBindingApplier.ResolveStartInteractionFlags(
+                    _lobbySession.PlayerState,
+                    out bool canAssign,
+                    out bool canSelectLocal);
                 GameDataBindingApplier.UpdateMapSelectionDisplay(
                     root,
                     _lobbySession.VisibleMaps,
                     lbMapList.SelectedIndex,
-                    resources);
+                    resources,
+                    _lobbySession.PlayerState,
+                    canAssign,
+                    canSelectLocal);
                 UpdateLaunchButtonState(root);
                 RefreshCnCNetGameListing();
             };
         }
+
+        WireMapPreviewStartMarkers(root);
 
         UiNodeViewModel? tbMapSearch = FindVm(root, "tbMapSearch");
         if (tbMapSearch != null)
@@ -896,6 +1030,159 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         int occupied = _lobbySession.PlayerState.Slots.Count(s => s.IsOccupied);
         ShowStatus($"Maps: {_gameResources.Maps.Count}, players: {occupied}, modes: {_gameResources.GameModes.Count}");
+    }
+
+    private void WireMapPreviewStartMarkers(UiNodeViewModel root)
+    {
+        UiNodeViewModel? previewBox = FindVm(root, "MapPreviewBox");
+        if (previewBox == null)
+            return;
+
+        // Re-subscribe cleanly when the lobby window is reapplied.
+        previewBox.StartMarkerLeftClicked -= OnMapStartMarkerLeftClicked;
+        previewBox.StartMarkerRightClicked -= OnMapStartMarkerRightClicked;
+        previewBox.StartMarkerLeftClicked += OnMapStartMarkerLeftClicked;
+        previewBox.StartMarkerRightClicked += OnMapStartMarkerRightClicked;
+    }
+
+    private void OnMapStartMarkerLeftClicked(int startLocation1Based)
+    {
+        if (_activeRoot == null)
+            return;
+
+        LobbyPlayerState state = _lobbySession.PlayerState;
+        GameDataBindingApplier.ResolveStartInteractionFlags(state, out bool canAssign, out bool canSelectLocal);
+        MapEntry? map = GetCurrentLobbyMap();
+        bool enforce = map?.EnforceMaxPlayers ?? false;
+
+        if (canAssign)
+        {
+            // Host path: assign the first occupied slot that is still random (StartIndex==0),
+            // else reassign slot 0. Full context menu is Phase B UI polish; protocol path is identical.
+            int target = -1;
+            for (int i = 0; i < state.Slots.Length; i++)
+            {
+                if (state.Slots[i].IsOccupied && state.Slots[i].StartIndex == 0)
+                {
+                    target = i;
+                    break;
+                }
+            }
+
+            if (target < 0)
+            {
+                for (int i = 0; i < state.Slots.Length; i++)
+                {
+                    if (state.Slots[i].IsOccupied)
+                    {
+                        target = i;
+                        break;
+                    }
+                }
+            }
+
+            if (target < 0)
+                return;
+
+            if (!MapStartLocationRules.TryApplyHostAssignment(state.Slots, target, startLocation1Based, enforce))
+                return;
+
+            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, CnCNetSessionService.Instance.GameRoom);
+            RefreshMapStartMarkersAndPlayerUi();
+            return;
+        }
+
+        if (canSelectLocal)
+        {
+            if (!MapStartLocationRules.TryApplyJoinerSelection(
+                    state.Slots,
+                    state.LocalPlayerName,
+                    startLocation1Based,
+                    enforce))
+            {
+                ShowStatus($"Starting location {startLocation1Based} is occupied.");
+                return;
+            }
+
+            int localIndex = Array.FindIndex(state.Slots, s => s.IsHumanLocal);
+            if (localIndex < 0)
+                localIndex = Array.FindIndex(
+                    state.Slots,
+                    s => !s.IsAi && s.Name.Equals(state.LocalPlayerName, StringComparison.OrdinalIgnoreCase));
+
+            if (localIndex >= 0)
+                MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(
+                    state,
+                    localIndex,
+                    CnCNetSessionService.Instance.GameRoom);
+
+            RefreshMapStartMarkersAndPlayerUi();
+        }
+    }
+
+    private void OnMapStartMarkerRightClicked(int startLocation1Based)
+    {
+        if (_activeRoot == null)
+            return;
+
+        LobbyPlayerState state = _lobbySession.PlayerState;
+        GameDataBindingApplier.ResolveStartInteractionFlags(state, out bool canAssign, out bool canSelectLocal);
+
+        if (canAssign)
+        {
+            MapStartLocationRules.ClearOccupantsOf(state.Slots, startLocation1Based);
+            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, CnCNetSessionService.Instance.GameRoom);
+            RefreshMapStartMarkersAndPlayerUi();
+            return;
+        }
+
+        if (canSelectLocal
+            && MapStartLocationRules.TryClearLocalIfOwn(state.Slots, state.LocalPlayerName, startLocation1Based))
+        {
+            int localIndex = Array.FindIndex(state.Slots, s => s.IsHumanLocal);
+            if (localIndex >= 0)
+                MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(
+                    state,
+                    localIndex,
+                    CnCNetSessionService.Instance.GameRoom);
+            RefreshMapStartMarkersAndPlayerUi();
+        }
+    }
+
+    private void RefreshMapStartMarkersAndPlayerUi()
+    {
+        if (_activeRoot == null)
+            return;
+
+        ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
+        LobbyPlayerBindingApplier.Apply(_activeRoot, _lobbySession.PlayerState, resources, _mainBehaviors);
+        RefreshCurrentMapStartMarkers();
+        UpdateLaunchButtonState(_activeRoot);
+    }
+
+    private void RefreshCurrentMapStartMarkers()
+    {
+        if (_activeRoot == null)
+            return;
+
+        GameDataBindingApplier.ResolveStartInteractionFlags(
+            _lobbySession.PlayerState,
+            out bool canAssign,
+            out bool canSelectLocal);
+        GameDataBindingApplier.RefreshMapStartMarkers(
+            _activeRoot,
+            GetCurrentLobbyMap(),
+            _lobbySession.PlayerState,
+            canAssign,
+            canSelectLocal);
+    }
+
+    private MapEntry? GetCurrentLobbyMap()
+    {
+        if (_activeRoot == null)
+            return null;
+        UiNodeViewModel? lbMapList = FindVm(_activeRoot, "lbMapList");
+        return _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
     }
 
     private void OnLobbyMapSearchChanged()
@@ -1258,6 +1545,14 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             WireCnCNetGameOptionsBridge();
             ApplyCnCNetGameRoomPlayers(_activeRoot);
+            GameDataBindingApplier.ApplyGameRoomChat(_activeRoot, CnCNetSessionService.Instance.GameRoom);
+        }
+
+        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
+        if (gameRoom != null)
+        {
+            gameRoom.ChangeTunnelRequested -= OpenGameRoomTunnelSelection;
+            gameRoom.ChangeTunnelRequested += OpenGameRoomTunnelSelection;
         }
 
         if (room.IsHost)
@@ -1287,14 +1582,58 @@ public partial class MainWindow : Window, IUiNavigationHost
         session.GameOptionsControlCounts = () => CnCNetGameOptionsUiBridge.GetControlCounts(_activeRoot);
         session.GameOptionsProvider = CollectCnCNetGameOptions;
         session.GameOptionsReceiver = ApplyCnCNetGameOptionsFromHost;
+        WireHostGameOptionChangeBroadcast();
+        session.GameRoom?.TryFlushPendingGameOptions();
     }
 
     private void ClearCnCNetGameOptionsBridge()
     {
+        UnwireHostGameOptionChangeBroadcast();
         CnCNetSessionService session = CnCNetSessionService.Instance;
         session.GameOptionsControlCounts = null;
         session.GameOptionsProvider = null;
         session.GameOptionsReceiver = null;
+    }
+
+    private void WireHostGameOptionChangeBroadcast()
+    {
+        UnwireHostGameOptionChangeBroadcast();
+        if (_activeRoot == null)
+            return;
+
+        (IReadOnlyList<UiNodeViewModel> checkBoxes, IReadOnlyList<UiNodeViewModel> dropDowns) =
+            CnCNetGameOptionsCatalog.Enumerate(_activeRoot);
+
+        foreach (UiNodeViewModel chk in checkBoxes)
+            chk.CheckedChanged += OnHostGameOptionControlChanged;
+
+        foreach (UiNodeViewModel dd in dropDowns)
+            dd.SelectionChanged += OnHostGameOptionControlChanged;
+    }
+
+    private void UnwireHostGameOptionChangeBroadcast()
+    {
+        if (_activeRoot == null)
+            return;
+
+        (IReadOnlyList<UiNodeViewModel> checkBoxes, IReadOnlyList<UiNodeViewModel> dropDowns) =
+            CnCNetGameOptionsCatalog.Enumerate(_activeRoot);
+
+        foreach (UiNodeViewModel chk in checkBoxes)
+            chk.CheckedChanged -= OnHostGameOptionControlChanged;
+
+        foreach (UiNodeViewModel dd in dropDowns)
+            dd.SelectionChanged -= OnHostGameOptionControlChanged;
+    }
+
+    private void OnHostGameOptionControlChanged()
+    {
+        CnCNetGameRoomSession? room = CnCNetSessionService.Instance.GameRoom;
+        if (room is not { IsHost: true, IsLocalJoined: true })
+            return;
+
+        // UpdateHostListing → BroadcastGameOptionsLocked (GO to everyone already in the room).
+        RefreshCnCNetGameListing();
     }
 
     private CnCNetGameOptionsState CollectCnCNetGameOptions()
@@ -1303,22 +1642,53 @@ public partial class MainWindow : Window, IUiNavigationHost
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
         CnCNetGameRoomSession? room = CnCNetSessionService.Instance.GameRoom;
-        return CnCNetGameOptionsUiBridge.Collect(
+        CnCNetGameOptionsState state = CnCNetGameOptionsUiBridge.Collect(
             _activeRoot,
             map,
             gameMode,
             room?.RandomSeed ?? Random.Shared.Next(),
             room?.RemoveStartingLocations ?? false);
+
+        if (room == null)
+            return state;
+
+        // Prefer session-persisted multiplayer timing fields when set from a prior GO.
+        return new CnCNetGameOptionsState
+        {
+            CheckBoxValues = state.CheckBoxValues,
+            DropDownIndices = state.DropDownIndices,
+            MapOfficial = state.MapOfficial,
+            MapSha1 = state.MapSha1,
+            GameModeName = state.GameModeName,
+            MapUntranslatedName = state.MapUntranslatedName,
+            FrameSendRate = room.FrameSendRate,
+            MaxAhead = room.MaxAhead,
+            ProtocolVersion = room.ProtocolVersion,
+            RandomSeed = state.RandomSeed,
+            RemoveStartingLocations = state.RemoveStartingLocations,
+        };
     }
 
     private void ApplyCnCNetGameOptionsFromHost(CnCNetGameOptionsState state)
     {
-        if (_activeRoot == null)
-            return;
+        void Apply()
+        {
+            if (_activeRoot == null)
+                return;
 
-        CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources, _lobbySession);
-        RefreshLobbyMapList();
-        RefreshCnCNetGameListing();
+            CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources, _lobbySession);
+            RefreshLobbyMapList();
+            // Joiner must not re-broadcast GO via RefreshCnCNetGameListing host path.
+            if (CnCNetSessionService.Instance.GameRoom is { IsHost: true })
+                RefreshCnCNetGameListing();
+            else
+                UpdateLaunchButtonState(_activeRoot);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+            Apply();
+        else
+            Dispatcher.UIThread.Post(Apply);
     }
 
     private void OnCnCNetStateChanged()
@@ -1356,6 +1726,8 @@ public partial class MainWindow : Window, IUiNavigationHost
         try
         {
             ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: false);
+            // Refresh in-room chat timeline + tbChatInput enabled state.
+            GameDataBindingApplier.ApplyGameRoomChat(root, CnCNetSessionService.Instance.GameRoom);
         }
         catch (Exception ex)
         {
@@ -1428,7 +1800,9 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         CnCNetGameLobbyUiHelper.ApplyToolbarRole(root, resources, _mainBehaviors, isJoiner: !room.IsHost);
         CnCNetGameLobbyUiHelper.UpdateManualReadyLabel(root, isJoiner: !room.IsHost);
+        ApplyLockGameButtonLabel(root, room.IsHost, locked);
         UpdateLaunchButtonState(root);
+        RefreshCurrentMapStartMarkers();
 
         if (updateStatus)
         {
@@ -1436,6 +1810,14 @@ public partial class MainWindow : Window, IUiNavigationHost
                 ? $"Hosting \"{room.RoomName}\" — waiting for players."
                 : $"Joined \"{room.RoomName}\" — waiting for host.");
         }
+    }
+
+    private static void ApplyLockGameButtonLabel(UiNodeViewModel root, bool isHost, bool locked)
+    {
+        if (!isHost)
+            return;
+
+        FindVm(root, "btnLockGame")?.SetDisplayText(locked ? "Unlock Game" : "Lock Game");
     }
 
     private void OnGameResourcesLoaded()
