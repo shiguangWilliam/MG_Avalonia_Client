@@ -5,19 +5,13 @@
         Title="ClientAvalonia"
         CanResize="False">
   <DockPanel>
-    <DockPanel DockPanel.Dock="Bottom" Height="28" Margin="8,0">
-      <Button x:Name="PART_SwitchMod"
-              DockPanel.Dock="Right"
-              Content="切换 Mod"
-              Padding="10,2"
-              Margin="8,0,0,0"
-              FontSize="11"
-              Click="OnSwitchModClick" />
-      <TextBlock x:Name="PART_Status"
-                 FontSize="11"
-                 VerticalAlignment="Center"
-                 Opacity="0.85" />
-    </DockPanel>
+    <TextBlock x:Name="PART_Status"
+               DockPanel.Dock="Bottom"
+               Height="24"
+               Margin="8,0"
+               FontSize="11"
+               VerticalAlignment="Center"
+               Opacity="0.85" />
     <Border Background="#111" HorizontalAlignment="Center" VerticalAlignment="Center">
       <Grid HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch">

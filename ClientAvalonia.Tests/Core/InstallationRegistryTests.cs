@@ -11,11 +11,11 @@ using Xunit.Abstractions;
 namespace ClientAvalonia.Tests.Core;
 
 /// <summary>
-/// InstallationRegistry self-healing closed loop:
-///   read → validate (Resources/ClientDefinitions.ini present) → repair (rewrite or clear).
+/// InstallationRegistry self-healing closed loop (MG):
+///   read → validate (directory + gamemd.exe) → repair (rewrite or clear).
 ///
-/// Tests use unique random keys under HKCU\SOFTWARE so they never touch the real candidate
-/// keys (MomentOfGenesis, TiberianSun, ...). The internal seam
+/// Tests use unique random keys under HKCU\SOFTWARE so they never touch the real MG key
+/// (MomentOfGenesis). The internal seam
 /// <see cref="InstallationRegistry.TryRepairAllCandidates(string[], string?)"/> takes the
 /// candidate list as a parameter, so we feed in test-only keys.
 ///
@@ -166,7 +166,7 @@ public sealed class InstallationRegistryTests : IDisposable
 
         string validKey = _testKeyName + "_v";
         string invalidKey = _testKeyName + "_i";
-        WriteInstallPath(invalidKey, @"C:\Nope");   // invalid (no ClientDefinitions.ini)
+        WriteInstallPath(invalidKey, @"C:\Nope");   // invalid (no gamemd.exe)
         WriteInstallPath(validKey, _root.RootPath); // valid
 
         // validateFilePresence=true → invalid entry is skipped, valid one returned.

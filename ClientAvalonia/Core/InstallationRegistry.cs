@@ -2,57 +2,97 @@ using ClientCore;
 using Microsoft.Win32;
 using Rampastring.Tools;
 using System;
-using System.Collections.Generic;
 using System.IO;
 
 namespace ClientAvalonia.Core;
 
 /// <summary>
-/// Reads/writes the game install path under HKCU\SOFTWARE\{InstallationPathRegKey}\InstallPath
+/// Reads/writes the MG install path under HKCU\SOFTWARE\MomentOfGenesis\InstallPath
 /// (aligned with DXMainClient Startup.WriteInstallPathToRegistry).
 /// </summary>
-/// <remarks>
-/// Two access modes:
-///  - <b>Configured</b>: single key from <see cref="ClientConfiguration.InstallationPathRegKey"/>
-///    (requires ClientCore bootstrap to have loaded ClientDefinitions.ini).
-///  - <b>Early-bound</b>: scans a hard-coded candidate list of registry keys. Used during
-///    bootstrap BEFORE ClientDefinitions.ini is located, since the configured key name itself
-///    comes from that INI. Without this, a launcher that starts the client with an unrelated
-///    CWD (e.g. C:\Windows\System32) makes FindGameRoot fall back to that CWD and the very
-///    next call to <c>ClientConfiguration.Instance</c> throws FileNotFoundException.
-/// </remarks>
 public static class InstallationRegistry
 {
+    public const string MgRegistryKeyName = "MomentOfGenesis";
+    public const string MgGameExecutableName = "gamemd.exe";
+
     private const string InstallPathValueName = "InstallPath";
 
-    /// <summary>
-    /// Candidate registry key names probed during early bootstrap. Includes the configured
-    /// keys for DTA, MG, and other known CnCNet mods so the same client binary can relocate
-    /// any of them when CWD is unreliable.
-    /// </summary>
+    /// <summary>Candidate keys for early bootstrap / repair. Main branch is MG-only.</summary>
     private static readonly string[] EarlyBoundCandidateKeys =
     {
-        "MomentOfGenesis", // MG (default for this build)
-        "TiberianSun",     // DTA / TS default (ClientConfiguration fallback)
-        "CnCNet",
-        "YR",
-        "MentalOmega",
-        "TwistedInsurrection",
+        MgRegistryKeyName,
     };
 
     public static string RegistryKeyPath =>
-        "SOFTWARE\\" + ClientConfiguration.Instance.InstallationPathRegKey;
+        "SOFTWARE\\" + (ClientCoreBootstrap.IsInitialized
+            ? ClientConfiguration.Instance.InstallationPathRegKey
+            : MgRegistryKeyName);
+
+    public static string MgRegistryKeyPath => "SOFTWARE\\" + MgRegistryKeyName;
 
     /// <summary>
-    /// Early-bootstrap install path lookup. Scans the candidate registry keys and returns the
-    /// first <c>InstallPath</c> value that points to a directory containing
-    /// <c>Resources/ClientDefinitions.ini</c>. Returns null on non-Windows or when no valid
-    /// install path is recorded.
+    /// MG boot self-check:
+    /// 1. No InstallPath → write <paramref name="launcherCwd"/> and use it.
+    /// 2. InstallPath set → require directory + gamemd.exe; otherwise rewrite launcher CWD.
     /// </summary>
-    /// <param name="validateFilePresence">
-    /// When true (default), only returns paths whose <c>Resources/ClientDefinitions.ini</c>
-    /// exists — preventing stale registry entries from hijacking the bootstrap.
-    /// </param>
+    public static string ResolveAndHealMgInstallPath(string launcherCwd)
+    {
+        string fallback = NormalizeRoot(launcherCwd);
+
+        if (!OperatingSystem.IsWindows())
+            return fallback;
+
+        string? recorded = TryReadInstallPathFromKey(MgRegistryKeyPath);
+        if (string.IsNullOrWhiteSpace(recorded))
+        {
+            TryWriteInstallPathToKey(MgRegistryKeyPath, fallback);
+            Logger.Log($"InstallationRegistry: MG InstallPath missing — wrote '{fallback}'.");
+            return fallback;
+        }
+
+        string resolved = NormalizeRoot(recorded);
+        if (IsMgInstallPathValid(resolved))
+        {
+            Logger.Log($"InstallationRegistry: MG InstallPath valid -> '{resolved}'.");
+            return resolved;
+        }
+
+        TryWriteInstallPathToKey(MgRegistryKeyPath, fallback);
+        Logger.Log(
+            $"InstallationRegistry: MG InstallPath invalid ('{resolved}') — rewrote '{fallback}'.");
+        return fallback;
+    }
+
+    /// <summary>
+    /// Valid MG install root: absolute path, directory exists, and contains <c>gamemd.exe</c>.
+    /// </summary>
+    public static bool IsMgInstallPathValid(string? installPath)
+    {
+        if (string.IsNullOrWhiteSpace(installPath))
+            return false;
+
+        string resolved = NormalizeRoot(installPath);
+
+        try
+        {
+            if (!Path.IsPathRooted(resolved))
+                return false;
+
+            if (!Directory.Exists(resolved))
+                return false;
+
+            return File.Exists(Path.Combine(resolved, MgGameExecutableName));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Early-bootstrap install path lookup (MG key). When
+    /// <paramref name="validateFilePresence"/> is true, requires <c>gamemd.exe</c>.
+    /// </summary>
     public static string? TryReadEarlyBoundInstallPath(bool validateFilePresence = true)
         => TryReadEarlyBoundInstallPath(EarlyBoundCandidateKeys, validateFilePresence);
 
@@ -68,16 +108,13 @@ public static class InstallationRegistry
             if (string.IsNullOrWhiteSpace(path))
                 continue;
 
-            string resolved = path.TrimEnd('\\', '/');
+            string resolved = NormalizeRoot(path);
 
-            if (validateFilePresence)
+            if (validateFilePresence && !IsMgInstallPathValid(resolved))
             {
-                string clientDefs = Path.Combine(resolved, "Resources", "ClientDefinitions.ini");
-                if (!File.Exists(clientDefs))
-                {
-                    Logger.Log($"InstallationRegistry: early-bound candidate '{candidate}' -> '{resolved}' rejected (no ClientDefinitions.ini).");
-                    continue;
-                }
+                Logger.Log(
+                    $"InstallationRegistry: early-bound candidate '{candidate}' -> '{resolved}' rejected (no {MgGameExecutableName}).");
+                continue;
             }
 
             Logger.Log($"InstallationRegistry: early-bound InstallPath resolved via '{candidate}' -> '{resolved}'.");
@@ -87,12 +124,7 @@ public static class InstallationRegistry
         return null;
     }
 
-    /// <summary>
-    /// Writes <paramref name="installPath"/> to <b>all</b> candidate registry keys (early-bound).
-    /// Used during bootstrap right after the game root is found, so subsequent launches can
-    /// relocate the install regardless of CWD. Does NOT depend on ClientConfiguration being
-    /// initialized yet. Once ClientCore is bootstrapped, the configured key is also updated.
-    /// </summary>
+    /// <summary>Writes <paramref name="installPath"/> to the MG registry key (early-bound).</summary>
     public static void TryWriteEarlyBoundInstallPath(string installPath)
     {
         if (!OperatingSystem.IsWindows())
@@ -101,24 +133,19 @@ public static class InstallationRegistry
         if (string.IsNullOrWhiteSpace(installPath))
             return;
 
-        string normalized = installPath.TrimEnd('\\', '/');
-
-        foreach (string candidate in EarlyBoundCandidateKeys)
-        {
-            TryWriteInstallPathToKey("SOFTWARE\\" + candidate, normalized);
-        }
+        TryWriteInstallPathToKey(MgRegistryKeyPath, NormalizeRoot(installPath));
     }
 
     /// <summary>
-    /// Returns true when <paramref name="installPath"/> looks like a real install root:
-    /// non-empty, absolute, and containing <c>Resources/ClientDefinitions.ini</c>.
+    /// Returns true when <paramref name="installPath"/> looks like a usable client root
+    /// (Resources/ClientDefinitions.ini present). Used by general bootstrap helpers.
     /// </summary>
     public static bool IsInstallPathValid(string? installPath)
     {
         if (string.IsNullOrWhiteSpace(installPath))
             return false;
 
-        string resolved = installPath.TrimEnd('\\', '/');
+        string resolved = NormalizeRoot(installPath);
 
         try
         {
@@ -135,16 +162,8 @@ public static class InstallationRegistry
     }
 
     /// <summary>
-    /// Scans every candidate registry key, validates the recorded <c>InstallPath</c>, and
-    /// overwrites (or clears) any stale/wrong entry with <paramref name="knownGoodRoot"/>.
-    /// Called from bootstrap after a trustworthy root has been discovered so the registry
-    /// self-heals instead of silently carrying bad data across launches.
+    /// Repairs MG InstallPath against <paramref name="knownGoodRoot"/> using gamemd.exe rules.
     /// </summary>
-    /// <param name="knownGoodRoot">
-    /// The freshly-resolved install root. When null/invalid, bad entries are only cleared
-    /// (no overwrite), so we never propagate an unverified path into the registry.
-    /// </param>
-    /// <returns>Number of registry keys that were repaired.</returns>
     public static int TryRepairAllCandidates(string? knownGoodRoot)
         => TryRepairAllCandidates(EarlyBoundCandidateKeys, knownGoodRoot);
 
@@ -154,8 +173,8 @@ public static class InstallationRegistry
         if (!OperatingSystem.IsWindows())
             return 0;
 
-        string? goodRoot = IsInstallPathValid(knownGoodRoot)
-            ? knownGoodRoot!.TrimEnd('\\', '/')
+        string? goodRoot = IsMgInstallPathValid(knownGoodRoot)
+            ? NormalizeRoot(knownGoodRoot!)
             : null;
 
         int repaired = 0;
@@ -165,7 +184,6 @@ public static class InstallationRegistry
             string keyPath = "SOFTWARE\\" + candidate;
             string? recorded = TryReadInstallPathFromKey(keyPath);
 
-            // No entry: write it if we have a good root (first launch on this key name).
             if (string.IsNullOrWhiteSpace(recorded))
             {
                 if (goodRoot != null)
@@ -178,11 +196,9 @@ public static class InstallationRegistry
                 continue;
             }
 
-            if (IsInstallPathValid(recorded))
+            if (IsMgInstallPathValid(recorded))
                 continue;
 
-            // Stale entry detected: either rewrite with the good root or, if we don't have
-            // a verified root either, delete the bad value so it can't hijack later launches.
             if (goodRoot != null)
             {
                 TryWriteInstallPathToKey(keyPath, goodRoot);
@@ -224,7 +240,7 @@ public static class InstallationRegistry
         try
         {
             using RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryKeyPath);
-            key.SetValue(InstallPathValueName, installPath.TrimEnd('\\', '/'));
+            key.SetValue(InstallPathValueName, NormalizeRoot(installPath));
             Logger.Log($"InstallationRegistry: updated InstallPath to {installPath}.");
         }
         catch (Exception ex)
@@ -241,6 +257,9 @@ public static class InstallationRegistry
 
         return TryReadInstallPathFromKey(RegistryKeyPath);
     }
+
+    private static string NormalizeRoot(string path)
+        => path.TrimEnd('\\', '/');
 
     private static string? TryReadInstallPathFromKey(string keyPath)
     {
@@ -280,7 +299,6 @@ public static class InstallationRegistry
             if (key == null)
                 return;
 
-            // Drop the value only; keep the key itself (other tools may store sibling values).
             if (key.GetValue(InstallPathValueName) != null)
                 key.DeleteValue(InstallPathValueName, throwOnMissingValue: false);
         }

@@ -55,18 +55,6 @@ public sealed class ClientEnvironment
 
     public static ClientEnvironment Discover(string? startDirectory = null)
     {
-        // After an explicit workspace bind, never let DX registry first-hit override the choice.
-        if (ModWorkspaceBinder.IsBound
-            && !string.IsNullOrWhiteSpace(ModWorkspaceBinder.CurrentInstallPath)
-            && ModWorkspaceRegistry.IsInstallPathValid(ModWorkspaceBinder.CurrentInstallPath))
-        {
-            string bound = ModWorkspaceBinder.CurrentInstallPath!;
-            if (ClientCoreBootstrap.TryEnsureInitialized(bound, out _))
-                return DiscoverFromCore(bound);
-
-            return DiscoverLegacy(bound);
-        }
-
         startDirectory ??= Directory.GetCurrentDirectory();
         string gameRoot = FindGameRoot(startDirectory);
 
@@ -370,12 +358,9 @@ public sealed class ClientEnvironment
     internal static string FindGameRoot(string startDirectory, string[]? registryCandidates)
     {
         // Bootstrap priority (highest first):
-        //   1. Registry hint (HKCU\SOFTWARE\<candidate>\InstallPath) — DX early-bound, for CLI/tests
+        //   1. MG registry hint (HKCU\SOFTWARE\MomentOfGenesis\InstallPath + gamemd.exe)
         //   2. Walk upward from <startDirectory> (usually CWD)
         //   3. Walk upward from AppContext.BaseDirectory (exe folder)
-        //
-        // Production Avalonia UI must not call this for silent first-hit binding;
-        // use ModRegistryCatalog + ModWorkspaceBinder instead.
 
         string? registryRoot = registryCandidates != null
             ? InstallationRegistry.TryReadEarlyBoundInstallPath(registryCandidates, validateFilePresence: true)

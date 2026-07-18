@@ -20,8 +20,7 @@ internal static class Program
             return;
 
         StartupParams parameters = PreStartup.ParseArguments(args);
-        // Production UI: early init only — GameRoot bound after workspace picker.
-        PreStartup.InitializeEarly(parameters);
+        PreStartup.Initialize(parameters);
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

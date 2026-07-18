@@ -23,8 +23,8 @@ and the constant lives in `Fixture/DxAliases.cs`. Update the table when DX moves
 | `DX-PORT-RANGE` | `Domain/Multiplayer/CnCNet/CnCNetTunnel.cs` bare `int.Parse` | DX accepts anything parseable; Avalonia adds 1–65535 (MG-Extension) |
 | `DX-NAME-VALIDATOR` | `ClientCore/NameValidator.cs` | shared by DX and Avalonia — char set, length, first-char rules |
 | `DX-IRC-CHANNEL-CASING` | DX `Channel.cs` JOIN preserves case, compare uses lower | mirrored by `CnCNetIrcChannelNames.Preserve/Normalize` |
-| `DX-BOOTSTRAP-CWD` | `DXMainClient/PreStartup.cs:62-65` | DX uses exe path directly; Avalonia adds registry hint + CWD walk |
-| `DX-REGISTRY-WRITE-GATE` | `DXMainClient/Startup.cs:432-436` | DX honors `WritePathToRegistry`; Avalonia early-bound repair bypasses it |
+| `DX-BOOTSTRAP-CWD` | `DXMainClient/PreStartup.cs:62-65` | DX uses exe path; Avalonia MG self-check uses `MomentOfGenesis` + `gamemd.exe`, then CWD rewrite |
+| `DX-REGISTRY-WRITE-GATE` | `DXMainClient/Startup.cs:432-436` | DX honors `WritePathToRegistry`; Avalonia early MG heal bypasses it |
 
 Where DX and MG diverge (only `DX-PASSWORD-SHA1-CHANNEL` vs `MG-PASSWORD-SHA1-CHANNEL-ROOM`),
 Avalonia create/host and primary join follow DX; MG remains a join-candidate fallback.

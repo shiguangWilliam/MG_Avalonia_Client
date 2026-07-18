@@ -12,12 +12,11 @@ namespace ClientAvalonia.Core;
 
 /// <summary>
 /// Early client bootstrap aligned with DXMainClient <c>PreStartup.Initialize</c>.
-/// Production UI defers GameRoot binding to <see cref="ModWorkspaceBinder"/> (workspace picker).
+/// Main branch: MG-only registry self-check, then direct start (no multi-mod picker).
 /// </summary>
 public static class PreStartup
 {
-    private static bool _earlyRan;
-    private static bool _fullBootstrapRan;
+    private static bool _ran;
 
     public static StartupParams ParseArguments(string[] args)
     {
@@ -45,15 +44,12 @@ public static class PreStartup
         return new StartupParams(noAudio, multipleInstanceMode, unknown);
     }
 
-    /// <summary>
-    /// Culture, exception handler, early logger — no GameRoot bind, no DX registry repair.
-    /// </summary>
-    public static void InitializeEarly(StartupParams parameters)
+    public static void Initialize(StartupParams parameters)
     {
-        if (_earlyRan)
+        if (_ran)
             return;
 
-        _earlyRan = true;
+        _ran = true;
 
         Translation.InitialUICulture = CultureInfo.CurrentUICulture;
         CultureInfo.CurrentUICulture = new CultureInfo(ProgramConstants.HARDCODED_LOCALE_CODE);
@@ -63,40 +59,50 @@ public static class PreStartup
 
         _ = EncodingExt.UTF8NoBOM;
 
-        ClientLogService.EnsureEarlyInitialized();
-        LogStartupParameters(parameters);
-        Logger.Log("PreStartup: early init complete — waiting for workspace picker (no silent first-hit).");
-    }
+        // Boot self-check (MG only):
+        // missing key → write launcher CWD; stale key (no dir / no gamemd.exe) → rewrite CWD.
+        string launcherCwd = Directory.GetCurrentDirectory();
+        string gameRoot = InstallationRegistry.ResolveAndHealMgInstallPath(launcherCwd);
 
-    /// <summary>
-    /// Legacy / CLI path: resolve a game root and run full bootstrap immediately.
-    /// Prefer <see cref="InitializeEarly"/> + <see cref="ModWorkspaceBinder"/> for the UI.
-    /// Does <b>not</b> call <see cref="InstallationRegistry.TryRepairAllCandidates"/> (avoids DX key pollution).
-    /// </summary>
-    public static void Initialize(StartupParams parameters)
-    {
-        InitializeEarly(parameters);
+        // Prefer a root that can actually host the client UI (ClientDefinitions.ini).
+        // Registry heal already fixed InstallPath; walk-up covers cwd that is a subfolder.
+        if (!InstallationRegistry.IsInstallPathValid(gameRoot))
+            gameRoot = ClientEnvironment.FindGameRoot(gameRoot);
 
-        if (_fullBootstrapRan || ModWorkspaceBinder.IsBound)
-            return;
+        Environment.CurrentDirectory = gameRoot;
+        ProgramConstants.SetHostedGameRoot(gameRoot);
+        Logger.Log($"PreStartup: MG game root resolved = {gameRoot}");
 
-        string gameRoot = ClientEnvironment.FindGameRoot(Directory.GetCurrentDirectory());
-        string modName = ModRegistryCatalog.SuggestModName(gameRoot);
-        string clientGameType = ModRegistryCatalog.ResolveClientGameTypeHint(modName, gameRoot) ?? "YR";
-        if (!ModWorkspaceBinder.TryBindAndBootstrap(
-                modName,
-                gameRoot,
-                clientGameType,
-                out string? error))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            ClientPermissions.EnsureWritableGameDirectory();
+
+        ClientLogService.EnsureInitialized();
+
+        if (!ClientCoreBootstrap.TryEnsureInitialized(gameRoot, out string? settingsError))
         {
-            Startup.BootstrapError = error ?? "Settings initialization failed.";
+            Startup.BootstrapError = settingsError ?? "Settings initialization failed.";
             Startup.BootstrapSucceeded = false;
             Logger.Log($"PreStartup: bootstrap failed: {Startup.BootstrapError}");
             return;
         }
 
-        _fullBootstrapRan = true;
-        FinishPostBindHousekeeping();
+        LogStartupParameters(parameters);
+
+        RemoveObsoleteGameDirectoryFiles();
+
+        var startup = new Startup();
+#if DEBUG
+        startup.Execute();
+#else
+        try
+        {
+            startup.Execute();
+        }
+        catch (Exception ex)
+        {
+            HandleException(ex);
+        }
+#endif
     }
 
     /// <summary>Backward-compatible entry used by CLI validators.</summary>
@@ -109,21 +115,6 @@ public static class PreStartup
         }
 
         Initialize(ParseArguments([]));
-    }
-
-    /// <summary>Called after UI picker binds a workspace successfully.</summary>
-    public static void NotifyWorkspaceBound()
-    {
-        _fullBootstrapRan = true;
-        FinishPostBindHousekeeping();
-    }
-
-    private static void FinishPostBindHousekeeping()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            ClientPermissions.EnsureWritableGameDirectory();
-
-        RemoveObsoleteGameDirectoryFiles();
     }
 
     private static void LogStartupParameters(StartupParams parameters)

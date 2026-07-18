@@ -37,6 +37,9 @@ internal sealed class TempGameRoot : IDisposable
         // but we add an explicit one in case ClientDefinitions.ini is filtered.
         File.WriteAllText(Path.Combine(ResourcesPath, "dummy.ini"), "[X]\r\n");
 
+        // MG boot self-check marker (InstallationRegistry.IsMgInstallPathValid).
+        File.WriteAllBytes(Path.Combine(RootPath, "gamemd.exe"), Array.Empty<byte>());
+
         GameRoot = RootPath;
     }
 

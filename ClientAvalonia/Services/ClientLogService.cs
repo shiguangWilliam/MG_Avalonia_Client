@@ -87,7 +87,7 @@ public static class ClientLogService
     /// <summary>Legacy entry: prefers game-root log when GamePath already points at a valid install.</summary>
     public static void EnsureInitialized()
     {
-        if (ModWorkspaceRegistry.IsInstallPathValid(ProgramConstants.GamePath))
+        if (InstallationRegistry.IsInstallPathValid(ProgramConstants.GamePath))
             EnsureGameRootInitialized();
         else
             EnsureEarlyInitialized();

@@ -1012,6 +1012,7 @@ public sealed class CnCNetSession : IDisposable
         _hostedGameRefreshTimer = null;
         _tunnelMaintenanceTimer?.Dispose();
         _tunnelMaintenanceTimer = null;
+        DisarmGameRoomJoinTimeout();
         _gameBroadcast.Dispose();
         Disconnect();
         _connection?.Dispose();
