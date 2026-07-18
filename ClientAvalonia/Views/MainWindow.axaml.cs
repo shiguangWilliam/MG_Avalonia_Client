@@ -576,12 +576,31 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void ShowStatus(string message) => PART_Status.Text = message;
 
+    private void OnSwitchModClick(object? sender, RoutedEventArgs e)
+        => ReturnToWorkspacePicker();
+
     public void ExitApplication()
     {
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             desktop.Shutdown();
         else
             Close();
+    }
+
+    public void ReturnToWorkspacePicker()
+    {
+        CloseFloatingOverlaySilently();
+        try
+        {
+            CnCNetSessionService.Instance.Disconnect();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"ReturnToWorkspacePicker: disconnect failed: {ex.Message}");
+        }
+
+        // Hand off on the UI queue so this click handler finishes before MainWindow is closed.
+        Dispatcher.UIThread.Post(() => App.ReturnToWorkspacePicker(), DispatcherPriority.Normal);
     }
 
     private void OnGameProcessStarted()

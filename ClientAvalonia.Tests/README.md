@@ -17,8 +17,9 @@ and the constant lives in `Fixture/DxAliases.cs`. Update the table when DX moves
 | `DX-GAME-FLAGS-DEFAULTS` | same `:1547-1551` | locked/passworded/closed/loaded/ladder defaults |
 | `DX-GAME-NOTUNNEL-REJECT` | same `:1572-1589` | reject when `tunnels.Count == 0` |
 | `DX-GAME-LEGACY-11` | same | R10 11-field fallback path |
-| `DX-PASSWORD-SHA1-CHANNEL` | `DXGUI/Multiplayer/CnCNet/CnCNetLobby.cs:1052` | DX upstream: `SHA1(channelName)[..10]` |
-| `MG-PASSWORD-SHA1-CHANNEL-ROOM` | MG `clientdx.exe` IL | MG actual: `SHA1(channelName + roomName)[..10]` ASCII |
+| `DX-PASSWORD-SHA1-CHANNEL` | `DXGUI/Multiplayer/CnCNet/CnCNetLobby.cs:1052` | DX upstream (create + primary join): `SHA1(channelName)[..10]` |
+| `MG-PASSWORD-SHA1-CHANNEL-ROOM` | MG `clientdx.exe` IL | MG join fallback: `SHA1(channelName + roomName)[..10]` ASCII |
+| `LNOD-DX-CHANNEL-CONVENTION` | LNOD `Client/client.log` JOIN | empty Collection → `#cncnet-{LocalGame}` / `#cncnet-{LocalGame}-games` |
 | `DX-PORT-RANGE` | `Domain/Multiplayer/CnCNet/CnCNetTunnel.cs` bare `int.Parse` | DX accepts anything parseable; Avalonia adds 1–65535 (MG-Extension) |
 | `DX-NAME-VALIDATOR` | `ClientCore/NameValidator.cs` | shared by DX and Avalonia — char set, length, first-char rules |
 | `DX-IRC-CHANNEL-CASING` | DX `Channel.cs` JOIN preserves case, compare uses lower | mirrored by `CnCNetIrcChannelNames.Preserve/Normalize` |
@@ -26,8 +27,9 @@ and the constant lives in `Fixture/DxAliases.cs`. Update the table when DX moves
 | `DX-REGISTRY-WRITE-GATE` | `DXMainClient/Startup.cs:432-436` | DX honors `WritePathToRegistry`; Avalonia early-bound repair bypasses it |
 
 Where DX and MG diverge (only `DX-PASSWORD-SHA1-CHANNEL` vs `MG-PASSWORD-SHA1-CHANNEL-ROOM`),
-tests are tagged `[Trait("Baseline","DX")]` or `[Trait("Baseline","MG-Binary")]` so the
-divergence is explicit. `MG-Extension` traits mark features Avalonia adds beyond DX.
+Avalonia create/host and primary join follow DX; MG remains a join-candidate fallback.
+Tests are tagged `[Trait("Baseline","DX")]` or `[Trait("Baseline","MG-Binary")]`.
+`MG-Extension` traits mark features Avalonia adds beyond DX.
 
 ## Test categories
 
@@ -35,9 +37,12 @@ divergence is explicit. `MG-Extension` traits mark features Avalonia adds beyond
 - **Medium** (`Core/`, `CnCNet/CnCNetTunnelListLoaderTests.cs`, password tests): need a
   TempGameRoot fixture or Windows registry access. Some are Windows-only (marked
   `[SkippableFact]` and skipped on non-Windows).
-- **Integration** (`IniUi/LayoutEngineEndToEndTests.cs`, `Integration/ValidateModesTests.cs`):
-  end-to-end INI → tree → layout via the real LayoutEngine, or subprocess invocation of
-  `ClientAvalonia.exe --validate-*`. Tagged `[Trait("Category","Integration")]`.
+- **Integration** (`IniUi/LayoutEngineEndToEndTests.cs`, `Integration/ValidateModesTests.cs`,
+  `Integration/CnCNetRoomJoinHandshakeIntegrationTests.cs`,
+  `Integration/CnCNetMgAndLnodJoinIntegrationTests.cs`):
+  end-to-end INI → tree → layout, validate modes, create→GAME→join password handshake,
+  or MG/LNOD workspace → channel funnel → welcome JOIN plan (no live IRC).
+  Tagged `[Trait("Category","Integration")]`.
 
 ## Running
 

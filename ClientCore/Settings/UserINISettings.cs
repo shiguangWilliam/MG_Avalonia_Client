@@ -40,6 +40,13 @@ namespace ClientCore
             }
         }
 
+        /// <summary>
+        /// Clears the singleton for Avalonia workspace rebind. Next <see cref="Initialize"/>
+        /// loads settings from the newly bound <see cref="ProgramConstants.GamePath"/>.
+        /// </summary>
+        public static void ResetInstance()
+            => _instance = null;
+
         public static void Initialize(string userIniFileName)
         {
             if (_instance != null)

@@ -80,6 +80,9 @@ public sealed class LayoutEngine
         if (windowSectionName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase))
             MultiplayerGameLobbyLayout.Apply(tree);
 
+        if (windowSectionName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
+            LobbyOptionsPanelLayoutPolicy.Apply(tree, windowSectionName);
+
         return tree;
     }
 

@@ -45,6 +45,9 @@ public interface IUiNavigationHost
 
     void ExitApplication();
 
+    /// <summary>Teardown current workspace and return to the multi-mod picker (§5.2).</summary>
+    void ReturnToWorkspacePicker();
+
     void CommitSettings();
 
     void DiscardSettings();

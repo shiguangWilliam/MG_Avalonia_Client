@@ -24,6 +24,14 @@ public sealed class Startup
 
     public static event Action? LocalVersionsChecked;
 
+    /// <summary>Clears bootstrap flags for Avalonia workspace rebind.</summary>
+    public static void ResetBootstrapState()
+    {
+        BootstrapSucceeded = false;
+        BootstrapError = null;
+        IsUpdaterInitialized = false;
+    }
+
     public void Execute()
     {
         DirectoryInfo resourcesDirectory = SafePath.GetDirectory(ProgramConstants.GetResourcePath());

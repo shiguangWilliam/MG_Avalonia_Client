@@ -374,7 +374,10 @@ public sealed class CnCNetSession : IDisposable
             _currentGame = _gameCollection.GetLocalGame();
             if (_currentGame == null)
             {
-                LogActivity("No game collection entry for LocalGame ? IRC connect skipped.");
+                LogActivity(
+                    $"No game collection entry for LocalGame={ClientConfiguration.Instance.LocalGame}. " +
+                    "Add [CustomGames] in GameCollectionConfig.ini, set CnCNetChatChannel / CnCNetGameBroadcastChannel " +
+                    "in ClientDefinitions.ini, or use a valid LocalGame id for #cncnet-{{id}} convention fallback.");
                 LobbyState.SetConnectionStatus("No chat channels configured.");
                 StateChanged?.Invoke();
                 return;
@@ -868,12 +871,12 @@ public sealed class CnCNetSession : IDisposable
 
         if (!string.IsNullOrEmpty(password) && _gameRoomJoinPasswordCandidates is { Count: > 0 })
         {
-            // MG actual SHA1 input is channelName + GameRoomName (ASCII, then SHA1, then first 10 hex chars).
-            string inputHint = string.IsNullOrEmpty(roomNameHint)
+            // Primary +k is DX SHA1(channelName); candidates may also include MG channel+room.
+            string inputHint = _gameRoomJoinPasswordCandidateIndex == 0
                 ? wire
-                : $"{wire}+{roomNameHint}";
+                : string.IsNullOrEmpty(roomNameHint) ? wire : $"{wire}+{roomNameHint}";
             LogActivity(
-                $"JOIN game channel {wire} (default +k candidate {_gameRoomJoinPasswordCandidateIndex + 1}/{_gameRoomJoinPasswordCandidates.Count}, MG SHA1 input: \"{inputHint}\")",
+                $"JOIN game channel {wire} (default +k candidate {_gameRoomJoinPasswordCandidateIndex + 1}/{_gameRoomJoinPasswordCandidates.Count}, SHA1 input: \"{inputHint}\")",
                 notifyUi: false);
         }
         else
@@ -1265,10 +1268,9 @@ public sealed class CnCNetSession : IDisposable
         if (_connection == null || _currentGame == null)
             return;
 
-        string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
-        _connection.JoinChannelInstant(chatChannel, "ra1-derp");
-        _connection.JoinChannelInstant("#cncnet");
-        JoinGameBroadcastChannel(_currentGame);
+        foreach (CnCNetWelcomeChannelPlan.JoinStep step in CnCNetWelcomeChannelPlan.BuildForLocalGame(_currentGame))
+            _connection.JoinChannelInstant(step.Channel, step.Key);
+
         JoinFollowedBroadcastChannels();
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_currentGame.ChatChannel);
@@ -1276,6 +1278,7 @@ public sealed class CnCNetSession : IDisposable
         LobbyState.SetConnectionStatus("Connected");
         LobbyState.SelectedChatColorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
         _reconnectAttempts = 0;
+        string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
         LogActivity($"JOIN {chatChannel}, #cncnet + broadcast channels; NAMES requested.");
         EnsureGameBroadcastChannelsJoined();
         TryRejoinActiveGameRoom();

@@ -72,6 +72,35 @@
     </Panel>
   </DataTemplate>
 
+  <!-- Lobby GameOptions / GameRules: scroll when pre-compile audit detects overflow or sibling overlap. -->
+  <DataTemplate x:Key="DxLobbyOptionsPanel" DataType="vm:UiNodeViewModel">
+    <Panel Width="{Binding Width}"
+           Height="{Binding Height}"
+           IsVisible="{Binding IsVisible}"
+           ClipToBounds="True">
+      <Image Source="{Binding BackgroundImage}"
+             Stretch="{Binding BackgroundImageStretch}"
+             IsVisible="{Binding BackgroundImage, Converter={x:Static ObjectConverters.IsNotNull}}"
+             IsHitTestVisible="False" />
+      <Border Background="{Binding TiledBackgroundBrush}"
+              IsVisible="{Binding UseTiledBackground}"
+              IsHitTestVisible="False" />
+      <Border Background="{Binding BackgroundBrush}"
+              CornerRadius="8"
+              BorderBrush="#6B4E2E"
+              BorderThickness="1"
+              IsHitTestVisible="False" />
+      <ScrollViewer Margin="3"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+        <Panel MinHeight="{Binding ScrollContentHeight}"
+               Width="{Binding Width}">
+          <views:DxNodeCanvasView DataContext="{Binding}" />
+        </Panel>
+      </ScrollViewer>
+    </Panel>
+  </DataTemplate>
+
   <DataTemplate x:Key="DxTabButton" DataType="vm:UiNodeViewModel">
     <ctrl:DxTabButton DataContext="{Binding}" />
   </DataTemplate>

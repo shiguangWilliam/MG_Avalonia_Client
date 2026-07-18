@@ -12,10 +12,12 @@ namespace ClientAvalonia.Core;
 
 /// <summary>
 /// Early client bootstrap aligned with DXMainClient <c>PreStartup.Initialize</c>.
+/// Production UI defers GameRoot binding to <see cref="ModWorkspaceBinder"/> (workspace picker).
 /// </summary>
 public static class PreStartup
 {
-    private static bool _ran;
+    private static bool _earlyRan;
+    private static bool _fullBootstrapRan;
 
     public static StartupParams ParseArguments(string[] args)
     {
@@ -43,12 +45,15 @@ public static class PreStartup
         return new StartupParams(noAudio, multipleInstanceMode, unknown);
     }
 
-    public static void Initialize(StartupParams parameters)
+    /// <summary>
+    /// Culture, exception handler, early logger — no GameRoot bind, no DX registry repair.
+    /// </summary>
+    public static void InitializeEarly(StartupParams parameters)
     {
-        if (_ran)
+        if (_earlyRan)
             return;
 
-        _ran = true;
+        _earlyRan = true;
 
         Translation.InitialUICulture = CultureInfo.CurrentUICulture;
         CultureInfo.CurrentUICulture = new CultureInfo(ProgramConstants.HARDCODED_LOCALE_CODE);
@@ -56,51 +61,42 @@ public static class PreStartup
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             HandleException(args.ExceptionObject as Exception ?? new Exception("Unknown unhandled exception."));
 
-        string gameRoot = ClientEnvironment.FindGameRoot(Directory.GetCurrentDirectory());
-        Environment.CurrentDirectory = gameRoot;
-        ProgramConstants.SetHostedGameRoot(gameRoot);
-
-        // Validate every candidate registry key against the freshly-discovered root and repair
-        // (rewrite or clear) any stale/wrong entry. This must happen BEFORE any INI-driven check
-        // so subsequent launches can relocate the install even when CWD is unreliable (e.g. launched
-        // from System32). The legacy post-bootstrap write in Startup.cs honors the
-        // WritePathToRegistry user toggle; here we self-heal unconditionally because without a
-        // trustworthy registry entry the next launch cannot even read that toggle.
-        InstallationRegistry.TryRepairAllCandidates(gameRoot);
-        Logger.Log($"PreStartup: game root resolved and registry validated = {gameRoot}");
-
         _ = EncodingExt.UTF8NoBOM;
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            ClientPermissions.EnsureWritableGameDirectory();
+        ClientLogService.EnsureEarlyInitialized();
+        LogStartupParameters(parameters);
+        Logger.Log("PreStartup: early init complete — waiting for workspace picker (no silent first-hit).");
+    }
 
-        ClientLogService.EnsureInitialized();
+    /// <summary>
+    /// Legacy / CLI path: resolve a game root and run full bootstrap immediately.
+    /// Prefer <see cref="InitializeEarly"/> + <see cref="ModWorkspaceBinder"/> for the UI.
+    /// Does <b>not</b> call <see cref="InstallationRegistry.TryRepairAllCandidates"/> (avoids DX key pollution).
+    /// </summary>
+    public static void Initialize(StartupParams parameters)
+    {
+        InitializeEarly(parameters);
 
-        if (!ClientCoreBootstrap.TryEnsureInitialized(gameRoot, out string? settingsError))
+        if (_fullBootstrapRan || ModWorkspaceBinder.IsBound)
+            return;
+
+        string gameRoot = ClientEnvironment.FindGameRoot(Directory.GetCurrentDirectory());
+        string modName = ModRegistryCatalog.SuggestModName(gameRoot);
+        string clientGameType = ModRegistryCatalog.ResolveClientGameTypeHint(modName, gameRoot) ?? "YR";
+        if (!ModWorkspaceBinder.TryBindAndBootstrap(
+                modName,
+                gameRoot,
+                clientGameType,
+                out string? error))
         {
-            Startup.BootstrapError = settingsError ?? "Settings initialization failed.";
+            Startup.BootstrapError = error ?? "Settings initialization failed.";
             Startup.BootstrapSucceeded = false;
             Logger.Log($"PreStartup: bootstrap failed: {Startup.BootstrapError}");
             return;
         }
 
-        LogStartupParameters(parameters);
-
-        RemoveObsoleteGameDirectoryFiles();
-
-        var startup = new Startup();
-#if DEBUG
-        startup.Execute();
-#else
-        try
-        {
-            startup.Execute();
-        }
-        catch (Exception ex)
-        {
-            HandleException(ex);
-        }
-#endif
+        _fullBootstrapRan = true;
+        FinishPostBindHousekeeping();
     }
 
     /// <summary>Backward-compatible entry used by CLI validators.</summary>
@@ -113,6 +109,21 @@ public static class PreStartup
         }
 
         Initialize(ParseArguments([]));
+    }
+
+    /// <summary>Called after UI picker binds a workspace successfully.</summary>
+    public static void NotifyWorkspaceBound()
+    {
+        _fullBootstrapRan = true;
+        FinishPostBindHousekeeping();
+    }
+
+    private static void FinishPostBindHousekeeping()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            ClientPermissions.EnsureWritableGameDirectory();
+
+        RemoveObsoleteGameDirectoryFiles();
     }
 
     private static void LogStartupParameters(StartupParams parameters)
@@ -161,13 +172,19 @@ public static class PreStartup
 
         try
         {
-            string crashDir = SafePath.CombineFilePath(ProgramConstants.ClientUserFilesPath, "ClientCrashLogs");
+            string crashDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ClientAvalonia",
+                "ClientCrashLogs");
             Directory.CreateDirectory(crashDir);
-            string crashPath = SafePath.CombineFilePath(
-                crashDir,
-                $"ClientCrashLog{DateTime.Now:yyyy_MM_dd_HH_mm}.txt");
-            File.Copy(SafePath.CombineFilePath(ProgramConstants.ClientUserFilesPath, "client.log"), crashPath, true);
-            Logger.Log("Crash log copied to: " + crashPath);
+            string crashPath = Path.Combine(crashDir, $"ClientCrashLog{DateTime.Now:yyyy_MM_dd_HH_mm}.txt");
+
+            string? logFile = ProgramConstants.LogFileName;
+            if (!string.IsNullOrWhiteSpace(logFile) && File.Exists(logFile))
+            {
+                File.Copy(logFile, crashPath, true);
+                Logger.Log("Crash log copied to: " + crashPath);
+            }
         }
         catch
         {

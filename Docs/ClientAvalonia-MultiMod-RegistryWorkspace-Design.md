@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |----|------|
-| 状态 | 设计稿（未实现） |
+| 状态 | P0/P1 已落地（Avalonia 独立注册表契约） |
 | 范围 | 注册器 + 启动时 Mod 选择器 + ClientDefinitions 兼容兜底 |
 | 产品落点 | Settings 默认窗口（注册器 / 回退选择器） |
 | 关联现状 | `InstallationRegistry`、`FindGameRoot`、DX `WriteInstallPathToRegistry` |
@@ -60,7 +60,20 @@
 
 ## 4. 注册表契约
 
-### 4.1 键值范式（强制）
+> **实现说明（相对原稿的关键变更）**：Avalonia 多 Mod 索引 **不复用** DX 的 `HKCU\SOFTWARE\{{ModName}}\InstallPath`，以免 Hub/注册器/自愈逻辑污染 DX 启动器。  
+> Avalonia 契约见 §4.0；DX 键仅作只读「导入提示」，且 **禁止** `TryRepairAllCandidates` 式批量写回。
+
+### 4.0 Avalonia 专用契约（强制，已落地）
+
+```
+Hive:   HKEY_CURRENT_USER
+Key:    SOFTWARE\ClientAvalonia\ModWorkspaces\{{ModName}}
+Value:  InstallPath (REG_SZ) = 游戏根绝对路径（建议去尾部 \）
+```
+
+实现类型：`ModWorkspaceRegistry` / `ModRegistrar` / `ModRegistryCatalog`。
+
+### 4.1 DX 键范式（只读兼容，不由 Avalonia 写入）
 
 ```
 Hive:   HKEY_CURRENT_USER
@@ -68,9 +81,9 @@ Key:    SOFTWARE\{{ModName}}
 Value:  InstallPath (REG_SZ) = 游戏根绝对路径（建议去尾部 \）
 ```
 
-- `{{ModName}}`：与 DX `RegistryInstallPath` / 候选表一致的短名，如 `MomentOfGenesis`、`TiberianSun`、`MentalOmega`、`YR`。
-- **禁止**把多个 mod 的路径写到同一个键。
-- **禁止** Hub/注册器用「当前选中路径」批量覆盖所有候选键。
+- `{{ModName}}`：与 DX `RegistryInstallPath` 一致的短名，如 `MomentOfGenesis`、`TiberianSun`、`MentalOmega`、`YR`。
+- **禁止** Avalonia 把多个 mod 的路径写到同一个 DX 键，或批量修复所有 DX 候选键。
+- 选定工作区并完成 ClientCore 引导后，若用户开启 `WriteInstallationPathToRegistry`，仍可按 **当前 mod 的配置键** 单键写入（与 DX 行为对齐），这不是多 Mod 索引。
 
 ### 4.2 内置候选（可配置扩展）
 
@@ -195,7 +208,7 @@ Value:  InstallPath (REG_SZ) = 游戏根绝对路径（建议去尾部 \）
 
 示例（非穷尽，实现时落成白名单/特性表）：
 
-- `ClientGameType`（缺省可按 LocalGame 推断或默认 YR/TS）  
+- `ClientGameType`（**Avalonia 选择器：注册/启动时手动选 TS/YR/Ares/RA**；写入 `SOFTWARE\ClientAvalonia\ModWorkspaces\{ModName}\ClientGameType`，并作为会话 `SessionFallback`。**不**自动改写 `ClientDefinitions.ini`，**不**做 exe/DLL 探测。ini 已有值时仍以 ini 为准）  
 - `CnCNetProtocolRevision`、`CnCNetLiveStatusIdentifier`  
 - `DiscordAppId`、`DisplayPlayerCountInTopBar`  
 - `DisableComponentOptions`、`DisableMultiplayerGameLoading`  
@@ -226,7 +239,9 @@ MG 工作区可能声明 `ClientGameType=YR` 并带有一批 YR 向键；DTA/TS 
 |------|------|
 | 列表 | 候选键 → 显示名（来自 LongGameName/WindowTitle）/ 路径 / Ready\|Stale |
 | 操作 | 启动（绑定并进入）/ 设为默认高亮 / 清除陈旧键 / 打开文件夹 |
+| 表单 | ModName + **ClientGameType** 下拉（TS/YR/Ares/RA；优先填 ini，其次 Avalonia 注册表） |
 | 添加 | 「浏览文件夹…」→ 校验 ClientDefinitions → 可选写入注册表 |
+| 注册 | 「注册到 Avalonia 表」：**无可用路径时先弹出目录选择**；已有 Ready 选中项则直接写入 |
 | 退回入口 | 主界面或 Settings 提供「切换 Mod / 退回选择」→ §5.2～5.3 |
 
 ### 7.2 页或区：注册器
@@ -235,8 +250,8 @@ MG 工作区可能声明 `ClientGameType=YR` 并带有一批 YR 向键；DTA/TS 
 |------|------|
 | 1 | 选择或浏览游戏根 |
 | 2 | 读取 ClientDefinitions；解析建议 `{{ModName}}`（RegistryInstallPath 或映射） |
-| 3 | 允许用户确认/改选 ModName（防写错键） |
-| 4 | 写入 `SOFTWARE\{{ModName}}\InstallPath` |
+| 3 | 允许用户确认/改选 ModName（防写错键）；**手动选择 ClientGameType** |
+| 4 | 写入 Avalonia：`SOFTWARE\ClientAvalonia\ModWorkspaces\{{ModName}}\InstallPath` + `ClientGameType`（不写 DX 键、不改 ini） |
 | 5 | 刷新选择列表 |
 
 遵守用户设置中与 DX 对齐的「是否写入注册表」开关时：注册器可提示「当前禁止写入」，但仍允许**仅本次会话**选用该文件夹作为工作区（Manual 源）。
@@ -292,7 +307,7 @@ MG 工作区可能声明 `ClientGameType=YR` 并带有一批 YR 向键；DTA/TS 
 
 | 决策 | 选择 |
 |------|------|
-| 索引 | `HKCU\SOFTWARE\{{ModName}}\InstallPath` 同范式多键 |
+| 索引 | Avalonia：`HKCU\SOFTWARE\ClientAvalonia\ModWorkspaces\{{ModName}}\InstallPath`（与 DX 键隔离）；DX 键只读提示 |
 | 启动 | 优先注册表枚举 + **强制选择**（记忆仅高亮） |
 | 运行时 | 工作区绝对路径 + 相对资源 |
 | 换根 | **退回选择器** + 强制清理会话（§5.2～5.3），非真热切换 |

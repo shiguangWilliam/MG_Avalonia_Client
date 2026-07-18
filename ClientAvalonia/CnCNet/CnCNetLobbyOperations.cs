@@ -5,7 +5,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using ClientCore;
-using ClientCore.Extensions;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
@@ -17,42 +16,45 @@ public static class CnCNetLobbyOperations
     private const string LocalizedGameSuffixMarker = "-游戏";
 
     /// <summary>
-    /// MG 1.0.4.2 default IRC +k key (verified against MG DX clientdx.exe + Client/client.log):
-    /// first 10 hex chars of <c>SHA1(ASCII(channelName + GameRoomName))</c>.
+    /// Default IRC +k key aligned with upstream DXMainClient:
+    /// first 10 hex chars of <c>SHA1(ASCII(channelName))</c>.
     /// </summary>
     /// <remarks>
-    /// MG differs from upstream DXMainClient (which uses <c>SHA1(channelName)</c>):
-    /// MG modifies <c>Gcw_GameCreated</c> to concatenate the user-entered room name before hashing,
-    /// and localizes the channel suffix via <c>L10N("Client:Main:RamdomChannelName")</c> (zh-CN: <c>-游戏</c>).
-    /// ASCII encoding converts non-ASCII bytes to <c>?</c> (0x3F) — observed hashes match this scheme.
+    /// Create/host always uses this DX key so mainstream DX clients can join.
+    /// Join also tries MG's <c>SHA1(ASCII(channelName + GameRoomName))</c> as a fallback
+    /// (MG 1.0.4.2 localizes channel suffix and hashes channel+room).
+    /// ASCII encoding converts non-ASCII bytes to <c>?</c> (0x3F).
     /// </remarks>
     public static string GetDefaultChannelPassword(string channelName, string roomName)
         => GetDefaultChannelPasswordCandidates(channelName, roomName)[0];
 
-    /// <summary>Ordered IRC +k keys to try for default-password rooms (MG actual first, then upstream fallbacks).</summary>
+    /// <summary>
+    /// Ordered IRC +k keys for default-password rooms:
+    /// DX upstream first, then MG channel+room, then codepage fallbacks when needed.
+    /// </summary>
     public static IReadOnlyList<string> GetDefaultChannelPasswordCandidates(string channelName, string roomName)
     {
         string preservedChannel = CnCNetIrcChannelNames.Preserve(channelName);
         string normalizedRoom = roomName ?? string.Empty;
         var candidates = new List<string>(capacity: 5);
 
-        // 1. MG actual algorithm: SHA1(ASCII(channelName + GameRoomName)). Always first.
-        AddUniqueCandidate(candidates, preservedChannel + normalizedRoom, Encoding.ASCII);
-
-        // 2. Upstream DXMainClient algorithm (in case the host uses unmodified DX): SHA1(ASCII(channelName)).
+        // 1. DXMainClient: SHA1(ASCII(channelName)) — create/host and primary join.
         AddUniqueCandidate(candidates, preservedChannel, Encoding.ASCII);
 
-        // 3. Localized -游戏 with ANSI codepage fallback (defensive — observed MG always matches #1).
+        // 2. MG fork: SHA1(ASCII(channelName + GameRoomName)) — join fallback for MG hosts.
+        AddUniqueCandidate(candidates, preservedChannel + normalizedRoom, Encoding.ASCII);
+
+        // 3. Non-ASCII: try system ANSI codepage for both algorithms.
         if (preservedChannel.Any(static c => c > 127) || normalizedRoom.Any(static c => c > 127))
         {
-            AddUniqueCandidate(candidates, preservedChannel + normalizedRoom, Encoding.Default);
             AddUniqueCandidate(candidates, preservedChannel, Encoding.Default);
+            AddUniqueCandidate(candidates, preservedChannel + normalizedRoom, Encoding.Default);
         }
 
         return candidates;
     }
 
-    /// <summary>MG Gcw_GameCreated: empty user password → SHA1(channelName+roomName) key; non-empty → custom key.</summary>
+    /// <summary>DX Gcw_GameCreated: empty user password → SHA1(channelName) key; non-empty → custom key.</summary>
     public static bool ResolveCreatePassword(
         string channelName,
         string roomName,
@@ -85,7 +87,7 @@ public static class CnCNetLobbyOperations
         return $"MODE {channelWire} -k+k {oldPassword} {newPassword}";
     }
 
-    /// <summary>Maps join listing RequiresPassword to the IRC JOIN key (MG CnCNetLobby.JoinGame).</summary>
+    /// <summary>Maps join listing RequiresPassword to the IRC JOIN key (DX CnCNetLobby.JoinGame).</summary>
     public static bool TryResolveJoinPassword(
         CnCNetHostedGameSummary game,
         string? userPassword,
@@ -109,7 +111,7 @@ public static class CnCNetLobbyOperations
             return true;
         }
 
-        // MG: always derive from channelName + GameRoomName; ignore any stale user input.
+        // DX: derive from channelName; candidates also include MG channel+room for join fallback.
         defaultPasswordCandidates = GetDefaultChannelPasswordCandidates(game.ChannelName, game.RoomName);
         joinPassword = defaultPasswordCandidates[0];
         return true;
@@ -299,16 +301,15 @@ public static class CnCNetLobbyOperations
         return true;
     }
 
+    /// <summary>DX <c>RandomizeChannelName</c>: <c>{chatChannel}-game{7digits}</c> (English suffix, no L10N).</summary>
     private static string GenerateUniqueGameChannel(CnCNetSession session, string chatChannel)
     {
-        string baseName = chatChannel.StartsWith('#') ? chatChannel : "#" + chatChannel;
-        string format = "{0}-game{1}".L10N("Client:Main:RamdomChannelName");
         const int maxTries = 10000;
 
         for (int i = 0; i < maxTries; i++)
         {
             int suffix = Random.Shared.Next(1_000_000, 9_999_999);
-            string channelName = string.Format(CultureInfo.InvariantCulture, format, baseName, suffix);
+            string channelName = BuildGameChannelName(chatChannel, suffix);
             bool exists = session.LobbyState.HostedGameDetails.Any(g =>
                 g.ChannelName.Equals(channelName, StringComparison.OrdinalIgnoreCase));
 
@@ -319,7 +320,17 @@ public static class CnCNetLobbyOperations
         throw new InvalidOperationException($"Could not find a random channel name after {maxTries} retries.");
     }
 
-    /// <summary>MG localized <c>{base}-游戏{num}</c> → DX SHA1 input <c>{base}-game{num}</c>.</summary>
+    /// <summary>
+    /// DX <c>CnCNetLobby.RandomizeChannelName</c> format:
+    /// <c>{chatChannel}-game{suffix}</c> with a leading <c>#</c> on the chat channel.
+    /// </summary>
+    internal static string BuildGameChannelName(string chatChannel, int suffix)
+    {
+        string baseName = chatChannel.StartsWith('#') ? chatChannel : "#" + chatChannel;
+        return baseName + "-game" + suffix.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>MG localized <c>{base}-游戏{num}</c> → DX English <c>{base}-game{num}</c> (join fallback helper).</summary>
     internal static string? TryGetEnglishGameChannelName(string preservedChannelName)
     {
         int markerIndex = preservedChannelName.LastIndexOf(LocalizedGameSuffixMarker, StringComparison.Ordinal);

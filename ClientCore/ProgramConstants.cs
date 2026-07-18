@@ -25,6 +25,13 @@ namespace ClientCore
         public static void SetHostedGameRoot(string gameRoot)
             => _hostedGamePathOverride = SafePath.CombineDirectoryPath(gameRoot);
 
+        /// <summary>Clears an Avalonia-hosted game root override (workspace teardown / rebind).</summary>
+        public static void ClearHostedGameRoot()
+        {
+            _hostedGamePathOverride = null;
+            _defaultGamePath = null;
+        }
+
         public static string GamePath
             => _hostedGamePathOverride
                ?? (_defaultGamePath ??= SafePath.CombineDirectoryPath(GetGamePath(StartupPath)));

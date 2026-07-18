@@ -46,11 +46,62 @@ public sealed class CnCNetGameCollection
         games.AddRange(defaultGames);
         games.AddRange(LoadCustomGames(defaultGames.Concat(otherGames).ToList()));
         games.AddRange(otherGames);
+        TryAddImplicitLocalGame(games);
 
         Games = games;
 
         if (GetGameIndexFromInternalName(ClientConfiguration.Instance.LocalGame) < 0)
-            Logger.Log($"CnCNetGameCollection: LocalGame={ClientConfiguration.Instance.LocalGame} not found in collection.");
+        {
+            Logger.Log(
+                $"CnCNetGameCollection: LocalGame={ClientConfiguration.Instance.LocalGame} not found. " +
+                "Add [CustomGames] in GameCollectionConfig.ini, set CnCNetChatChannel / CnCNetGameBroadcastChannel " +
+                "in ClientDefinitions.ini, or use a LocalGame id that can form #cncnet-{{id}} / #cncnet-{{id}}-games.");
+        }
+    }
+
+    /// <summary>
+    /// Channel funnel for LocalGame missing from built-in table / CustomGames:
+    /// ClientDefinitions keys → LNOD-DX convention <c>#cncnet-{id}</c> / <c>#cncnet-{id}-games</c>.
+    /// </summary>
+    private static void TryAddImplicitLocalGame(List<CnCNetGameEntry> games)
+    {
+        string localGame = ClientConfiguration.Instance.LocalGame;
+        if (string.IsNullOrWhiteSpace(localGame))
+            return;
+
+        foreach (CnCNetGameEntry game in games)
+        {
+            if (localGame.Equals(game.InternalName, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        if (!CnCNetLocalGameChannelResolver.TryResolve(
+                localGame,
+                ClientConfiguration.Instance.CnCNetChatChannel,
+                ClientConfiguration.Instance.CnCNetGameBroadcastChannel,
+                out string chat,
+                out string broadcast,
+                out CnCNetLocalGameChannelResolver.Source source))
+        {
+            return;
+        }
+
+        string id = CnCNetLocalGameChannelResolver.NormalizeInternalName(localGame);
+        string uiName = ClientConfiguration.Instance.LongGameName;
+        if (string.IsNullOrWhiteSpace(uiName))
+            uiName = id.ToUpperInvariant();
+
+        Logger.Log(
+            $"CnCNetGameCollection: implicit LocalGame={id} via {source}: chat={chat}, games={broadcast}.");
+
+        games.Add(new CnCNetGameEntry
+        {
+            InternalName = id,
+            UiName = uiName,
+            ChatChannel = NormalizeChannel(chat),
+            GameBroadcastChannel = NormalizeChannel(broadcast),
+            IconFileName = id + "icon.png",
+        });
     }
 
     public int GetGameIndexFromInternalName(string gameName)

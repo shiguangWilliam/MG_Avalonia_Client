@@ -17,16 +17,13 @@ namespace ClientAvalonia.Tests.CnCNet;
 /// MG (clientdx.exe IL + Client/client.log): host IRC +k key = first 10 hex of
 ///   <c>SHA1(ASCII(channelName + GameRoomName))</c>.
 ///
-/// <see cref="CnCNetLobbyOperations.GetDefaultChannelPasswordCandidates"/> returns MG-actual
-/// first, then DX-upstream as a fallback, so a host on either side can be rejoined.
-///
-/// Tests pin BOTH baselines with magic values computed from the same algorithm — if either
-/// side regresses the SHA1 input or truncation length, the test fails loudly.
+/// Avalonia aligns create/host and primary join with <b>DX</b>.
+/// <see cref="CnCNetLobbyOperations.GetDefaultChannelPasswordCandidates"/> returns DX first,
+/// then MG channel+room as a join fallback so MG-hosted rooms remain joinable.
 /// </summary>
 public sealed class CnCNetLobbyOperationsPasswordTests
 {
     // Locked magic values: SHA1 hex of ASCII input, first 10 chars, lower-case.
-    // Verified once via a one-shot test (see git history); pinned here as regression locks.
     private const string DxChannelOnlyHash = "5cbd0e1a1e";      // SHA1("#ra3-game-1234567")[..10]
     private const string MgChannelPlusRoomHash = "d6a95d9ccc";  // SHA1("#ra3-game-1234567TestRoom")[..10]
 
@@ -45,37 +42,33 @@ public sealed class CnCNetLobbyOperationsPasswordTests
     [Trait("Baseline", "MG-Binary")]
     public void MgBehavior_Sha1OfChannelPlusRoomName_First10Hex()
     {
-        // Reference: MG clientdx.exe IL (verified in prior session against Client/client.log)
+        // Reference: MG clientdx.exe IL (verified against Client/client.log)
         //   string password = SHA1(channelName + GameRoomName).Substring(0, 10);
-        // with ASCII encoding (non-ASCII bytes collapse to '?').
         string recomputed = Sha1First10(DxAliases.SampleChannel + DxAliases.SampleRoomName);
         recomputed.Should().Be(MgChannelPlusRoomHash,
             "MG actual uses SHA1(channelName + roomName) — if this changes, MG IL has drifted.");
     }
 
     [Fact]
-    [Trait("Baseline", "MG-Binary")]
-    public void GetDefaultChannelPassword_Returns_MgChannelPlusRoom_Hash_First()
+    [Trait("Baseline", "DX")]
+    public void GetDefaultChannelPassword_Returns_DxChannelOnly_Hash_First()
     {
-        // MG is the host this client targets, so MG-actual is the first/default key.
         string key = CnCNetLobbyOperations.GetDefaultChannelPassword(
             DxAliases.SampleChannel, DxAliases.SampleRoomName);
-        key.Should().Be(MgChannelPlusRoomHash);
+        key.Should().Be(DxChannelOnlyHash);
     }
 
     [Fact]
-    public void JoinPasswordCandidates_Order_ChannelFirst_ThenChannelPlusRoom()
+    public void JoinPasswordCandidates_Order_DxFirst_ThenMgChannelPlusRoom()
     {
-        // MG-actual first, then DX-upstream fallback, then codepage fallbacks for non-ASCII.
-        // For pure-ASCII inputs (the common case) we expect exactly two candidates.
         var candidates = CnCNetLobbyOperations.GetDefaultChannelPasswordCandidates(
             DxAliases.SampleChannel, DxAliases.SampleRoomName);
 
         candidates.Should().NotBeEmpty();
-        candidates[0].Should().Be(MgChannelPlusRoomHash, "MG actual is always first");
-        candidates.Should().Contain(DxChannelOnlyHash, "DX upstream is a fallback");
-        int dxIndex = candidates.ToList().IndexOf(DxChannelOnlyHash);
-        dxIndex.Should().BeGreaterThan(0, "DX hash must come AFTER the MG hash, not before");
+        candidates[0].Should().Be(DxChannelOnlyHash, "DX upstream is always first");
+        candidates.Should().Contain(MgChannelPlusRoomHash, "MG channel+room is a join fallback");
+        int mgIndex = candidates.ToList().IndexOf(MgChannelPlusRoomHash);
+        mgIndex.Should().BeGreaterThan(0, "MG hash must come AFTER the DX hash");
     }
 
     [Fact]
@@ -89,8 +82,6 @@ public sealed class CnCNetLobbyOperationsPasswordTests
     [Fact]
     public void JoinPasswordCandidates_AddCodepageFallbacks_ForNonAsciiChannel()
     {
-        // When channel or room contains non-ASCII chars, ASCII encoding turns them into '?'.
-        // The codepage fallback (Encoding.Default) catches hosts that hash the original bytes.
         var candidates = CnCNetLobbyOperations.GetDefaultChannelPasswordCandidates(
             "#游戏-1", "TestRoom");
         candidates.Count.Should().BeGreaterThan(2, "non-ASCII inputs add codepage fallbacks");
@@ -118,28 +109,26 @@ public sealed class CnCNetLobbyOperationsPasswordTests
             out string ircKey, out bool isCustomPassword);
 
         ok.Should().BeTrue();
-        ircKey.Should().Be(MgChannelPlusRoomHash);
+        ircKey.Should().Be(DxChannelOnlyHash);
         isCustomPassword.Should().BeFalse();
     }
 
     [Fact]
     public void ResolveCreatePassword_DerivesDefaultKey_WhenPasswordRequiredButBlank()
     {
-        // Empty user password but RequiresPassword → fall back to derived MG key.
         bool ok = CnCNetLobbyOperations.ResolveCreatePassword(
             DxAliases.SampleChannel, DxAliases.SampleRoomName,
             requiresPassword: true, password: "   ",
             out string ircKey, out bool isCustomPassword);
 
         ok.Should().BeTrue();
-        ircKey.Should().Be(MgChannelPlusRoomHash);
+        ircKey.Should().Be(DxChannelOnlyHash);
         isCustomPassword.Should().BeFalse();
     }
 
     [Fact]
     public void BuildChannelPasswordModeCommand_SwitchesKeyCleanly()
     {
-        // DX Channel.ChangePassword: -k old, +k new, or -k+k old new.
         CnCNetLobbyOperations.BuildChannelPasswordModeCommand("#c", "old", "new")
             .Should().Be("MODE #c -k+k old new");
         CnCNetLobbyOperations.BuildChannelPasswordModeCommand("#c", "", "new")
@@ -151,7 +140,6 @@ public sealed class CnCNetLobbyOperationsPasswordTests
     [Fact]
     public void TryResolveJoinPassword_ReturnsDefaultCandidates_WhenGameNotPassworded()
     {
-        // MG CnCNetLobby.JoinGame: always derives from channelName+roomName, ignores stale user input.
         var game = new CnCNetHostedGameSummary
         {
             HostName = "H",
@@ -164,9 +152,10 @@ public sealed class CnCNetLobbyOperationsPasswordTests
             game, userPassword: null, out string joinPassword, out var candidates, out _);
 
         ok.Should().BeTrue();
-        joinPassword.Should().Be(MgChannelPlusRoomHash);
+        joinPassword.Should().Be(DxChannelOnlyHash);
         candidates.Should().NotBeNull();
-        candidates![0].Should().Be(MgChannelPlusRoomHash);
+        candidates![0].Should().Be(DxChannelOnlyHash);
+        candidates.Should().Contain(MgChannelPlusRoomHash);
     }
 
     [Fact]

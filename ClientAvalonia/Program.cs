@@ -20,7 +20,8 @@ internal static class Program
             return;
 
         StartupParams parameters = PreStartup.ParseArguments(args);
-        PreStartup.Initialize(parameters);
+        // Production UI: early init only — GameRoot bound after workspace picker.
+        PreStartup.InitializeEarly(parameters);
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
@@ -102,8 +103,22 @@ internal static class Program
             bool bitmapOk = string.IsNullOrEmpty(idle) || resources.LoadBitmap(idle) != null;
             Console.WriteLine(
                 $"  {node.Id,-18} {node.TemplateKey,-12} @({node.GetIntProp("CanvasLeft")},{node.GetIntProp("CanvasTop")}) " +
-                $"{node.GetIntProp("Width")}x{node.GetIntProp("Height")} visible={visible} text=\"{text}\" idle={idle} bmp={(bitmapOk ? "ok" : "fail")}");
+                $"{node.GetIntProp("Width")}x{node.GetIntProp("Height")} visible={visible} text=\"{text}\" idle={idle} bmp={(bitmapOk ? "ok" : "fail")}"
+                + FormatLobbyOptionsDebug(node));
         }
+    }
+
+    private static string FormatLobbyOptionsDebug(UiNode node)
+    {
+        if (!node.Id.Equals("GameOptionsPanel", StringComparison.OrdinalIgnoreCase)
+            && !node.Id.Equals("GameRulesPanel", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        if (!node.Props.TryGetValue("LobbyOptionsScrollReason", out object? reason))
+            return string.Empty;
+
+        node.Props.TryGetValue("ScrollContentHeight", out object? scrollH);
+        return $" scrollReason={reason} scrollH={scrollH}";
     }
 
     private static void ValidateGameResources()

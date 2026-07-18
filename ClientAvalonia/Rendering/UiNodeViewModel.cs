@@ -89,7 +89,7 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     /// <summary>Canvas host height: expanded for scrollable option panels.</summary>
     public double LayoutCanvasHeight
-        => TemplateKey == "DxOptionsScrollPanel" ? ScrollContentHeight : Height;
+        => TemplateKey is "DxOptionsScrollPanel" or "DxLobbyOptionsPanel" ? ScrollContentHeight : Height;
     public double ContentMaxWidth
     {
         get

@@ -55,6 +55,18 @@ public sealed class ClientEnvironment
 
     public static ClientEnvironment Discover(string? startDirectory = null)
     {
+        // After an explicit workspace bind, never let DX registry first-hit override the choice.
+        if (ModWorkspaceBinder.IsBound
+            && !string.IsNullOrWhiteSpace(ModWorkspaceBinder.CurrentInstallPath)
+            && ModWorkspaceRegistry.IsInstallPathValid(ModWorkspaceBinder.CurrentInstallPath))
+        {
+            string bound = ModWorkspaceBinder.CurrentInstallPath!;
+            if (ClientCoreBootstrap.TryEnsureInitialized(bound, out _))
+                return DiscoverFromCore(bound);
+
+            return DiscoverLegacy(bound);
+        }
+
         startDirectory ??= Directory.GetCurrentDirectory();
         string gameRoot = FindGameRoot(startDirectory);
 
@@ -340,20 +352,30 @@ public sealed class ClientEnvironment
     public static string FindGameRoot(string startDirectory)
         => FindGameRoot(startDirectory, registryCandidates: null);
 
+    /// <summary>
+    /// Walk CWD / exe only — no registry first-hit. Used by the workspace picker local probe.
+    /// </summary>
+    public static string? TryFindGameRootWithoutRegistry(string? startDirectory = null)
+    {
+        startDirectory ??= Directory.GetCurrentDirectory();
+
+        string? fromStart = WalkUpForGameRoot(Path.GetFullPath(startDirectory));
+        if (fromStart != null)
+            return fromStart;
+
+        return WalkUpForGameRoot(AppContext.BaseDirectory);
+    }
+
     /// <summary>Test seam: <paramref name="registryCandidates"/> overrides the hard-coded list.</summary>
     internal static string FindGameRoot(string startDirectory, string[]? registryCandidates)
     {
         // Bootstrap priority (highest first):
-        //   1. Registry hint (HKCU\SOFTWARE\<candidate>\InstallPath) — survives unrelated CWD
-        //      (e.g. C:\Windows\System32 when launched via shortcut/start-menu without a working dir)
+        //   1. Registry hint (HKCU\SOFTWARE\<candidate>\InstallPath) — DX early-bound, for CLI/tests
         //   2. Walk upward from <startDirectory> (usually CWD)
-        //   3. Walk upward from AppContext.BaseDirectory (exe folder) — covers single-file publish
-        //      where CWD has nothing to do with the install
+        //   3. Walk upward from AppContext.BaseDirectory (exe folder)
         //
-        // The previous implementation returned <startDirectory> as-is when nothing matched, which
-        // silently produced invalid roots like System32\Resources. Now we only return a directory
-        // after confirming Resources/ClientDefinitions.ini is reachable; otherwise we fall through
-        // and let the caller surface a clear FileNotFoundException.
+        // Production Avalonia UI must not call this for silent first-hit binding;
+        // use ModRegistryCatalog + ModWorkspaceBinder instead.
 
         string? registryRoot = registryCandidates != null
             ? InstallationRegistry.TryReadEarlyBoundInstallPath(registryCandidates, validateFilePresence: true)
@@ -369,9 +391,6 @@ public sealed class ClientEnvironment
         if (fromExe != null)
             return fromExe;
 
-        // Last-resort: return the start directory unchanged so the downstream
-        // ClientConfiguration error message points at the actual probed location
-        // (mirrors legacy behaviour for diagnostics) rather than masking it.
         Logger.Log($"ClientEnvironment: FindGameRoot could not locate Resources/ClientDefinitions.ini from start='{startDirectory}' or exe='{AppContext.BaseDirectory}'.");
         return Path.GetFullPath(startDirectory);
     }

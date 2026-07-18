@@ -58,6 +58,18 @@ public sealed class GameResourceCatalog
         }
     }
 
+    /// <summary>Drop cached catalogs before binding a different workspace.</summary>
+    public void Invalidate()
+    {
+        lock (_lock)
+        {
+            IsLoaded = false;
+            GameModes = [];
+            Maps = [];
+            Missions = [];
+        }
+    }
+
     /// <summary>Filter index 0 = favorites; 1+ = game mode at index-1.</summary>
     public IReadOnlyList<MapEntry> GetMapsForFilterIndex(int filterIndex)
     {

@@ -14,7 +14,7 @@ public sealed class PanelLayoutPass
     {
         foreach (UiNode node in tree.AllNodes())
         {
-            if (node == tree.Root || !IsContentPanel(node))
+            if (node == tree.Root || !IsContentPanel(node) || LobbyOptionsPanelLayoutPolicy.IsLobbyOptionsPanel(node))
                 continue;
 
             if (node.Children.Count < 2)

@@ -26,6 +26,7 @@ public static class MainMenuBehaviors
             host.ShowStatus("Click: Credits — opens URL in XNA client"));
 
         registry.Register("btnExit", _ => host.ExitApplication());
+        registry.Register("btnSwitchMod", _ => host.ReturnToWorkspacePicker());
 
         // Aligned with DX MainMenu.LblVersion_LeftClick: opens ChangelogURL.
         // ProcessLauncher guards empty URLs (MG ClientDefinitions.ini has ChangelogURL=)

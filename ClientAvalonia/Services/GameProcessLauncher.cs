@@ -71,9 +71,11 @@ public static class GameProcessLauncher
 
         bool windowed = GameRendererBootstrap.Manager.GetEffectiveWindowedMode();
         bool qresAvailable = File.Exists(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.QRES_EXECUTABLE));
-        bool useQres = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                       && qresAvailable
-                       && (windowed && UseQres || !windowed);
+        bool useQres = GameLaunchPolicy.ShouldUseQres(
+            GameLaunchPolicy.IsWindowsPlatform(),
+            qresAvailable,
+            UseQres,
+            windowed);
 
         if (useQres)
         {

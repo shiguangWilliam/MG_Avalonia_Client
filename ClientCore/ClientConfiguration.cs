@@ -86,6 +86,14 @@ namespace ClientCore
             }
         }
 
+        /// <summary>
+        /// Drops the singleton so the next <see cref="Instance"/> access reloads
+        /// <c>ClientDefinitions.ini</c> from the current <see cref="ProgramConstants.GamePath"/>.
+        /// Used by Avalonia multi-mod workspace rebind; DXMainClient does not call this.
+        /// </summary>
+        public static void ResetInstance()
+            => _instance = null;
+
         public void RefreshSettings()
         {
             DTACnCNetClient_ini = new IniFile(SafePath.CombineFilePath(ProgramConstants.GetResourcePath(), CLIENT_SETTINGS));
@@ -217,6 +225,12 @@ namespace ClientCore
         public int ThemeCount => clientDefinitionsIni.GetSectionKeys("Themes").Count;
 
         public string LocalGame => clientDefinitionsIni.GetStringValue(SETTINGS, "LocalGame", "DTA");
+
+        /// <summary>Optional CnCNet lobby chat channel when LocalGame is not in GameCollectionConfig.ini.</summary>
+        public string CnCNetChatChannel => clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetChatChannel", string.Empty);
+
+        /// <summary>Optional CnCNet game broadcast channel when LocalGame is not in GameCollectionConfig.ini.</summary>
+        public string CnCNetGameBroadcastChannel => clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetGameBroadcastChannel", string.Empty);
 
         /// <summary>CnCNet GAME CTCP revision (R10 legacy / R13 current). MG mod uses R10.</summary>
         public string CnCNetProtocolRevision =>

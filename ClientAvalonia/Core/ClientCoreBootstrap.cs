@@ -125,4 +125,16 @@ public static class ClientCoreBootstrap
             Translation.Instance = new Translation(UserINISettings.Instance.Translation.Value);
         }
     }
+
+    /// <summary>
+    /// Clears ClientCore singletons so a new workspace can bootstrap in-process
+    /// (Avalonia multi-mod return-to-picker). DXMainClient does not use this.
+    /// </summary>
+    public static void ResetForWorkspaceRebind()
+    {
+        _initialized = false;
+        UserINISettings.ResetInstance();
+        ClientConfiguration.ResetInstance();
+        Logger.Log("ClientCoreBootstrap: reset for workspace rebind.");
+    }
 }
