@@ -1,3 +1,7 @@
+// IniUiTreeBuilder: converts an IniDocument into a UiNodeTree, replicating DX's
+// implicit control-creation rules (R2-R8). Read ClientAvalonia/IniUi/README.md
+// before changing ShouldSkipOrphanSection / InferControlType / TryInferKnownControlType —
+// filters here directly affect MG/LNOD/QEC compatibility (ThreeModCompatibilityTests).
 using ClientAvalonia.IniUi.Ast;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Schema;

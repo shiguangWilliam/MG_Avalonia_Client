@@ -1,4 +1,5 @@
 using ClientAvalonia.Online.EventArguments;
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +11,6 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
-using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.</summary>
 public sealed class CnCNetSession : IDisposable
 {

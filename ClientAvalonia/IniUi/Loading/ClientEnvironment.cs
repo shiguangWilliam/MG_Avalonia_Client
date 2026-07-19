@@ -1,3 +1,7 @@
+// ClientEnvironment: game-root discovery, theme resolution, and asset/INI search paths.
+// The search path order in GetAssetSearchPaths / ResolveNamedIni is aligned with DX's
+// ProgramConstants.GetResourcePath(). Read ClientAvalonia/IniUi/README.md §ResourceResolver
+// before changing path order — map previews and side icons rely on GameRoot being a root.
 using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.Services;
