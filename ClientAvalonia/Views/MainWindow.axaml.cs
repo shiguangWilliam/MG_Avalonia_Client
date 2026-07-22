@@ -7,17 +7,22 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
+using ClientAvalonia.Domain.Resources;
 using ClientCore;
 using ClientCore.Settings;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
+using ClientAvalonia.IniUi.Actions;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Binding;
+using ClientAvalonia.IniUi.Lobby;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Overlays;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.Views;
@@ -34,6 +39,8 @@ public partial class MainWindow : Window, IUiNavigationHost
     private readonly ClientUpdateService _updateService = new();
     private readonly GameResourceCatalog _gameResources = GameResourceCatalog.Instance;
     private readonly LobbySessionState _lobbySession = new();
+    private readonly Session.SkirmishSession _skirmishSession;
+    private readonly ICnCNetSession _cncnet;
     private LayoutEngine? _mainEngine;
     private LayoutEngine? _overlayEngine;
     private UiViewModelFactory? _mainViewModelFactory;
@@ -65,6 +72,8 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public MainWindow()
     {
+        _skirmishSession = new Session.SkirmishSession(_lobbySession.PlayerState);
+        _cncnet = ResolveCnCNetSession();
         _bindingSession = new UiBindingSession(_environment);
         _gameLaunch.StatusChanged += msg => Dispatcher.UIThread.Post(() => ShowStatus(msg));
         _gameLaunch.GameProcessStarted += () => Dispatcher.UIThread.Post(OnGameProcessStarted);
@@ -73,12 +82,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         _updateService.StatusChanged += OnUpdateStatusChanged;
         ClientStartupService.LocalVersionsChecked += OnLocalVersionsChecked;
         _gameResources.Loaded += OnGameResourcesLoaded;
-        CnCNetSessionService.Instance.StateChanged += OnCnCNetStateChanged;
-        CnCNetSessionService.Instance.GameRoomJoined += OnCnCNetGameRoomJoined;
-        CnCNetSessionService.Instance.GameRoomJoinFailed += OnCnCNetGameRoomJoinFailed;
-        CnCNetSessionService.Instance.GameStarting += OnCnCNetGameStarting;
-        CnCNetSessionService.Instance.GameRoomHostAbandoned += OnCnCNetGameRoomHostAbandoned;
-        CnCNetSessionService.Instance.EnsureStarted();
+        _cncnet.StateChanged += OnCnCNetStateChanged;
+        _cncnet.GameRoomJoined += OnCnCNetGameRoomJoined;
+        _cncnet.GameRoomJoinFailed += OnCnCNetGameRoomJoinFailed;
+        _cncnet.GameStarting += OnCnCNetGameStarting;
+        _cncnet.GameRoomHostAbandoned += OnCnCNetGameRoomHostAbandoned;
+        _cncnet.EnsureStarted();
         InitializeComponent();
         KeyDown += OnKeyDown;
         Loaded += OnWindowLoaded;
@@ -126,7 +135,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         TryAutomaticCnCNetLogin();
     }
 
-    private static void TryAutomaticCnCNetLogin()
+    private void TryAutomaticCnCNetLogin()
     {
         try
         {
@@ -140,7 +149,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             }
 
             Logger.Log("AutomaticCnCNetLogin: connecting CnCNet session at startup.");
-            CnCNetSessionService.Instance.ConnectIfNeeded();
+            _cncnet.ConnectIfNeeded();
         }
         catch (Exception ex)
         {
@@ -195,7 +204,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             UiNodeTree tree = _mainEngine.LoadWindow(iniPath, iniSection);
             UiNodeViewModel vm = _mainViewModelFactory.CreateTree(tree);
-            IniBehaviorApplier.Apply(vm, _mainBehaviors, this);
+            IniBehaviorApplier.Apply(vm, _mainBehaviors, this, ResolveIniActionCatalog());
 
             if (IsGameLobbyWindow(windowName))
                 _bindingSession.State.SetCanLaunchGame(true);
@@ -243,26 +252,28 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        string? iniPath = _environment.ResolveWindowIni(windowName);
-        if (iniPath == null)
+        if (_environment.ResolveWindowLoadTarget(windowName) is not { } target)
         {
             ShowStatus($"INI not found for window: {windowName}");
             return;
         }
 
+        string iniPath = target.IniPath;
+        string sectionName = target.SectionName;
+
         try
         {
-            (int width, int height) = FloatingOverlayLayout.ResolveOverlaySize(iniPath, windowName);
+            (int width, int height) = FloatingOverlayLayout.ResolveOverlaySize(iniPath, sectionName);
 
             _overlayBehaviors.Clear();
             FloatingOverlayBehaviors.RegisterForOverlay(_overlayBehaviors, this, windowName);
 
-            _overlayEngine = LayoutEngine.CreateForWindow(_environment, iniPath, windowName);
+            _overlayEngine = LayoutEngine.CreateForWindow(_environment, iniPath, sectionName);
             var factory = new UiViewModelFactory(_overlayEngine.Resources, _overlayBehaviors);
 
-            UiNodeTree tree = _overlayEngine.LoadWindow(iniPath, windowName);
+            UiNodeTree tree = _overlayEngine.LoadWindow(iniPath, sectionName);
             _overlayRoot = factory.CreateTree(tree);
-            IniBehaviorApplier.Apply(_overlayRoot, _overlayBehaviors, this);
+            IniBehaviorApplier.Apply(_overlayRoot, _overlayBehaviors, this, ResolveIniActionCatalog());
             _bindingSession.ApplyToTree(_overlayRoot, windowName);
 
             PART_OverlayPanel.Width = width;
@@ -322,7 +333,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        var tunnels = CnCNetSessionService.Instance.Tunnels;
+        var tunnels = _cncnet.Tunnels;
         if (tunnels.Count == 0)
         {
             ShowStatus("No NAT tunnels available.");
@@ -355,14 +366,14 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void OpenGameRoomTunnelSelection()
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore;
         if (room is not { IsHost: true })
         {
             ShowStatus("Only the game host can change the tunnel.");
             return;
         }
 
-        var tunnels = CnCNetSessionService.Instance.Tunnels;
+        var tunnels = _cncnet.Tunnels;
         if (tunnels.Count == 0)
         {
             ShowStatus("No NAT tunnels available.");
@@ -376,7 +387,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             tunnels,
             tunnel =>
             {
-                if (CnCNetSessionService.Instance.TryHostChangeTunnel(tunnel))
+                if (_cncnet.TryHostChangeTunnel(tunnel))
                 {
                     ShowStatus($"Tunnel changed to {tunnel.Name}.");
                     CloseFloatingOverlaySilently();
@@ -393,7 +404,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void OpenGameLobbySettingsOverlay()
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore;
         if (room is not { IsHost: true })
         {
             ShowStatus("Only the game host can change room settings.");
@@ -407,7 +418,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             room,
             (name, max, skill, password) =>
             {
-                CnCNetSessionService.Instance.UpdateGameLobbySettings(name, max, skill, password);
+                _cncnet.UpdateGameLobbySettings(name, max, skill, password);
                 ShowStatus("Room settings updated.");
                 CloseFloatingOverlaySilently();
             },
@@ -525,7 +536,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     /// </summary>
     private bool IsCnCNetGameRoomChatEligible()
         => CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
-           && CnCNetSessionService.Instance.GameRoom is { IsLocalJoined: true };
+           && _cncnet.GameRoom is { IsLocalJoined: true };
 
     public void OpenOptionsOverlay() => OpenFloatingOverlay("OptionsWindow");
 
@@ -547,7 +558,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
-            CnCNetSessionService.Instance.LeaveGameRoom();
+            _cncnet.LeaveGameRoom();
 
         if (_navStack.Count > 0)
         {
@@ -564,10 +575,10 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
             || CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
-            || CnCNetSessionService.Instance.ActiveGameRoom != null
-            || CnCNetSessionService.Instance.Connection is { IsConnected: true })
+            || _cncnet.ActiveGameRoom != null
+            || _cncnet.Connection is { IsConnected: true })
         {
-            CnCNetSessionService.Instance.Disconnect();
+            _cncnet.Disconnect();
         }
 
         _navStack.Clear();
@@ -692,7 +703,9 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             Map = map,
             GameMode = gameMode,
-            Players = _lobbySession.PlayerState,
+            // Phase 3 P3-2：走 Session-aware 入口（Slots + SideCount）。
+            Slots = _lobbySession.PlayerState.Slots,
+            SideCount = _lobbySession.PlayerState.SideNames.Count,
             LobbyRoot = _activeRoot,
         };
 
@@ -761,7 +774,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     public bool TryLaunchCnCNetGame(out string message)
     {
         message = string.Empty;
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        ICnCNetSession session = _cncnet;
 
         if (session.IsGameRoomJoinPending)
         {
@@ -769,7 +782,8 @@ public partial class MainWindow : Window, IUiNavigationHost
             return false;
         }
 
-        CnCNetActiveGameRoom? room = session.ActiveGameRoom ?? session.GameRoom?.Room;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)session).ActiveGameRoomCore
+                                     ?? session.GameRoom?.Room;
         if (room == null)
         {
             message = "Not in a CnCNet game room.";
@@ -876,7 +890,8 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
         GameDataBindingApplier.ResolveStartInteractionFlags(
-            _lobbySession.PlayerState,
+            _lobbySession.UIMode,
+            _lobbySession.AllowHostPlayerOptions,
             out bool canAssign,
             out bool canSelectLocal);
         GameDataBindingApplier.UpdateMapSelectionDisplay(
@@ -884,7 +899,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             _lobbySession.VisibleMaps,
             index,
             resources,
-            _lobbySession.PlayerState,
+            _lobbySession.PlayerState.Slots,
             canAssign,
             canSelectLocal);
         UpdateLaunchButtonState();
@@ -953,25 +968,66 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             {
-                CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
-                string localNick = CnCNetSessionService.Instance.LocalNick;
+                ICnCNetGameSession? room = _cncnet.ActiveGameRoom;
+                string localNick = _cncnet.LocalNick;
                 string hostName = room?.HostName ?? localNick;
-                bool resetSlots = _lobbySession.PlayerState.Mode != LobbyPlayerMode.Multiplayer;
-                LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
-                    _lobbySession.PlayerState,
-                    localNick,
-                    hostName,
-                    room?.IsHost == true,
-                    resetSlots);
+                // Phase 2 P2-1：直接读 LobbySessionState.UIMode（真相源），不再绕道 PlayerState.Mode。
+                bool resetSlots = _lobbySession.UIMode != LobbyPlayerMode.Multiplayer;
+                if (room != null)
+                {
+                    // 走 Session-aware 重载：写 UI 态 + ApplyToSlots 到 session.PlayerSlots。
+                    LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
+                        _lobbySession,
+                        room,
+                        entries: [],
+                        localNick,
+                        hostName,
+                        room?.IsHost == true,
+                        resetSlots);
+                    _lobbySession.PlayerState.SyncFromSlots(room.PlayerSlots);
+                }
+                else
+                {
+                    LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
+                        _lobbySession.PlayerState,
+                        localNick,
+                        hostName,
+                        room?.IsHost == true,
+                        resetSlots);
+                }
             }
             else
             {
                 LobbyPlayerSlotUiRules.ConfigureForSkirmish(_lobbySession.PlayerState);
-                if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
+                if (_lobbySession.PlayerState.TryLoadSkirmishSettings())
+                {
+                    // Restored user's saved skirmish layout — keep as is.
+                }
+                else if (_gameResources.Maps.Count > 0)
+                {
+                    // New user / no saved layout: pre-fill AI to match the first map's
+                    // MaxPlayers (auto-ai-slots.md v2 default behavior).
+                    MapEntry defaultMap = _gameResources.Maps[0];
+                    _lobbySession.PlayerState.LoadDefaultSkirmishSlots(defaultMap.MaxPlayers);
+                }
+                else
+                {
                     _lobbySession.PlayerState.LoadDefaultSkirmishSlots();
+                }
             }
 
-            LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+            // Phase 4 P4-1：走 sink 路径（session 是 IGameSession 子类）。
+            // _lobbySession.PlayerState 作为 UI 镜像，调用方在 StateChanged 时 SyncFromSlots 同步。
+            LobbyPlayerBindingApplier.Apply(
+                root,
+                (IGameSession)_skirmishSession,
+                _lobbySession.PlayerState,
+                _lobbySession,
+                LobbyCatalogService.Instance,
+                resources,
+                _mainBehaviors,
+                gameRoomProvider: () => _cncnet.GameRoom,
+                onSlotsMutated: OnLobbySlotsMutated);
 
             if (windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             {
@@ -985,13 +1041,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             if (windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
             {
-                CnCNetSessionService session = CnCNetSessionService.Instance;
-                session.ConnectIfNeeded();
-                session.EnsureGameBroadcastChannelsJoined();
-                session.SyncLobbyStateFromCore();
+                _cncnet.ConnectIfNeeded();
+                _cncnet.EnsureGameBroadcastChannelsJoined();
+                ((CnCNetSessionServiceAdapter)_cncnet).Service.SyncLobbyStateFromCore();
             }
 
-            GameDataBindingApplier.ApplyChannelLobby(root, CnCNetSessionService.Instance.LobbyState);
+            GameDataBindingApplier.ApplyChannelLobby(root, _cncnet.LobbyState);
         }
 
         if (!IsGameLobbyWindow(windowName))
@@ -1009,8 +1064,26 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             lbMapList.SelectionChanged += () =>
             {
+                // Skirmish-only: refill AI slots to match the new map's MaxPlayers.
+                // Per auto-ai-slots.md v2 — non-preserving, single-player only.
+                // Multiplayer/CnCNet slots are managed by join/part events.
+                if (IsSkirmishWindow(windowName))
+                {
+                    MapEntry? newMap = _lobbySession.GetSelectedMap(lbMapList.SelectedIndex);
+                    if (newMap != null)
+                    {
+                        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+                            _skirmishSession,
+                            newMap.MaxPlayers,
+                            ResolvePlayerName(),
+                            ResolveColorCatalog(),
+                            _lobbySession.PlayerState.AiNames);
+                    }
+                }
+
                 GameDataBindingApplier.ResolveStartInteractionFlags(
-                    _lobbySession.PlayerState,
+                    _lobbySession.UIMode,
+                    _lobbySession.AllowHostPlayerOptions,
                     out bool canAssign,
                     out bool canSelectLocal);
                 GameDataBindingApplier.UpdateMapSelectionDisplay(
@@ -1018,9 +1091,37 @@ public partial class MainWindow : Window, IUiNavigationHost
                     _lobbySession.VisibleMaps,
                     lbMapList.SelectedIndex,
                     resources,
-                    _lobbySession.PlayerState,
+                    _lobbySession.PlayerState.Slots,
                     canAssign,
                     canSelectLocal);
+
+                // Re-apply player UI so the new AI slot layout is rendered.
+                // Phase 4 P4-1：走 sink 路径（如果有 active game session），否则退回 legacy。
+                ICnCNetGameSession? activeRoom = _cncnet.ActiveGameRoom;
+                if (activeRoom is IGameSession gameSession)
+                {
+                    LobbyPlayerBindingApplier.Apply(
+                        root,
+                        gameSession,
+                        _lobbySession.PlayerState,
+                        _lobbySession,
+                        LobbyCatalogService.Instance,
+                        resources,
+                        _mainBehaviors,
+                        gameRoomProvider: () => _cncnet.GameRoom,
+                        onSlotsMutated: OnLobbySlotsMutated);
+                }
+                else
+                {
+                    LobbyPlayerBindingApplier.Apply(
+                        root,
+                        _lobbySession.PlayerState,
+                        resources,
+                        _mainBehaviors,
+                        onSlotsMutated: OnLobbySlotsMutated,
+                        gameRoomProvider: () => _cncnet.GameRoom);
+                }
+
                 UpdateLaunchButtonState(root);
                 RefreshCnCNetGameListing();
             };
@@ -1095,7 +1196,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             if (!MapStartLocationRules.TryApplyHostAssignment(state.Slots, target, startLocation1Based, enforce))
                 return;
 
-            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, CnCNetSessionService.Instance.GameRoom);
+            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, _cncnet.GameRoom);
             RefreshMapStartMarkersAndPlayerUi();
             return;
         }
@@ -1122,7 +1223,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                 MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(
                     state,
                     localIndex,
-                    CnCNetSessionService.Instance.GameRoom);
+                    _cncnet.GameRoom);
 
             RefreshMapStartMarkersAndPlayerUi();
         }
@@ -1139,7 +1240,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (canAssign)
         {
             MapStartLocationRules.ClearOccupantsOf(state.Slots, startLocation1Based);
-            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, CnCNetSessionService.Instance.GameRoom);
+            MultiplayerSlotCoordinator.HandleHostOptionsEdit(state, _cncnet.GameRoom);
             RefreshMapStartMarkersAndPlayerUi();
             return;
         }
@@ -1152,7 +1253,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                 MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(
                     state,
                     localIndex,
-                    CnCNetSessionService.Instance.GameRoom);
+                    _cncnet.GameRoom);
             RefreshMapStartMarkersAndPlayerUi();
         }
     }
@@ -1163,7 +1264,53 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
-        LobbyPlayerBindingApplier.Apply(_activeRoot, _lobbySession.PlayerState, resources, _mainBehaviors);
+        // Phase 4 P4-1：根据当前 active session 选择 sink 路径或 legacy 路径。
+        IGameSession? gameSession = ResolveActiveGameSession();
+        if (gameSession != null)
+        {
+            LobbyPlayerBindingApplier.Apply(
+                _activeRoot,
+                gameSession,
+                _lobbySession.PlayerState,
+                _lobbySession,
+                LobbyCatalogService.Instance,
+                resources,
+                _mainBehaviors,
+                gameRoomProvider: () => _cncnet.GameRoom,
+                onSlotsMutated: OnLobbySlotsMutated);
+        }
+        else
+        {
+            LobbyPlayerBindingApplier.Apply(_activeRoot, _lobbySession.PlayerState, resources, _mainBehaviors);
+        }
+        RefreshCurrentMapStartMarkers();
+        UpdateLaunchButtonState(_activeRoot);
+    }
+
+    /// <summary>
+    /// Phase 4 P4-1：解析当前 active game session（Skirmish 或 CnCNet 房间）。
+    /// 返回 null 表示尚未进入具体 session（如刚连入 CnCNet 但未进房）。
+    /// </summary>
+    private IGameSession? ResolveActiveGameSession()
+    {
+        if (IsSkirmishWindow(CurrentWindow))
+            return _skirmishSession;
+
+        ICnCNetGameSession? room = _cncnet?.ActiveGameRoom;
+        return room as IGameSession;
+    }
+
+    /// <summary>
+    /// Fired by <see cref="LobbyPlayerBindingApplier"/> whenever a dropdown
+    /// mutates slot state (name/side/color/team/start), in any lobby mode.
+    /// Used to refresh dependent UI (map start markers, launch button) without
+    /// waiting for an extra user click. See auto-refresh-design.md.
+    /// </summary>
+    private void OnLobbySlotsMutated()
+    {
+        if (_activeRoot == null)
+            return;
+
         RefreshCurrentMapStartMarkers();
         UpdateLaunchButtonState(_activeRoot);
     }
@@ -1174,13 +1321,14 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
 
         GameDataBindingApplier.ResolveStartInteractionFlags(
-            _lobbySession.PlayerState,
+            _lobbySession.UIMode,
+            _lobbySession.AllowHostPlayerOptions,
             out bool canAssign,
             out bool canSelectLocal);
         GameDataBindingApplier.RefreshMapStartMarkers(
             _activeRoot,
             GetCurrentLobbyMap(),
-            _lobbySession.PlayerState,
+            _lobbySession.PlayerState.Slots,
             canAssign,
             canSelectLocal);
     }
@@ -1208,11 +1356,11 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void UpdateCnCNetGameBroadcastListing(UiNodeViewModel root)
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        ICnCNetSession session = _cncnet;
         if (session.IsGameRoomJoinPending)
             return;
 
-        CnCNetActiveGameRoom? room = session.ActiveGameRoom;
+        ICnCNetGameSession? room = session.ActiveGameRoom;
         if (room is not { IsHost: true })
             return;
 
@@ -1220,7 +1368,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
 
-        CnCNetSessionService.Instance.UpdateGameRoomListing(
+        _cncnet.UpdateGameRoomListing(
             map?.UntranslatedName ?? string.Empty,
             gameMode?.UntranslatedUIName ?? string.Empty,
             map?.Sha1 ?? string.Empty);
@@ -1228,18 +1376,18 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void PushCnCNetHostLobbyState()
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        ICnCNetSession session = _cncnet;
         if (session.IsGameRoomJoinPending)
             return;
 
-        CnCNetActiveGameRoom? room = session.ActiveGameRoom;
+        ICnCNetGameSession? room = session.ActiveGameRoom;
         if (room is not { IsHost: true })
             return;
 
         if (_activeRoot != null)
             LobbyPlayerBindingApplier.SyncFromUi(_activeRoot, _lobbySession.PlayerState);
 
-        CnCNetSessionService.Instance.SyncGameRoomFromLobby(_lobbySession.PlayerState);
+        _cncnet.SyncGameRoomFromLobby(_lobbySession.PlayerState);
         RefreshCnCNetGameListing();
     }
 
@@ -1257,7 +1405,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public async void TryJoinSelectedCnCNetGame()
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_cncnet).Service;
 
         if (session.IsGameRoomJoinPending)
         {
@@ -1305,22 +1453,36 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void EnterCnCNetGameLobbyConnecting()
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore;
         if (room == null)
             return;
 
-        string localNick = CnCNetSessionService.Instance.LocalNick;
+        string localNick = _cncnet.LocalNick;
         string hostName = string.IsNullOrWhiteSpace(room.HostName) ? localNick : room.HostName;
 
+        ICnCNetGameSession? session = _cncnet.ActiveGameRoom;
+        // Phase 3 P3-5：删除 fallback——ActiveGameRoomCore 非空时 ActiveGameRoom 必非空。
+        // 若确实无 session，提前返回（防御性），不再退回旧三步胶水。
+        if (session == null)
+        {
+            Logger.Log("EnterCnCNetGameLobbyConnecting: ActiveGameRoom null — skipping slot setup.");
+            return;
+        }
+
+        // Phase 2 P2-5：用 Session API 替代 LobbyPlayerState.EnsureHostAsFirstHuman。
         LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
-            _lobbySession.PlayerState,
+            _lobbySession,
+            session,
+            entries: [],
             localNick,
             hostName,
             room.IsHost,
             resetSlots: true);
 
         if (room.IsHost)
-            _lobbySession.PlayerState.EnsureHostAsFirstHuman(hostName, localNick);
+            session.InitHostSlots(localNick);
+
+        _lobbySession.PlayerState.SyncFromSlots(session.PlayerSlots);
 
         if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             NavigateTo("CnCNetGameLobby");
@@ -1339,7 +1501,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private List<string> GetCnCNetPlayerNames()
     {
-        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
+        CnCNetGameRoomSession? gameRoom = _cncnet.GameRoom;
         if (gameRoom != null)
         {
             IReadOnlyList<string> names = gameRoom.GetHumanPlayerNames();
@@ -1385,7 +1547,9 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             Map = map,
             GameMode = gameMode,
-            Players = _lobbySession.PlayerState,
+            // Phase 3 P3-2：走 Session-aware 入口（Slots + SideCount）。
+            Slots = _lobbySession.PlayerState.Slots,
+            SideCount = _lobbySession.PlayerState.SideNames.Count,
             LobbyRoot = _activeRoot,
         };
 
@@ -1394,7 +1558,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         ShowStatus("Launching game...");
 
         var startSnapshot = startInfo;
-        var roomPlayers = CnCNetSessionService.Instance.GameRoom?.Players;
+        var roomPlayers = _cncnet.GameRoom?.Players;
         var gameOptions = CollectCnCNetGameOptions();
 
         _gameLaunch.BeginLaunch(
@@ -1423,15 +1587,15 @@ public partial class MainWindow : Window, IUiNavigationHost
         bool canLaunch = _lobbySession.VisibleMaps.Count > 0
             && (lbMapList?.SelectedIndex ?? -1) >= 0;
 
-        CnCNetActiveGameRoom? cncRoom = CnCNetSessionService.Instance.ActiveGameRoom
-            ?? CnCNetSessionService.Instance.GameRoom?.Room;
+        CnCNetActiveGameRoom? cncRoom = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore
+            ?? _cncnet.GameRoom?.Room;
         UiNodeViewModel? btnLaunch = FindVm(root, "btnLaunchGame");
         UiNodeViewModel? chkAutoReady = FindVm(root, "chkAutoReady");
 
         if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
         {
             ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
-            CnCNetSessionService session = CnCNetSessionService.Instance;
+            ICnCNetSession session = _cncnet;
 
             if (cncRoom == null)
             {
@@ -1489,12 +1653,12 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         PART_TopBarHost.Activate(this);
 
-        var lobby = CnCNetSessionService.Instance.LobbyState;
+        var lobby = _cncnet.LobbyState;
         string status = lobby.ConnectionStatus;
         if (string.IsNullOrWhiteSpace(status))
-            status = CnCNetSessionService.Instance.Connection?.IsConnected == true ? "已连接" : "Offline";
+            status = _cncnet.Connection?.IsConnected == true ? "已连接" : "Offline";
 
-        PART_TopBarHost.Bar.UpdateState(status, CnCNetSessionService.Instance.OnlinePlayerCount);
+        PART_TopBarHost.Bar.UpdateState(status, _cncnet.OnlinePlayerCount);
     }
 
     private bool ShouldShowTopBar()
@@ -1512,6 +1676,14 @@ public partial class MainWindow : Window, IUiNavigationHost
     private static bool IsChannelLobbyWindow(string windowName)
         => windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Single-player skirmish window. Excludes multiplayer (CnCNetGameLobby /
+    /// LANGameLobby) — those slots are managed by join/part events, never auto-filled.
+    /// Used by <see cref="DefaultAiSlotPolicy"/> trigger points.
+    /// </summary>
+    private static bool IsSkirmishWindow(string windowName)
+        => windowName.Equals("SkirmishLobby", StringComparison.OrdinalIgnoreCase);
 
     private void ApplyCampaignOverlay(UiNodeViewModel root, CampaignSideFilter sideFilter = CampaignSideFilter.All)
     {
@@ -1543,20 +1715,28 @@ public partial class MainWindow : Window, IUiNavigationHost
         return null;
     }
 
-    private bool _applyingCnCNetGameRoomPlayers;
+    /// <summary>
+    /// Phase 4 P4-5：替代旧 <c>_applyingCnCNetGameRoomPlayers</c> 布尔重入标志。
+    /// 记录上次成功应用 PO 到 UI 时读到的 <see cref="IGameSession.Revision"/>；
+    /// 若新事件读到的 Revision 与之相同，说明本次刷新由我们自己的写入触发（冗余）—— skip。
+    /// </summary>
+    private long _lastAppliedGameRoomRevision = -1;
 
-    private void OnCnCNetGameRoomJoined(CnCNetActiveGameRoom room)
+    private void OnCnCNetGameRoomJoined(ICnCNetGameSession room)
     {
+        // Phase 4 P4-5：进入新房间时重置 Revision 缓存，强制下次 ApplyCnCNetGameRoomPlayers 走完整路径。
+        _lastAppliedGameRoomRevision = -1;
+
         if (!CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             NavigateTo("CnCNetGameLobby");
         else if (_activeRoot != null)
         {
             WireCnCNetGameOptionsBridge();
             ApplyCnCNetGameRoomPlayers(_activeRoot);
-            GameDataBindingApplier.ApplyGameRoomChat(_activeRoot, CnCNetSessionService.Instance.GameRoom);
+            GameDataBindingApplier.ApplyGameRoomChat(_activeRoot, _cncnet.GameRoom);
         }
 
-        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
+        CnCNetGameRoomSession? gameRoom = _cncnet.GameRoom;
         if (gameRoom != null)
         {
             gameRoom.ChangeTunnelRequested -= OpenGameRoomTunnelSelection;
@@ -1580,13 +1760,13 @@ public partial class MainWindow : Window, IUiNavigationHost
     {
         ClearCnCNetGameOptionsBridge();
         ShowStatus("The game host has abandoned the game.");
-        CnCNetSessionService.Instance.EnsureGameBroadcastChannelsJoined();
+        _cncnet.EnsureGameBroadcastChannelsJoined();
         NavigateTo("CnCNetLobby");
     }
 
     private void WireCnCNetGameOptionsBridge()
     {
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_cncnet).Service;
         session.GameOptionsControlCounts = () => CnCNetGameOptionsUiBridge.GetControlCounts(_activeRoot);
         session.GameOptionsProvider = CollectCnCNetGameOptions;
         session.GameOptionsReceiver = ApplyCnCNetGameOptionsFromHost;
@@ -1597,7 +1777,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     private void ClearCnCNetGameOptionsBridge()
     {
         UnwireHostGameOptionChangeBroadcast();
-        CnCNetSessionService session = CnCNetSessionService.Instance;
+        CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_cncnet).Service;
         session.GameOptionsControlCounts = null;
         session.GameOptionsProvider = null;
         session.GameOptionsReceiver = null;
@@ -1636,7 +1816,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void OnHostGameOptionControlChanged()
     {
-        CnCNetGameRoomSession? room = CnCNetSessionService.Instance.GameRoom;
+        CnCNetGameRoomSession? room = _cncnet.GameRoom;
         if (room is not { IsHost: true, IsLocalJoined: true })
             return;
 
@@ -1649,7 +1829,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         UiNodeViewModel? lbMapList = _activeRoot != null ? FindVm(_activeRoot, "lbMapList") : null;
         MapEntry? map = _lobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
         GameModeEntry? gameMode = _gameResources.GetGameModeForFilterIndex(_lobbySession.FilterIndex);
-        CnCNetGameRoomSession? room = CnCNetSessionService.Instance.GameRoom;
+        CnCNetGameRoomSession? room = _cncnet.GameRoom;
         CnCNetGameOptionsState state = CnCNetGameOptionsUiBridge.Collect(
             _activeRoot,
             map,
@@ -1687,7 +1867,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             CnCNetGameOptionsUiBridge.Apply(_activeRoot, state, _gameResources, _lobbySession);
             RefreshLobbyMapList();
             // Joiner must not re-broadcast GO via RefreshCnCNetGameListing host path.
-            if (CnCNetSessionService.Instance.GameRoom is { IsHost: true })
+            if (_cncnet.GameRoom is { IsHost: true })
                 RefreshCnCNetGameListing();
             else
                 UpdateLaunchButtonState(_activeRoot);
@@ -1701,14 +1881,14 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void OnCnCNetStateChanged()
     {
-        int count = CnCNetSessionService.Instance.OnlinePlayerCount;
+        int count = _cncnet.OnlinePlayerCount;
         _bindingSession.State.SetOnlinePlayerCount(count);
 
         if (_activeRoot != null && IsChannelLobbyWindow(CurrentWindow))
         {
-            GameDataBindingApplier.ApplyChannelLobby(_activeRoot, CnCNetSessionService.Instance.LobbyState);
+            GameDataBindingApplier.ApplyChannelLobby(_activeRoot, _cncnet.LobbyState);
             if (!IsFloatingOverlayOpen)
-                ShowStatus($"CnCNet: {CnCNetSessionService.Instance.LobbyState.ConnectionStatus}");
+                ShowStatus($"CnCNet: {_cncnet.LobbyState.ConnectionStatus}");
         }
 
         if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
@@ -1723,55 +1903,59 @@ public partial class MainWindow : Window, IUiNavigationHost
     /// <summary>Read session → UI only; never pushes PO/GAME/GO back to the network.</summary>
     private void RefreshCnCNetGameRoomUiFromSession(UiNodeViewModel root)
     {
-        if (_applyingCnCNetGameRoomPlayers)
+        // Phase 4 P4-5：用 Revision 比对替代布尔重入标志——
+        // 若读到的 Revision 与上次应用相同，说明本次刷新是冗余的（可能是我们自己写入触发的回声）。
+        ICnCNetGameSession? currentSession = _cncnet?.ActiveGameRoom;
+        if (currentSession != null && currentSession.Revision == _lastAppliedGameRoomRevision)
             return;
 
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore;
         if (room == null)
             return;
 
-        _applyingCnCNetGameRoomPlayers = true;
         try
         {
             ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: false);
             // Refresh in-room chat timeline + tbChatInput enabled state.
-            GameDataBindingApplier.ApplyGameRoomChat(root, CnCNetSessionService.Instance.GameRoom);
+            GameDataBindingApplier.ApplyGameRoomChat(root, _cncnet.GameRoom);
+            if (currentSession != null)
+                _lastAppliedGameRoomRevision = currentSession.Revision;
         }
         catch (Exception ex)
         {
             Logger.Log($"CnCNet game room UI refresh failed: {ex.Message}");
             Logger.Log(ex.ToString());
         }
-        finally
-        {
-            _applyingCnCNetGameRoomPlayers = false;
-        }
     }
 
     private void ApplyCnCNetGameRoomPlayers(UiNodeViewModel root)
     {
-        if (_applyingCnCNetGameRoomPlayers)
+        // Phase 4 P4-5：用 Revision 比对替代布尔重入标志。
+        ICnCNetGameSession? currentSession = _cncnet?.ActiveGameRoom;
+        if (currentSession != null && currentSession.Revision == _lastAppliedGameRoomRevision)
             return;
 
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        CnCNetActiveGameRoom? room = ((CnCNetSessionServiceAdapter)_cncnet).ActiveGameRoomCore;
         if (room == null)
             return;
 
-        _applyingCnCNetGameRoomPlayers = true;
         try
         {
             ApplyCnCNetGameRoomPlayersCore(root, room, updateStatus: true);
+            if (currentSession != null)
+                _lastAppliedGameRoomRevision = currentSession.Revision;
         }
         finally
         {
-            _applyingCnCNetGameRoomPlayers = false;
+            // 保留 finally 块以兼容未来可能的资源清理。
         }
     }
 
     private void ApplyCnCNetGameRoomPlayersCore(UiNodeViewModel root, CnCNetActiveGameRoom room, bool updateStatus)
     {
-        CnCNetGameRoomSession? gameRoom = CnCNetSessionService.Instance.GameRoom;
-        string localNick = CnCNetSessionService.Instance.LocalNick;
+        ICnCNetGameSession? session = _cncnet.ActiveGameRoom;
+        CnCNetGameRoomSession? gameRoom = _cncnet.GameRoom;
+        string localNick = _cncnet.LocalNick;
         string hostName = room.HostName;
         if (string.IsNullOrWhiteSpace(hostName))
             hostName = gameRoom?.HostName ?? localNick;
@@ -1780,26 +1964,51 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         IReadOnlyList<CnCNetGameRoomPlayer> entries = gameRoom?.Players ?? [];
 
+        // Phase 2 P2-5 + Phase 3 P3-5：Session API 单一真相源路径。
+        // Phase 3 P3-5：删除 fallback（session 必非空——ActiveGameRoomCore 非空即 ActiveGameRoom 非空）。
+        // 若 session 为 null，提前返回。
+        if (session == null)
+        {
+            Logger.Log("ApplyCnCNetGameRoomPlayersCore: ActiveGameRoom null — skipping.");
+            return;
+        }
+
         LobbyPlayerSlotUiRules.ConfigureForMultiplayer(
-            _lobbySession.PlayerState,
+            _lobbySession,
+            session,
+            entries,
             localNick,
             hostName,
-            room.IsHost);
-
-        MultiplayerSlotLayout.ApplyToState(_lobbySession.PlayerState, entries, localNick);
+            room.IsHost,
+            resetSlots: false);
 
         if (room.IsHost)
-            _lobbySession.PlayerState.EnsureHostAsFirstHuman(hostName, localNick);
+            session.ReorderHostFirst(hostName, localNick);
         else
-            _lobbySession.PlayerState.MarkLocalHuman(localNick);
+            session.MarkLocalHuman(localNick);
+
+        // Session.PlayerSlots 是真相源；投影到 _lobbySession.PlayerState 供 BindingApplier 读。
+        _lobbySession.PlayerState.SyncFromSlots(session.PlayerSlots);
 
         ResourceResolver resources = _mainEngine?.Resources ?? new ResourceResolver();
-        LobbyPlayerBindingApplier.Apply(root, _lobbySession.PlayerState, resources, _mainBehaviors);
+        // Phase 4 P4-1：走 sink 路径（session 是 ICnCNetGameSession 即 IGameSession 子类）。
+        LobbyPlayerBindingApplier.Apply(
+            root,
+            (IGameSession)session,
+            _lobbySession.PlayerState,
+            _lobbySession,
+            LobbyCatalogService.Instance,
+            resources,
+            _mainBehaviors,
+            gameRoomProvider: () => _cncnet.GameRoom,
+            onSlotsMutated: OnLobbySlotsMutated);
 
         bool locked = gameRoom?.Locked ?? false;
+        // Phase 3 P3-3：走 Session-aware 重载（直接吃 slots + UIMode），不再依赖 LobbyPlayerState。
         LobbyPlayerStatusApplier.Apply(
             root,
-            _lobbySession.PlayerState,
+            _lobbySession.PlayerState.Slots,
+            _lobbySession.UIMode,
             resources,
             _mainBehaviors,
             entries,
@@ -1928,8 +2137,60 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
 
         string message = tbChat.InputText.Trim();
-        CnCNetSessionService.Instance.SendChatMessage(message);
+        _cncnet.SendChatMessage(message);
         tbChat.InputText = string.Empty;
+    }
+
+    private static ICnCNetSession ResolveCnCNetSession()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<ICnCNetSession>();
+        }
+        catch (InvalidOperationException)
+        {
+            return new CnCNetSessionServiceAdapter();
+        }
+    }
+
+    /// <summary>
+    /// 安全解析 INI 动作目录。catalog 在 PreStartup.RegisterEnvironmentServices
+    /// 后才可用；早于该点的窗口加载会拿到 null（退化为仅 DISABLE 行为）。
+    /// </summary>
+    private static IIniActionCatalog? ResolveIniActionCatalog()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<IIniActionCatalog>();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string ResolvePlayerName()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<IGameEnvironment>().PlayerName;
+        }
+        catch (InvalidOperationException)
+        {
+            return ProgramConstants.PLAYERNAME;
+        }
+    }
+
+    private static IMultiplayerColorCatalog ResolveColorCatalog()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<IMultiplayerColorCatalog>();
+        }
+        catch (InvalidOperationException)
+        {
+            return new MultiplayerColorCatalogAdapter();
+        }
     }
 
     private void ApplyViewportSize(int width, int height)

@@ -4,6 +4,7 @@ using Avalonia.Media.Imaging;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 using ClientCore;
 
 namespace ClientAvalonia.IniUi.Binding;
@@ -13,10 +14,14 @@ namespace ClientAvalonia.IniUi.Binding;
 /// </summary>
 public static class MapPreviewOverlayApplier
 {
+    /// <summary>
+    /// Phase 4 P4-3：Session-aware 主入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
+    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// </summary>
     public static void Apply(
         UiNodeViewModel previewBox,
         MapEntry? map,
-        LobbyPlayerState? playerState,
+        IReadOnlyList<IPlayerSlot>? slots,
         bool canAssign,
         bool canSelectLocal)
     {
@@ -66,10 +71,10 @@ public static class MapPreviewOverlayApplier
                 MapPreviewOverlayGeometry.ProjectIndicator(layout, projected[i].X, projected[i].Y);
 
             int start1Based = i + 1;
-            var occupants = new List<LobbyPlayerSlot>();
-            if (playerState != null)
+            var occupants = new List<IPlayerSlot>();
+            if (slots != null)
             {
-                foreach (LobbyPlayerSlot slot in playerState.Slots)
+                foreach (IPlayerSlot slot in slots)
                 {
                     if (slot.IsOccupied && slot.StartIndex == start1Based)
                         occupants.Add(slot);
@@ -94,9 +99,10 @@ public static class MapPreviewOverlayApplier
                 Environment.NewLine,
                 occupants.Select(FormatOccupant));
 
+            // Phase 4 P4-3：MapStartLocationRules.CanJoinerSelect 已统一为 IPlayerSlot 签名（数组协变兼容）。
             bool selectable = canAssign
                 || (canSelectLocal && MapStartLocationRules.CanJoinerSelect(
-                    playerState?.Slots ?? (IList<LobbyPlayerSlot>)Array.Empty<LobbyPlayerSlot>(),
+                    (IList<IPlayerSlot>?)slots ?? Array.Empty<IPlayerSlot>(),
                     start1Based,
                     map.EnforceMaxPlayers));
 
@@ -122,7 +128,19 @@ public static class MapPreviewOverlayApplier
         previewBox.MapPreviewEnforceMaxPlayers = map.EnforceMaxPlayers;
     }
 
-    private static string FormatOccupant(LobbyPlayerSlot slot)
+    /// <summary>
+    /// Legacy 入口（Phase 4 P4-3：标记为已过时）。新代码用 <see cref="Apply(UiNodeViewModel, MapEntry?, IReadOnlyList{IPlayerSlot}?, bool, bool)"/>。
+    /// </summary>
+    [Obsolete("Phase 4 P4-3: 改用 IReadOnlyList<IPlayerSlot> 重载。Phase 5 删除。")]
+    public static void Apply(
+        UiNodeViewModel previewBox,
+        MapEntry? map,
+        LobbyPlayerState? playerState,
+        bool canAssign,
+        bool canSelectLocal)
+        => Apply(previewBox, map, playerState?.Slots, canAssign, canSelectLocal);
+
+    private static string FormatOccupant(IPlayerSlot slot)
     {
         if (slot.TeamIndex > 0 && slot.TeamIndex <= ProgramConstants.TEAMS.Count)
             return $"[{ProgramConstants.TEAMS[slot.TeamIndex - 1]}] {slot.Name}";

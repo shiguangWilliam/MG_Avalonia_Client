@@ -27,19 +27,16 @@ namespace ClientAvalonia.Tests.Integration;
 public sealed class CnCNetRoomJoinHandshakeIntegrationTests : IDisposable
 {
     private readonly TempGameRoot _root = new();
-    private readonly string _originalRevision = ProgramConstants.CNCNET_PROTOCOL_REVISION;
     private readonly string _originalGameVersion = ProgramConstants.GAME_VERSION;
 
     public CnCNetRoomJoinHandshakeIntegrationTests()
     {
         _root.BindToProgramConstants();
-        ProgramConstants.ApplyCnCNetProtocolRevision(DxAliases.CurrentProtocolRevision);
         ProgramConstants.GAME_VERSION = "1.0";
     }
 
     public void Dispose()
     {
-        ProgramConstants.ApplyCnCNetProtocolRevision(_originalRevision);
         ProgramConstants.GAME_VERSION = _originalGameVersion;
         _root.Dispose();
     }

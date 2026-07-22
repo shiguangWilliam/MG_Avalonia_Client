@@ -26,18 +26,27 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     private string _mapSha1 = string.Empty;
     private IReadOnlyList<string> _playerNames = [];
     private string _lastImmediatePayload = string.Empty;
+    private CnCNetGameBroadcastDialect? _dialect;
+
+    /// <summary>Optional wire-dialect observer; when null, emit always uses stock R13.</summary>
+    public CnCNetGameBroadcastDialect? Dialect
+    {
+        get => _dialect;
+        set => _dialect = value;
+    }
 
     public void ConfigureHostChannel(CnCNetIrcConnection connection, CnCNetActiveGameRoom room)
     {
         // XNA CnCNetGameLobby.OnJoined: MODE/TOPIC use channel.ChannelName (original casing).
         string channel = CnCNetIrcChannelNames.Preserve(room.ChannelName);
         string localGame = ClientConfiguration.Instance.LocalGame.ToLowerInvariant();
+        string topicRevision = ResolveEmitRevision(_channels?.GameBroadcastChannel);
         bool modeSent = connection.TrySendInstantOnChannel(
             channel,
             $"MODE {channel} +klnNs {room.Password} {room.MaxPlayers}");
         bool topicSent = connection.TrySendInstantOnChannel(
             channel,
-            $"TOPIC {channel} :{ProgramConstants.CNCNET_PROTOCOL_REVISION};{localGame}");
+            $"TOPIC {channel} :{topicRevision};{localGame}");
 
         if (modeSent && topicSent)
             Logger.Log($"CnCNetGameBroadcastService: host MODE/TOPIC on {channel}");
@@ -166,13 +175,26 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     {
         CnCNetActiveGameRoom room = _room!;
         string flags = CnCNetGameFlags.Build(_locked, room.Passworded, closed);
+        string? listingChannel = _channels?.GameBroadcastChannel;
+        bool legacy = _dialect?.PrefersLegacyEmit(listingChannel) == true;
         return CnCNetMultiplayerProtocol.BuildGameBroadcastPayload(
             room,
             flags,
             _playerNames,
             _mapName,
             _gameModeName,
-            _mapSha1);
+            _mapSha1,
+            useLegacyElevenField: legacy);
+    }
+
+    private string ResolveEmitRevision(string? broadcastChannel)
+    {
+        if (_dialect == null)
+            return ProgramConstants.CNCNET_PROTOCOL_REVISION;
+
+        return _dialect.ResolveEmitShape(broadcastChannel) == CnCNetGameBroadcastDialect.WireShape.LegacyR10
+            ? CnCNetGameBroadcastDialect.LegacyRevision
+            : ProgramConstants.CNCNET_PROTOCOL_REVISION;
     }
 
     private void RestartTimerLocked(TimeSpan firstInterval)

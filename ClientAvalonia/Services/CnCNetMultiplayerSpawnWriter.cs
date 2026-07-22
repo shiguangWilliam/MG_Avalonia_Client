@@ -1,6 +1,7 @@
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Session;
 using ClientCore;
 using Rampastring.Tools;
 
@@ -9,6 +10,35 @@ namespace ClientAvalonia.Services;
 /// <summary>Writes spawn.ini / spawnmap.ini for CnCNet (XNA GameLobbyBase.WriteSpawnIni + CnCNetGameLobby.WriteSpawnIniAdditions).</summary>
 public static class CnCNetMultiplayerSpawnWriter
 {
+    /// <summary>
+    /// Phase 3 P3-2：Session-aware 主入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>（session.PlayerSlots），
+    /// 不再依赖 <see cref="LobbyPlayerState"/>。当 <paramref name="roomPlayers"/> 非空时仍优先用 PO DTO
+    /// （保留 NAT 端口等只在 DTO 里存在的字段）。
+    /// </summary>
+    public static void Write(
+        MapEntry map,
+        GameModeEntry gameMode,
+        CnCNetStartGameInfo startInfo,
+        IReadOnlyList<IPlayerSlot> slots,
+        UiNodeViewModel? lobbyRoot,
+        IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers,
+        CnCNetGameOptionsState? options)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+
+        int randomSeed = options?.RandomSeed ?? 0;
+        if (randomSeed == 0)
+            randomSeed = Random.Shared.Next();
+
+        SkirmishSpawnWriter.WriteSpawnMap(map, gameMode, lobbyRoot);
+        WriteSpawnIni(map, gameMode, startInfo, slots, lobbyRoot, roomPlayers, options, randomSeed);
+    }
+
+    /// <summary>
+    /// Legacy 入口（Phase 3 P3-2：标记为已过时）。
+    /// 仍接受 <see cref="LobbyPlayerState"/>，内部委托到 Session-aware 重载。
+    /// </summary>
+    [Obsolete("Phase 3 P3-2: 改用 Write(..., IReadOnlyList<IPlayerSlot>, ...)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
     public static void Write(
         MapEntry map,
         GameModeEntry gameMode,
@@ -18,19 +48,15 @@ public static class CnCNetMultiplayerSpawnWriter
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
         CnCNetGameOptionsState? options = null)
     {
-        int randomSeed = options?.RandomSeed ?? 0;
-        if (randomSeed == 0)
-            randomSeed = Random.Shared.Next();
-
-        SkirmishSpawnWriter.WriteSpawnMap(map, gameMode, lobbyRoot);
-        WriteSpawnIni(map, gameMode, startInfo, players, lobbyRoot, roomPlayers, options, randomSeed);
+        IReadOnlyList<IPlayerSlot> slots = players?.Slots ?? Array.Empty<LobbyPlayerSlot>();
+        Write(map, gameMode, startInfo, slots, lobbyRoot, roomPlayers, options);
     }
 
     private static void WriteSpawnIni(
         MapEntry map,
         GameModeEntry gameMode,
         CnCNetStartGameInfo startInfo,
-        LobbyPlayerState? players,
+        IReadOnlyList<IPlayerSlot> slots,
         UiNodeViewModel? lobbyRoot,
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers,
         CnCNetGameOptionsState? options,
@@ -57,8 +83,8 @@ public static class CnCNetMultiplayerSpawnWriter
             }
         }
 
-        List<LobbyPlayerSlot> humans = BuildHumans(players, roomPlayers);
-        List<LobbyPlayerSlot> ais = BuildAis(players, roomPlayers);
+        List<LobbyPlayerSlot> humans = BuildHumans(slots, roomPlayers);
+        List<LobbyPlayerSlot> ais = BuildAis(slots, roomPlayers);
 
         if (humans.Count == 0)
         {
@@ -86,7 +112,7 @@ public static class CnCNetMultiplayerSpawnWriter
         allOccupied.AddRange(ais);
 
         IReadOnlyList<LobbyPlayerHouseResolver.ResolvedHouse> houses =
-            LobbyPlayerHouseResolver.Resolve(allOccupied, randomSeed);
+            LobbyPlayerHouseResolver.Resolve((IReadOnlyList<IPlayerSlot>)allOccupied, randomSeed);
 
         int localHumanIndex = humans.FindIndex(h => h.IsHumanLocal || h.Name == ProgramConstants.PLAYERNAME);
         if (localHumanIndex < 0)
@@ -170,7 +196,7 @@ public static class CnCNetMultiplayerSpawnWriter
                 int multiId = multiCmbIndexes.Count + aiIndex + 1;
                 string keyName = "Multi" + multiId;
                 LobbyPlayerHouseResolver.ResolvedHouse house = houses[humans.Count + aiIndex];
-                spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerState.HouseHandicapFromAiLevel(ais[aiIndex].AiLevel));
+                spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(ais[aiIndex].AiLevel));
                 spawnIni.SetIntValue("HouseCountries", keyName, house.InternalSideIndex);
                 spawnIni.SetIntValue("HouseColors", keyName, house.GameColorIndex);
             }
@@ -211,7 +237,7 @@ public static class CnCNetMultiplayerSpawnWriter
         Logger.Log($"CnCNetMultiplayerSpawnWriter: tunnel {startInfo.Tunnel.Address}:{startInfo.Tunnel.Port}, gameId={startInfo.UniqueGameId}, localPort={localPort}");
     }
 
-    private static List<LobbyPlayerSlot> BuildHumans(LobbyPlayerState? players, IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers)
+    private static List<LobbyPlayerSlot> BuildHumans(IReadOnlyList<IPlayerSlot> slots, IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers)
     {
         if (roomPlayers != null)
         {
@@ -229,10 +255,10 @@ public static class CnCNetMultiplayerSpawnWriter
                 .ToList();
         }
 
-        return players?.Slots.Where(s => s.IsOccupied && !s.IsAi).Select(s => s.Clone()).ToList() ?? [];
+        return slots.Where(s => s.IsOccupied && !s.IsAi).Select(Clone).ToList();
     }
 
-    private static List<LobbyPlayerSlot> BuildAis(LobbyPlayerState? players, IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers)
+    private static List<LobbyPlayerSlot> BuildAis(IReadOnlyList<IPlayerSlot> slots, IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers)
     {
         if (roomPlayers != null)
         {
@@ -251,7 +277,26 @@ public static class CnCNetMultiplayerSpawnWriter
                 .ToList();
         }
 
-        return players?.Slots.Where(s => s.IsOccupied && s.IsAi).Select(s => s.Clone()).ToList() ?? [];
+        return slots.Where(s => s.IsOccupied && s.IsAi).Select(Clone).ToList();
+    }
+
+    /// <summary>把任意 <see cref="IPlayerSlot"/> 克隆为 <see cref="LobbyPlayerSlot"/>（spawn.ini 写入需要可变副本）。</summary>
+    private static LobbyPlayerSlot Clone(IPlayerSlot slot)
+    {
+        if (slot is LobbyPlayerSlot concrete)
+            return concrete.Clone();
+
+        return new LobbyPlayerSlot
+        {
+            Name = slot.Name,
+            SideIndex = slot.SideIndex,
+            ColorIndex = slot.ColorIndex,
+            TeamIndex = slot.TeamIndex,
+            StartIndex = slot.StartIndex,
+            AiLevel = slot.AiLevel,
+            IsAi = slot.IsAi,
+            IsHumanLocal = slot.IsHumanLocal,
+        };
     }
 
     private static List<int> BuildMultiComboIndexes(

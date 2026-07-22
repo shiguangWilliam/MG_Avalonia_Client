@@ -1,6 +1,7 @@
+using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Services;
-using ClientAvalonia.CnCNet;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -22,14 +23,15 @@ public static class MultiplayerLobbyBehaviors
                 return;
             }
 
-            if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
+            ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+            if (cncnet.IsGameRoomJoinPending)
             {
                 host.ShowStatus("Joining game room — please wait...");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }
 
-            if (CnCNetSessionService.Instance.ActiveGameRoom != null)
+            if (cncnet.ActiveGameRoom != null)
             {
                 host.ShowStatus("Already in a game room — open the in-game lobby or leave first.");
                 host.NavigateTo(gameLobbyWindow);
@@ -47,14 +49,15 @@ public static class MultiplayerLobbyBehaviors
                 return;
             }
 
-            if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
+            ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+            if (cncnet.IsGameRoomJoinPending)
             {
                 host.ShowStatus("Joining game room — please wait...");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }
 
-            if (CnCNetSessionService.Instance.ActiveGameRoom != null)
+            if (cncnet.ActiveGameRoom != null)
             {
                 host.ShowStatus("Already in a game room.");
                 host.NavigateTo(gameLobbyWindow);
@@ -62,7 +65,7 @@ public static class MultiplayerLobbyBehaviors
             }
 
             if (host.ActiveRoot != null)
-                GameDataBindingApplier.SyncChannelGameSelection(host.ActiveRoot, CnCNetSessionService.Instance.LobbyState);
+                GameDataBindingApplier.SyncChannelGameSelection(host.ActiveRoot, cncnet.LobbyState);
 
             host.TryJoinSelectedCnCNetGame();
         });

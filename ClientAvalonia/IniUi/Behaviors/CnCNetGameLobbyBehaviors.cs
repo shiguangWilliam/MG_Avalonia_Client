@@ -1,6 +1,8 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -11,8 +13,9 @@ public static class CnCNetGameLobbyBehaviors
     {
         registry.Register("btnLockGame", _ =>
         {
-            bool locked = CnCNetSessionService.Instance.GameRoom?.Locked == true;
-            CnCNetSessionService.Instance.SetGameRoomLocked(!locked);
+            ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+            bool locked = cncnet.GameRoom?.Locked == true;
+            cncnet.SetGameRoomLocked(!locked);
             host.ShowStatus(locked ? "Game unlocked." : "Game locked.");
             host.RefreshCnCNetGameRoomPlayers();
         });
@@ -23,18 +26,19 @@ public static class CnCNetGameLobbyBehaviors
 
         registry.Register("chkAutoReady", _ =>
         {
-            if (CnCNetSessionService.Instance.ActiveGameRoom?.IsHost == true)
+            ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+            if (cncnet.ActiveGameRoom?.IsHost == true)
                 return;
 
             bool autoReady = _.IsChecked;
             if (autoReady)
             {
-                CnCNetSessionService.Instance.SetGameRoomReady(true, autoReady: true);
+                cncnet.SetGameRoomReady(true, autoReady: true);
                 host.ShowStatus("Auto ready enabled.");
             }
             else
             {
-                CnCNetSessionService.Instance.SetGameRoomReady(false, autoReady: false);
+                cncnet.SetGameRoomReady(false, autoReady: false);
                 host.ShowStatus("Auto ready disabled.");
             }
 
@@ -46,15 +50,16 @@ public static class CnCNetGameLobbyBehaviors
 
     private static void ToggleJoinerReady(IUiNavigationHost host)
     {
-        CnCNetActiveGameRoom? room = CnCNetSessionService.Instance.ActiveGameRoom;
+        ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+        ICnCNetGameSession? room = cncnet.ActiveGameRoom;
         if (room == null || room.IsHost)
             return;
 
-        CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
-            .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+        CnCNetGameRoomPlayer? local = cncnet.GameRoom?.Players
+            .FirstOrDefault(p => p.Name.Equals(cncnet.LocalNick, StringComparison.OrdinalIgnoreCase));
 
         bool ready = !(local?.Ready ?? false);
-        CnCNetSessionService.Instance.SetGameRoomReady(ready, autoReady: false);
+        cncnet.SetGameRoomReady(ready, autoReady: false);
         host.ShowStatus(ready ? "Ready — waiting for host to launch." : "Not ready.");
         host.RefreshCnCNetGameRoomPlayers();
     }

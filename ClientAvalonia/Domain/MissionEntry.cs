@@ -1,6 +1,8 @@
+using ClientAvalonia.Domain.Resources;
+
 namespace ClientAvalonia.Domain;
 
-public sealed class MissionEntry
+public sealed class MissionEntry : IMissionResource
 {
     public required string SectionName { get; init; }
 
@@ -25,4 +27,23 @@ public sealed class MissionEntry
     public bool PlayerAlwaysOnNormalDifficulty { get; init; }
 
     public bool IsHeader => string.IsNullOrWhiteSpace(Scenario);
+
+    public long SizeBytes { get; init; }
+
+    public VersionInfo Version { get; init; } = new(0, 0, 0, 0);
+
+    public IReadOnlyDictionary<string, object> ModMetadata { get; init; }
+        = new Dictionary<string, object>();
+
+    string IResource.LogicalId => SectionName;
+
+    string IResource.UntranslatedName => SectionName;
+
+    string IResource.FilePath => Scenario;
+
+    string IResource.Sha1 => string.Empty;
+
+    ResourceOrigin IResource.Origin => ResourceOrigin.Official;
+
+    bool IResource.IsReadOnly => true;
 }

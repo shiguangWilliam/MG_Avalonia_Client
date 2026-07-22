@@ -23,7 +23,13 @@ public static class CnCNetMultiplayerProtocol
 
     public const int LegacyGameBroadcastFieldCount = 11;
 
-    /// <summary>DX <c>CnCNetLobby.GameBroadcastChannel_CTCPReceived</c> (strict 13 fields).</summary>
+    public const string LegacyProtocolRevision = "R10";
+
+    /// <summary>
+    /// Parses inbound GAME CTCP. Prefer stock DX R13/13-field; if the payload is the older
+    /// 11-field R10 layout (shipping MG DX), fall back to that parser. Not a LocalGame pin —
+    /// selection is driven by the wire shape that arrived.
+    /// </summary>
     public static bool TryParseGameBroadcast(
         string hostName,
         string ctcpMessage,
@@ -35,18 +41,61 @@ public static class CnCNetMultiplayerProtocol
         game = null;
         rejectReason = null;
 
-        if (!ctcpMessage.StartsWith("GAME ", StringComparison.Ordinal))
-            return false;
-
-        string[] parts = ctcpMessage[5..].Split(';');
-        if (parts.Length != GameBroadcastFieldCount)
+        // Defensive entry guard: anything that isn't a "GAME " CTCP is rejected before we
+        // touch indices. Hosts (or attackers) can send arbitrary payloads via CTCP; we never
+        // want this surface to throw and bubble out of the IRC read loop's try/catch.
+        //
+        // Distinguish "not a GAME CTCP at all" (silent reject, rejectReason=null — caller may
+        // receive other CTCP types on the same surface) from "looks like a GAME CTCP but is
+        // malformed" (rejectReason set so it lands in the log).
+        if (string.IsNullOrEmpty(ctcpMessage)
+            || !ctcpMessage.StartsWith("GAME ", StringComparison.Ordinal))
         {
-            if (parts.Length == LegacyGameBroadcastFieldCount)
-                return TryParseLegacyGameBroadcast(hostName, ctcpMessage, tunnels, sourceGameId, out game, out rejectReason);
-
-            rejectReason = $"invalid field count ({parts.Length}, expected {GameBroadcastFieldCount})";
+            // Preserve the historical "silent ignore" contract for non-GAME CTCPs.
             return false;
         }
+
+        if (ctcpMessage.Length <= 5)
+        {
+            rejectReason = "invalid GAME CTCP (too short)";
+            return false;
+        }
+
+        try
+        {
+            string[] parts = ctcpMessage[5..].Split(';');
+            if (parts.Length == GameBroadcastFieldCount)
+                return TryParseModernGameBroadcast(hostName, parts, tunnels, sourceGameId, out game, out rejectReason);
+
+            if (parts.Length == LegacyGameBroadcastFieldCount)
+                return TryParseLegacyGameBroadcast(hostName, parts, tunnels, sourceGameId, out game, out rejectReason);
+
+            rejectReason =
+                $"invalid field count ({parts.Length}, expected {GameBroadcastFieldCount} or {LegacyGameBroadcastFieldCount})";
+            return false;
+        }
+        catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
+        {
+            // Field-level Substring/Parse guards above cover the known shapes; this catch is the
+            // last-resort fallback so a malformed broadcast from a hostile/buggy peer degrades to
+            // a log entry instead of an unhandled exception on the IRC read thread.
+            Logger.Log($"CnCNetMultiplayerProtocol.TryParseGameBroadcast caught {ex.GetType().Name}: {ex.Message}");
+            game = null;
+            rejectReason = $"parser error ({ex.GetType().Name})";
+            return false;
+        }
+    }
+
+    private static bool TryParseModernGameBroadcast(
+        string hostName,
+        string[] parts,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
+        string sourceGameId,
+        out CnCNetHostedGameSummary? game,
+        out string? rejectReason)
+    {
+        game = null;
+        rejectReason = null;
 
         string revision = parts[0];
         if (!revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase))
@@ -54,6 +103,63 @@ public static class CnCNetMultiplayerProtocol
             rejectReason = $"unsupported protocol {revision}";
             return false;
         }
+
+        return TryFinishGameBroadcastParse(
+            hostName,
+            parts,
+            tunnels,
+            sourceGameId,
+            revision,
+            skillLevel: Conversions.IntFromString(parts[11], 0),
+            mapHash: parts[12],
+            out game,
+            out rejectReason);
+    }
+
+    /// <summary>Older 11-field GAME layout used by the shipping MG DX launcher (R10).</summary>
+    private static bool TryParseLegacyGameBroadcast(
+        string hostName,
+        string[] parts,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
+        string sourceGameId,
+        out CnCNetHostedGameSummary? game,
+        out string? rejectReason)
+    {
+        game = null;
+        rejectReason = null;
+
+        string revision = parts[0];
+        if (!revision.Equals(LegacyProtocolRevision, StringComparison.OrdinalIgnoreCase))
+        {
+            rejectReason = $"unsupported protocol {revision}";
+            return false;
+        }
+
+        return TryFinishGameBroadcastParse(
+            hostName,
+            parts,
+            tunnels,
+            sourceGameId,
+            revision,
+            skillLevel: 0,
+            mapHash: string.Empty,
+            out game,
+            out rejectReason);
+    }
+
+    private static bool TryFinishGameBroadcastParse(
+        string hostName,
+        string[] parts,
+        IReadOnlyList<CnCNetTunnel>? tunnels,
+        string sourceGameId,
+        string revision,
+        int skillLevel,
+        string mapHash,
+        out CnCNetHostedGameSummary? game,
+        out string? rejectReason)
+    {
+        game = null;
+        rejectReason = null;
 
         string flags = CnCNetGameFlags.Normalize(parts[5]);
         bool locked = Conversions.BooleanFromString(flags.Substring(0, 1), defaultValue: true);
@@ -114,106 +220,8 @@ public static class CnCNetMultiplayerProtocol
             MapName = parts[7],
             GameMode = parts[8],
             LoadedGameId = parts[10],
-            SkillLevel = Conversions.IntFromString(parts[11], 0),
-            MapHash = parts[12],
-            SourceGameId = sourceGameId,
-            LastRefreshUtc = DateTime.UtcNow,
-        };
-
-        return true;
-    }
-
-    /// <summary>R10 legacy 11-field GAME broadcasts.</summary>
-    public static bool TryParseLegacyGameBroadcast(
-        string hostName,
-        string ctcpMessage,
-        IReadOnlyList<CnCNetTunnel>? tunnels,
-        string sourceGameId,
-        out CnCNetHostedGameSummary? game,
-        out string? rejectReason)
-    {
-        game = null;
-        rejectReason = null;
-
-        if (!ctcpMessage.StartsWith("GAME ", StringComparison.Ordinal))
-            return false;
-
-        string[] parts = ctcpMessage[5..].Split(';');
-        if (parts.Length != LegacyGameBroadcastFieldCount)
-        {
-            rejectReason = $"invalid legacy field count ({parts.Length})";
-            return false;
-        }
-
-        string revision = parts[0];
-        if (!revision.Equals(ProgramConstants.CNCNET_PROTOCOL_REVISION, StringComparison.OrdinalIgnoreCase))
-        {
-            rejectReason = $"unsupported protocol {revision}";
-            return false;
-        }
-
-        string flags = CnCNetGameFlags.Normalize(parts[5]);
-
-        bool locked = CnCNetGameFlags.ParseLocked(flags);
-        bool passworded = CnCNetGameFlags.ParsePassworded(flags);
-        bool isClosed = CnCNetGameFlags.ParseClosed(flags);
-        bool isLoadedGame = CnCNetGameFlags.ParseLoadedGame(flags);
-        bool isLadder = CnCNetGameFlags.ParseLadder(flags);
-
-        if (!CnCNetPortValidator.TryParseEndpoint(parts[9], out string tunnelAddress, out ushort tunnelPort))
-        {
-            rejectReason = "invalid tunnel address";
-            return false;
-        }
-
-        if (tunnels != null)
-        {
-            if (tunnels.Count == 0)
-            {
-                rejectReason = "no available tunnels";
-                return false;
-            }
-
-            bool tunnelOk = tunnels.Any(t =>
-                t.Address.Equals(tunnelAddress, StringComparison.OrdinalIgnoreCase) && t.Port == tunnelPort);
-            if (!tunnelOk)
-            {
-                rejectReason = $"tunnel {tunnelAddress}:{tunnelPort} unavailable";
-                return false;
-            }
-        }
-
-        string[] players = parts[6].Split(',', StringSplitOptions.RemoveEmptyEntries);
-        string localGameId = ClientConfiguration.Instance.LocalGame;
-        bool incompatible = !string.IsNullOrWhiteSpace(sourceGameId)
-            && sourceGameId.Equals(localGameId, StringComparison.OrdinalIgnoreCase)
-            && !parts[1].Equals(ProgramConstants.GAME_VERSION, StringComparison.OrdinalIgnoreCase);
-
-        bool listingLocked = locked || (isLoadedGame && !players.Contains(ProgramConstants.PLAYERNAME));
-
-        game = new CnCNetHostedGameSummary
-        {
-            HostName = hostName,
-            RoomName = parts[4],
-            ChannelName = parts[3],
-            Revision = revision,
-            MaxPlayers = Conversions.IntFromString(parts[2], 0),
-            PlayerCount = players.Length,
-            Players = players,
-            IsClosed = isClosed,
-            Locked = listingLocked,
-            RequiresPassword = passworded,
-            IsLoadedGame = isLoadedGame,
-            IsLadder = isLadder,
-            GameVersion = parts[1],
-            Incompatible = incompatible,
-            TunnelAddress = tunnelAddress,
-            TunnelPort = tunnelPort,
-            MapName = parts[7],
-            GameMode = parts[8],
-            LoadedGameId = parts[10],
-            SkillLevel = 0,
-            MapHash = string.Empty,
+            SkillLevel = skillLevel,
+            MapHash = mapHash,
             SourceGameId = sourceGameId,
             LastRefreshUtc = DateTime.UtcNow,
         };
@@ -496,10 +504,15 @@ public static class CnCNetMultiplayerProtocol
         IReadOnlyList<string> playerNames,
         string mapName,
         string gameModeName,
-        string mapSha1)
+        string mapSha1,
+        bool useLegacyElevenField = false)
     {
+        string revision = useLegacyElevenField
+            ? LegacyProtocolRevision
+            : ProgramConstants.CNCNET_PROTOCOL_REVISION;
+
         var sb = new System.Text.StringBuilder("GAME ");
-        sb.Append(ProgramConstants.CNCNET_PROTOCOL_REVISION);
+        sb.Append(revision);
         sb.Append(';');
         sb.Append(ProgramConstants.GAME_VERSION);
         sb.Append(';');
@@ -521,11 +534,17 @@ public static class CnCNetMultiplayerProtocol
         sb.Append(':');
         sb.Append(room.Tunnel.Port);
         sb.Append(';');
-        sb.Append('0');
-        sb.Append(';');
-        sb.Append(room.SkillLevel);
-        sb.Append(';');
-        sb.Append(mapSha1);
+        sb.Append('0'); // loadedGameId
+
+        // Stock DX R13 appends skill + map hash; legacy R10/11-field stops after loadedGameId.
+        if (!useLegacyElevenField)
+        {
+            sb.Append(';');
+            sb.Append(room.SkillLevel);
+            sb.Append(';');
+            sb.Append(mapSha1);
+        }
+
         return sb.ToString();
     }
 

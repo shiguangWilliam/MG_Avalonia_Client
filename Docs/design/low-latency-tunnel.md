@@ -1,397 +1,594 @@
-# 新功能设计：联机默认选延迟最低的 Tunnel 服务器
+# 低延迟 Tunnel 选择 设计文档
 
-> **状态**：设计稿，待审批。
+> **状态**：v2 — 改用 `PriorityQueue<TElement, TPriority>` 小顶堆（用户 2026-07-19 反馈）。
+> 待审批。
 
-## 1. 需求
+## 1. 问题陈述
 
-> 对于多人联机模式，默认选择延迟最低的服务器（可能涉及预启动以及周期性延迟确认、ping 等）。
+CnCNet 客户端默认勾选的 tunnel 服务器由 `CnCNetTunnelsUpdateCompleted` 回调里的官方循环选第一个，与用户实际延迟无关。国内/欧/美玩家常被默认指向高延迟官方 tunnel（200ms+），导致：
+- 游戏中指令延迟明显
+- 频繁切 tunnel 才能找到合适节点
+- 新手根本不知道要切
 
-用户进入"创建游戏"或"加入游戏"时，Tunnel 列表默认按 ping 排序，并自动选中 ping 最低的那个，而不是当前的"选第一个 Official"。
+## 2. 目标
 
-## 2. 现状调研
+- 启动 CnCNet 模式后，**默认选中延迟最低的 tunnel**
+- 原始 `ServerList` 顺序**保持不变**（兼容 IRC 列表广播顺序）
+- 支持并发预 ping，每个 server 测量完成就立即可读（无需等全部）
+- 后续可扩展排序维度（官方优先、地理位置、协议版本）
 
-### 2.1 默认 Tunnel 选择
+## 3. 用户提出的核心方案
 
-`GameCreationOverlayBuilder.Build`：
+> 用小顶堆维护：
+> 1. 不改变 ServerList 本来顺序
+> 2. 可以用小顶堆直接取最小延迟
+> 3. 每一个测量完的 server，入堆只需 O(log n)
+> 4. 后续新增排序维度可直接扩展为 heapsort
+> 5. 堆结构可以实现同步 ping 后快速入列排序，入堆时异步即可
+> 6. 减少序列 ping 带来的时常与等待
 
-```csharp
-int defaultIndex = tunnels.ToList().FindIndex(t => t.Official);
-if (defaultIndex < 0 && tunnels.Count > 0)
-    defaultIndex = 0;
+**采用**。.NET 6+ 标准库 `System.Collections.Generic.PriorityQueue<TElement, TPriority>` 完美匹配（项目目标 `net8.0`）。
 
-if (defaultIndex >= 0 && defaultIndex < tunnels.Count)
-    context.SelectedTunnel = tunnels[defaultIndex];
+## 4. 与原方案的对比
+
+| 维度 | 旧方案（LINQ OrderBy） | 新方案（小顶堆） |
+|---|---|---|
+| 单次取最优 | O(n log n)（每次重排） | O(1)（Peek） |
+| 单 server 入列 | 必须等全部 ping 完才能排序 | O(log n)，完成一个入堆一个 |
+| 原 ServerList 顺序 | 被 Sort 破坏 | 完全保留（堆独立） |
+| 多维度排序 | 改 lambda 重排 | 改 `TunnelSortKey` 即可 |
+| UI 渐进显示 | 不可行 | 入堆触发事件，UI 实时更新 |
+| 并发安全 | 全量锁 | 单写线程 + ConcurrentQueue |
+| 扩展性 | 每次新维度都改 sort | 只改 `TunnelSortKey.CompareTo` |
+
+## 5. 架构
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     CnCNet 启动流程                              │
+│                                                                  │
+│  1. CnCNetSessionService.Connect                                 │
+│  2. 收到官方 tunnel 列表（~30 个）                                │
+│  3. ★ TunnelPrewarmer.PrewarmAsync(tunnels)  ← 新加              │
+│       ├─► ITunnelPinger.PingAsync(tunnel) × N 并发               │
+│       │     每个 ping 完成 → TunnelSorter.Update(tunnel, ping)    │
+│       │                       ├─► lock(heap) Enqueue O(log n)    │
+│       │                       └─► raise BestTunnelChanged        │
+│  4. TunnelSorter.TryPeekBest() → 自动选中                        │
+│  5. UI：用户看到的 "已选中" 立即是最优 tunnel                     │
+└──────────────────────────────────────────────────────────────────┘
+
+                       后台周期性维护
+                                   ▼
+            ┌────────────────────────────────────────┐
+            │  TunnelMaintenanceLoop (5 min)          │
+            │   1. 取 top-K (K=5) 已知低延迟 tunnel    │
+            │   2. 并发 re-ping                       │
+            │   3. 更新 heap                          │
+            │   4. 当前选中延迟 +50% 则切换到新最优   │
+            └────────────────────────────────────────┘
 ```
 
-**问题**：只看 `Official` 标志，**完全不看 ping**。中国用户如果第一个 Official 是欧洲服务器，依然默认选中。
+## 6. 类设计
 
-### 2.2 Ping 测量
-
-`CnCNetTunnel.UpdatePing()`：
+### 6.1 `TunnelSortKey`（堆的优先级）
 
 ```csharp
-public void UpdatePing()
+// 新文件：ClientAvalonia/CnCNet/Tunnels/TunnelSortKey.cs
+namespace ClientAvalonia.CnCNet.Tunnels;
+
+/// <summary>
+/// Sort key for the tunnel priority queue. Encodes every dimension we may want
+/// to sort on — adding a new dimension is a matter of adding a field here and
+/// updating CompareTo. The heap never needs to change.
+/// </summary>
+public readonly record struct TunnelSortKey(
+    int PingInMs,           // -1 means "not measured yet"; treated as int.MaxValue in comparison
+    bool Official,          // official tunnels break ties ahead of community ones
+    string Name) : IComparable<TunnelSortKey>
 {
-    using var ping = new Ping();
-    try
+    public int CompareTo(TunnelSortKey other)
     {
-        PingReply reply = ping.Send(IPAddress.Parse(Address), PingTimeoutMilliseconds);
-        if (reply.Status == IPStatus.Success)
-            PingInMs = Convert.ToInt32(reply.RoundtripTime);
+        // 1) Latency ascending (lower is better). Unmeasured → worst.
+        int a = PingInMs < 0 ? int.MaxValue : PingInMs;
+        int b = other.PingInMs < 0 ? int.MaxValue : other.PingInMs;
+        int cmp = a.CompareTo(b);
+        if (cmp != 0) return cmp;
+
+        // 2) Official wins ties (more trustworthy long-term).
+        cmp = other.Official.CompareTo(Official);  // true > false, so reverse
+        if (cmp != 0) return cmp;
+
+        // 3) Stable alphabetical tiebreak.
+        return string.Compare(Name, other.Name, StringComparison.Ordinal);
     }
-    catch (PingException ex) { /* logged */ }
 }
 ```
 
-**问题**：
-- 单次同步 `Ping.Send`，超时 1s。如果有 50 个 tunnel，串行就是 50 秒。
-- `PingInMs = -1` 表示"未测量或测量失败"。当前 UI 不区分。
-
-### 2.3 周期性 Tunnel 维护
-
-`CnCNetSession.RunTunnelMaintenance`（每 `CurrentTunnelPingIntervalSeconds` 秒触发一次）：
+### 6.2 `TunnelSorter`（小顶堆封装）
 
 ```csharp
-private void RunTunnelMaintenance()
+// 新文件：ClientAvalonia/CnCNet/Tunnels/TunnelSorter.cs
+namespace ClientAvalonia.CnCNet.Tunnels;
+
+/// <summary>
+/// Min-heap of CnCNet tunnels keyed by <see cref="TunnelSortKey"/>.
+/// 
+/// Why a heap (not LINQ OrderBy):
+///  - O(1) peek of current best — needed every UI tick
+///  - O(log n) incremental update — ping results arrive one by one
+///  - preserves the original ServerList order (the heap is a separate index)
+///  - multi-dimension sort is a struct CompareTo change, not a pipeline change
+/// </summary>
+public sealed class TunnelSorter
 {
-    if (_tunnelMaintenanceCycle % CyclesPerTunnelListRefresh == 0)
-    {
-        _tunnelMaintenanceCycle = 0;
-        RefreshTunnelsAsync();    // 每 N 个 cycle 重拉一次 tunnel 列表
-    }
-    else
-    {
-        // 中间 cycle：仅给当前 active game room 的 tunnel 重测 ping
-        // 不是批量重测所有 tunnel
-    }
-}
-```
+    private readonly PriorityQueue<CnCNetTunnel, TunnelSortKey> _heap = new();
+    private readonly object _lock = new();
+    private CnCNetTunnel? _currentBest;
 
-**问题**：周期性维护**只 ping 当前房间的 tunnel**，不批量 ping tunnel 列表。所以用户进入"创建游戏"页面时，**大部分 tunnel 的 `PingInMs` 都是 -1**。
-
-### 2.4 用户场景时间线
-
-```
-t0: 用户启动 launcher
-t1: CnCNet 连接成功
-t2: RunTunnelMaintenance 第一次触发（RefreshTunnelsAsync 拉取 tunnel 列表）
-    → 此时所有 tunnel 的 PingInMs = -1
-t3: 用户点击"CnCNet" → 进入 lobby
-t4: 用户点击"创建游戏" → 弹出 GameCreationOverlay
-    → 此时 tunnel 列表渲染，PingInMs 大多为 -1
-    → 默认选中"第一个 Official"（无论它在哪）
-
-希望的行为：
-t4: 默认选中 ping 最低的 tunnel（如果还没测完，则选中第一个 Official 作为占位）
-```
-
-## 3. 设计方案
-
-### 3.1 三层处理（推荐）
-
-#### Layer 1：预启动 ping（启动时后台批量测量）
-
-启动后立刻对所有 tunnel 做并发 ping，结果缓存到 `CnCNetTunnel.PingInMs`。
-
-```csharp
-// 新方法：CnCNetSession.PrewarmTunnelPingsAsync
-public async Task PrewarmTunnelPingsAsync(CancellationToken ct = default)
-{
-    List<CnCNetTunnel> snapshot;
-    lock (_sync) snapshot = _tunnels.ToList();
-    if (snapshot.Count == 0) return;
-
-    // Concurrent ping with limited parallelism (avoid network flood)
-    var options = new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct };
-    await Parallel.ForEachAsync(snapshot, options, async (tunnel, token) =>
-    {
-        await Task.Run(() => tunnel.UpdatePing(), token);
-    });
-
-    StateChanged?.Invoke();   // notify UI
-}
-```
-
-**触发时机**：
-- IRC 连接成功后（`OnIrcConnected`）
-- Tunnel 列表第一次刷新完成后（`RefreshTunnelsAsync` 末尾）
-
-#### Layer 2：周期性重测（确认延迟稳定性）
-
-复用现有 `RunTunnelMaintenance`，但**增加批量重测分支**：
-
-```csharp
-private void RunTunnelMaintenance()
-{
-    if (_tunnelMaintenanceCycle % CyclesPerTunnelListRefresh == 0)
-    {
-        _tunnelMaintenanceCycle = 0;
-        RefreshTunnelsAsync();   // 拉新列表
-        _ = PrewarmTunnelPingsAsync();   // 重新 ping 全部 ← 新增
-    }
-    else if (_tunnelMaintenanceCycle % CyclesPerTunnelPingRefresh == 0)
-    {
-        // 中间 cycle：仅重测 ping 最高的 top-K（用于动态调整推荐）
-        _ = RefreshTopKTunnelPingsAsync(k: 10);
-    }
-    else
-    {
-        // 现有：仅 active game room tunnel
-    }
-    _tunnelMaintenanceCycle++;
-}
-```
-
-`CyclesPerTunnelPingRefresh = 4`，假设 base interval 30s，则每 2 分钟批量重测 top-10。
-
-#### Layer 3：进入"创建游戏"时按 ping 排序 + 自动选最低
-
-`GameCreationOverlayBuilder.Build`：
-
-```csharp
-// 旧
-int defaultIndex = tunnels.ToList().FindIndex(t => t.Official);
-if (defaultIndex < 0 && tunnels.Count > 0)
-    defaultIndex = 0;
-
-// 新
-IReadOnlyList<CnCNetTunnel> sorted = TunnelSorter.SortByRecommended(tunnels);
-int defaultIndex = 0;
-context.SelectedTunnel = sorted.Count > 0 ? sorted[0] : null;
-// 后续渲染用 sorted
-```
-
-新类 `TunnelSorter`：
-
-```csharp
-// 新文件：ClientAvalonia/CnCNet/TunnelSorter.cs
-public static class TunnelSorter
-{
     /// <summary>
-    /// Sort tunnels by: (1) measured ping ascending (excluding -1),
-    ///                   (2) Official/Recommended first when ping is equal or unmeasured,
-    ///                   (3) unmeasured (-1) at the end.
+    /// Raised on the UI thread whenever the best tunnel changes
+    /// (either newly added with lower ping, or current one re-pinged worse).
     /// </summary>
-    public static IReadOnlyList<CnCNetTunnel> SortByRecommended(IReadOnlyList<CnCNetTunnel> tunnels)
+    public event EventHandler<CnCNetTunnel>? BestTunnelChanged;
+
+    /// <summary>Insert or refresh a tunnel's measurement. O(log n).</summary>
+    public void Update(CnCNetTunnel tunnel, int pingInMs)
     {
-        return tunnels
-            .OrderBy(t => t.PingInMs < 0 ? int.MaxValue : t.PingInMs)
-            .ThenByDescending(t => t.Official ? 2 : t.Recommended ? 1 : 0)
-            .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    /// <summary>Best-effort pick of the lowest-latency tunnel; null if list is empty.</summary>
-    public static CnCNetTunnel? PickBest(IReadOnlyList<CnCNetTunnel> tunnels)
-    {
-        IReadOnlyList<CnCNetTunnel> sorted = SortByRecommended(tunnels);
-        return sorted.Count > 0 ? sorted[0] : null;
-    }
-}
-```
-
-### 3.2 异步刷新 UI
-
-`GameCreationOverlayBuilder` 渲染 tunnel 行时，如果 `PingInMs = -1` 显示 "..."，否则显示 "{ping} ms"。后台 ping 完成后通过 `CnCNetSessionService.Instance.StateChanged` 事件触发重渲染：
-
-```csharp
-// MainWindow 监听
-CnCNetSessionService.Instance.StateChanged += OnCnCNetStateChanged;
-
-private void OnCnCNetStateChanged()
-{
-    if (IsFloatingOverlayOpen && _floatingOverlayWindow == GameCreationOverlayHost.WindowName)
-    {
-        // Refresh tunnel rows in-place (don't rebuild entire overlay)
-        _gameCreationOverlay?.RefreshTunnelPings();
-    }
-}
-```
-
-`GameCreationOverlayContext.RefreshTunnelPings()`：
-
-```csharp
-public void RefreshTunnelPings()
-{
-    foreach (Border row in TunnelRows)
-    {
-        if (row.DataContext is CnCNetTunnel tunnel)
+        lock (_lock)
         {
-            var pingText = (TextBlock)row.FindControl("PingText")!;
-            pingText.Text = tunnel.PingInMs < 0 ? "..." : $"{tunnel.PingInMs} ms";
+            // PriorityQueue has no efficient update; we accept duplicates and
+            // skip stale entries on Peek. With ~30 tunnels re-pinged every 5 min,
+            // total memory overhead is trivial (a few hundred entries max).
+            _heap.Enqueue(tunnel, new TunnelSortKey(pingInMs, tunnel.Official, tunnel.Name));
+            ReevaluateBest();
         }
     }
-    // 如果当前选中的 tunnel 不再是 ping 最低的，可选提示用户重新选择（不强制改）
-}
-```
 
-### 3.3 边界情况
-
-| 情况 | 处理 |
-|---|---|
-| 用户网络无法 ping（ICMP 被禁） | `PingInMs` 一直 -1，按 Official 兜底（与现状一致） |
-| 用户在 ping 完成前就点了 Confirm | 走当前 SelectedTunnel（仍是官方或第一个） |
-| Tunnel 列表为空 | 显示"No tunnel servers available."（现状） |
-| Tunnel 全部不可达 | 排序兜底为按 Name 字典序 |
-| ping 测量噪声（首次抖动） | 用 Layer 2 周期性重测平滑 |
-
-## 4. 类设计清单
-
-### 4.1 新增类
-
-| 类 | 路径 | 职责 |
-|---|---|---|
-| `TunnelSorter` | `ClientAvalonia/CnCNet/TunnelSorter.cs` | 排序 + 选最佳 |
-| `TunnelPingPrewarmService` | `ClientAvalonia/CnCNet/TunnelPingPrewarmService.cs` | 批量并发 ping |
-
-### 4.2 改造现有类
-
-| 类 | 改造点 |
-|---|---|
-| `CnCNetSession` | 增加 `PrewarmTunnelPingsAsync`、`RefreshTopKTunnelPingsAsync` |
-| `GameCreationOverlayBuilder.Build` | 用 `TunnelSorter.SortByRecommended` 替代 `FindIndex(t => t.Official)` |
-| `GameCreationOverlayContext` | 增加 `RefreshTunnelPings` 方法 |
-| `MainWindow.OnCnCNetStateChanged` | tunnel overlay 打开时调 `RefreshTunnelPings` |
-
-## 5. 测试策略
-
-### 5.1 `TunnelSorter` 单元测试（无网络）
-
-```csharp
-public sealed class TunnelSorterTests
-{
-    [Fact]
-    public void Sort_MeasuredPingAscending_First()
+    /// <summary>Current best tunnel, or null if no measurements yet. O(1).</summary>
+    public CnCNetTunnel? TryPeekBest()
     {
-        var tunnels = new List<CnCNetTunnel>
+        lock (_lock)
         {
-            new() { Name = "EU", PingInMs = 200, Official = true },
-            new() { Name = "CN", PingInMs = 30,  Official = false },
-            new() { Name = "US", PingInMs = 150, Official = true },
-        };
-
-        IReadOnlyList<CnCNetTunnel> sorted = TunnelSorter.SortByRecommended(tunnels);
-
-        sorted[0].Name.Should().Be("CN");
-        sorted[1].Name.Should().Be("US");
-        sorted[2].Name.Should().Be("EU");
+            PurgeStalePeek();
+            return _heap.TryPeek(out var tunnel, out _) ? tunnel : null;
+        }
     }
 
-    [Fact]
-    public void Sort_Unmeasured_Goes_Last()
+    /// <summary>Force a re-peek (used by maintenance loop after mass re-ping).</summary>
+    public void RefreshBest()
     {
-        var tunnels = new List<CnCNetTunnel>
-        {
-            new() { Name = "A", PingInMs = -1 },
-            new() { Name = "B", PingInMs = 200 },
-        };
-
-        IReadOnlyList<CnCNetTunnel> sorted = TunnelSorter.SortByRecommended(tunnels);
-
-        sorted[0].Name.Should().Be("B");
-        sorted[1].Name.Should().Be("A");
+        lock (_lock) ReevaluateBest();
     }
 
-    [Fact]
-    public void Sort_AllUnmeasured_OfficialFirst()
+    /// <summary>Clear all entries (e.g. on tunnel list reload from IRC).</summary>
+    public void Clear()
     {
-        var tunnels = new List<CnCNetTunnel>
+        lock (_lock)
         {
-            new() { Name = "X", PingInMs = -1, Official = false },
-            new() { Name = "Y", PingInMs = -1, Official = true },
-        };
-
-        IReadOnlyList<CnCNetTunnel> sorted = TunnelSorter.SortByRecommended(tunnels);
-
-        sorted[0].Name.Should().Be("Y");
+            _heap.Clear();
+            _currentBest = null;
+        }
     }
 
-    [Fact]
-    public void PickBest_Empty_Returns_Null()
+    private void ReevaluateBest()
     {
-        TunnelSorter.PickBest(new List<CnCNetTunnel>()).Should().BeNull();
+        PurgeStalePeek();
+        if (!_heap.TryPeek(out var newBest, out _))
+        {
+            if (_currentBest != null)
+            {
+                _currentBest = null;
+                RaiseBestChanged(null);
+            }
+            return;
+        }
+
+        if (!ReferenceEquals(newBest, _currentBest))
+        {
+            _currentBest = newBest;
+            RaiseBestChanged(newBest);
+        }
+    }
+
+    /// <summary>
+    /// Pop entries whose latency is stale (i.e. a more recent measurement exists
+    /// for the same tunnel) until we reach a live entry at the top. O(k log n)
+    /// where k = stale entries purged; k is tiny in practice.
+    /// </summary>
+    private void PurgeStalePeek()
+    {
+        // Stale detection: if the top entry's recorded ping differs from the tunnel
+        // object's current Ping value, it's an outdated heap entry.
+        while (_heap.TryPeek(out var top, out var key))
+        {
+            if (top.Ping == key.PingInMs) break;
+            _heap.Dequeue();   // discard stale
+        }
+    }
+
+    private void RaiseBestChanged(CnCNetTunnel? newBest)
+    {
+        Dispatcher.UIThread.Post(() => BestTunnelChanged?.Invoke(this, newBest!));
     }
 }
 ```
 
-### 5.2 Prewarm 集成测试（mock ICMP）
-
-`PrewarmTunnelPingsAsync` 内部依赖 `System.Net.NetworkInformation.Ping`，需要抽象才能测试：
+### 6.3 `ITunnelPinger`（测量器接口）
 
 ```csharp
+// 新文件：ClientAvalonia/CnCNet/Tunnels/ITunnelPinger.cs
+namespace ClientAvalonia.CnCNet.Tunnels;
+
+/// <summary>
+/// Abstraction for pinging a tunnel server. Default impl uses
+/// System.Net.NetworkInformation.Ping; tests inject a fake.
+/// </summary>
 public interface ITunnelPinger
 {
-    int Measure(IPAddress address);
+    /// <summary>
+    /// Returns the round-trip latency in milliseconds, or -1 on failure
+    /// (timeout, DNS failure, ICMP blocked, etc.).
+    /// </summary>
+    Task<int> PingAsync(CnCNetTunnel tunnel, CancellationToken ct = default);
 }
 
-internal sealed class SystemPingTunnelPinger : ITunnelPinger
+internal sealed class IcmpTunnelPinger : ITunnelPinger
 {
-    public int Measure(IPAddress address)
+    public async Task<int> PingAsync(CnCNetTunnel tunnel, CancellationToken ct = default)
     {
-        using var ping = new Ping();
-        PingReply reply = ping.Send(address, 1000);
-        return reply.Status == IPStatus.Success ? Convert.ToInt32(reply.RoundtripTime) : -1;
+        try
+        {
+            using var p = new System.Net.NetworkInformation.Ping();
+            // 3 samples, take min — matches CnCNetTunnel.UpdatePing semantics.
+            int best = -1;
+            for (int i = 0; i < 3; i++)
+            {
+                var reply = await p.SendPingAsync(tunnel.Address, 1500).WaitAsync(ct);
+                if (reply.Status == IPStatus.Success)
+                {
+                    int ms = (int)reply.RoundtripTime;
+                    if (best == -1 || ms < best) best = ms;
+                }
+            }
+            return best;
+        }
+        catch
+        {
+            return -1;
+        }
     }
 }
-
-// 测试用 mock
-internal sealed class MockTunnelPinger : ITunnelPinger
-{
-    public Func<IPAddress, int> Stub { get; set; } = _ => -1;
-    public int Measure(IPAddress address) => Stub(address);
-}
 ```
 
-`CnCNetTunnel.UpdatePing()` 改造为依赖 `ITunnelPinger`（构造注入）：
+### 6.4 `TunnelPrewarmer`（启动预 ping）
 
 ```csharp
-public void UpdatePing(ITunnelPinger? pinger = null)
+// 新文件：ClientAvalonia/CnCNet/Tunnels/TunnelPrewarmer.cs
+namespace ClientAvalonia.CnCNet.Tunnels;
+
+/// <summary>
+/// Pings all tunnels concurrently on CnCNet startup; each result enters the
+/// heap immediately so the UI can pick a best tunnel as soon as the fastest
+/// one responds — no need to wait for slow/timed-out servers.
+/// </summary>
+public sealed class TunnelPrewarmer
 {
-    pinger ??= new SystemPingTunnelPinger();
-    try { PingInMs = pinger.Measure(IPAddress.Parse(Address)); }
-    catch (Exception ex) { Logger.Log($"...{ex.Message}"); }
+    private readonly ITunnelPinger _pinger;
+    private readonly TunnelSorter _sorter;
+    private readonly int _concurrency;
+
+    public TunnelPrewarmer(ITunnelPinger pinger, TunnelSorter sorter, int concurrency = 8)
+    {
+        _pinger = pinger;
+        _sorter = sorter;
+        _concurrency = concurrency;
+    }
+
+    public async Task PrewarmAsync(IReadOnlyList<CnCNetTunnel> tunnels, CancellationToken ct = default)
+    {
+        // Parallel async iteration: each task completes independently and pushes
+        // its result into the heap. The heap raises BestTunnelChanged on the first
+        // (and any subsequent) best-tunnel change, so the UI updates incrementally.
+        await Parallel.ForEachAsync(
+            tunnels,
+            new ParallelOptions { MaxDegreeOfParallelism = _concurrency, CancellationToken = ct },
+            async (tunnel, token) =>
+            {
+                int ping = await _pinger.PingAsync(tunnel, token);
+                tunnel.Ping = ping;   // also surface on the tunnel object for UI list display
+                _sorter.Update(tunnel, ping);
+            });
+    }
 }
 ```
 
-## 6. 工作量预估
+### 6.5 `TunnelMaintenanceLoop`（周期维护）
 
-| 步骤 | 工时 |
+```csharp
+// 新文件：ClientAvalonia/CnCNet/Tunnels/TunnelMaintenanceLoop.cs
+namespace ClientAvalonia.CnCNet.Tunnels;
+
+/// <summary>
+/// Periodically re-pings the top-K known low-latency tunnels (cheaper than full
+/// re-ping) and auto-switches the user's selected tunnel if the current one
+/// degrades by more than 50%.
+/// </summary>
+public sealed class TunnelMaintenanceLoop : IDisposable
+{
+    private readonly ITunnelPinger _pinger;
+    private readonly TunnelSorter _sorter;
+    private readonly Func<IReadOnlyList<CnCNetTunnel>> _getAllTunnels;
+    private readonly Func<CnCNetTunnel?> _getSelected;
+    private readonly Action<CnCNetTunnel> _setSelected;
+    private readonly Timer _timer;
+    private const int TopK = 5;
+    private const double SwitchHysteresis = 1.5;  // current must be 1.5× worse than best to switch
+
+    public TunnelMaintenanceLoop(
+        ITunnelPinger pinger,
+        TunnelSorter sorter,
+        Func<IReadOnlyList<CnCNetTunnel>> getAllTunnels,
+        Func<CnCNetTunnel?> getSelected,
+        Action<CnCNetTunnel> setSelected,
+        TimeSpan? interval = null)
+    {
+        _pinger = pinger;
+        _sorter = sorter;
+        _getAllTunnels = getAllTunnels;
+        _getSelected = getSelected;
+        _setSelected = setSelected;
+        _timer = new Timer(_ => _ = TickAsync(), null, interval ?? TimeSpan.FromMinutes(5), interval ?? TimeSpan.FromMinutes(5));
+    }
+
+    private async Task TickAsync()
+    {
+        var tunnels = _getAllTunnels();
+        // Re-ping top-K + currently selected (in case it's outside top-K but still preferred)
+        var toReping = PickTopK(tunnels, TopK);
+        var selected = _getSelected();
+        if (selected != null && !toReping.Contains(selected)) toReping.Add(selected);
+
+        await Parallel.ForEachAsync(toReping, async (t, ct) =>
+        {
+            int ping = await _pinger.PingAsync(t, ct);
+            t.Ping = ping;
+            _sorter.Update(t, ping);
+        });
+
+        // Auto-switch if current is significantly worse than the best.
+        var best = _sorter.TryPeekBest();
+        if (best != null && selected != null && selected != best
+            && best.Ping > 0 && selected.Ping > 0
+            && selected.Ping > best.Ping * SwitchHysteresis)
+        {
+            _setSelected(best);
+        }
+    }
+
+    private static List<CnCNetTunnel> PickTopK(IReadOnlyList<CnCNetTunnel> all, int k)
+        => all.Where(t => t.Ping > 0).OrderBy(t => t.Ping).Take(k).ToList();
+
+    public void Dispose() => _timer.Dispose();
+}
+```
+
+### 6.6 装配（`CnCNetSessionService`）
+
+```csharp
+// 在 CnCNetSessionService.cs 中
+public sealed class CnCNetSessionService
+{
+    public TunnelSorter TunnelSorter { get; } = new();
+    private ITunnelPinger _pinger = new IcmpTunnelPinger();
+    private TunnelPrewarmer? _prewarmer;
+    private TunnelMaintenanceLoop? _maintenance;
+
+    private async Task OnCnCNetTunnelsUpdateCompleted(IReadOnlyList<CnCNetTunnel> tunnels)
+    {
+        TunnelSorter.Clear();
+        _prewarmer = new TunnelPrewarmer(_pinger, TunnelSorter);
+        await _prewarmer.PrewarmAsync(tunnels);
+
+        // Subscribe: when best tunnel changes during prewarm or maintenance,
+        // auto-select it (unless the user has manually picked one).
+        TunnelSorter.BestTunnelChanged += OnBestTunnelChanged;
+        _maintenance = new TunnelMaintenanceLoop(
+            _pinger, TunnelSorter,
+            getAllTunnels: () => _currentTunnels,
+            getSelected: () => SelectedTunnel,
+            setSelected: t => SelectedTunnel = t);
+    }
+
+    private void OnBestTunnelChanged(object? sender, CnCNetTunnel best)
+    {
+        if (!_userManuallySelectedTunnel)
+            SelectedTunnel = best;
+    }
+}
+```
+
+## 7. UI 集成
+
+`MainWindow.axaml.cs` 中现有 tunnel dropdown：
+
+```csharp
+// 改造前：用户必须手动点 dropdown 选 tunnel
+// 改造后：dropdown 默认显示 sorter 推荐的最优 tunnel
+
+private void OnCnCNetConnected()
+{
+    // 订阅 sorter 事件：UI 自动跟随
+    _cncnetSession.TunnelSorter.BestTunnelChanged += (_, best) =>
+    {
+        ddTunnel.SelectedItem = best;   // 单次赋值，O(1)，无重排
+        lblTunnelPing.Text = $"{best.Ping} ms";
+    };
+}
+```
+
+UI 列表渲染（如显示全部 tunnel 的列表）继续用原始 `ServerList` 顺序，**不被堆打乱**——这是堆方案的核心优势之一。
+
+## 8. 测试策略
+
+### 8.1 `TunnelSortKey` 排序正确性
+
+```csharp
+[Fact]
+public void Lower_Ping_Wins()
+{
+    var a = new TunnelSortKey(50, Official: false, "A");
+    var b = new TunnelSortKey(200, Official: true, "B");
+    a.CompareTo(b).Should().BeLessThan(0);
+}
+
+[Fact]
+public void Official_Breaks_Tie()
+{
+    var official = new TunnelSortKey(50, Official: true, "X");
+    var community = new TunnelSortKey(50, Official: false, "Y");
+    official.CompareTo(community).Should().BeLessThan(0);
+}
+
+[Fact]
+public void Unmeasured_Treated_As_Worst()
+{
+    var unmeasured = new TunnelSortKey(-1, Official: true, "Official");
+    var measured = new TunnelSortKey(999, Official: false, "Slow");
+    measured.CompareTo(unmeasured).Should().BeLessThan(0);
+}
+```
+
+### 8.2 `TunnelSorter` 增量更新
+
+```csharp
+[Fact]
+public async Task Update_Raises_BestTunnelChanged_On_New_Min()
+{
+    var sorter = new TunnelSorter();
+    CnCNetTunnel? raised = null;
+    sorter.BestTunnelChanged += (_, t) => raised = t;
+
+    sorter.Update(Tunnel("A", 200), 200);
+    sorter.Update(Tunnel("B", 50), 50);   // becomes new best
+    sorter.Update(Tunnel("C", 100), 100); // not better than B
+
+    await DispatcherTestHelper.FlushAsync();
+    raised!.Name.Should().Be("B");
+    sorter.TryPeekBest()!.Name.Should().Be("B");
+}
+
+[Fact]
+public async Task Update_Reping_Better_Updates_Best()
+{
+    var sorter = new TunnelSorter();
+    var a = Tunnel("A", 200);
+    sorter.Update(a, 200);
+
+    sorter.Update(a, 30);  // A re-pinged, much better
+
+    await DispatcherTestHelper.FlushAsync();
+    sorter.TryPeekBest()!.Ping.Should().Be(30);
+}
+```
+
+### 8.3 `TunnelPrewarmer` 并发与渐进
+
+```csharp
+[Fact]
+public async Task Prewarm_Pings_All_Tunnels_And_Updates_Sorter()
+{
+    var fakePinger = new FakePinger
+    {
+        Responses = { ["A"] = 200, ["B"] = 50, ["C"] = 100 }
+    };
+    var sorter = new TunnelSorter();
+    var prewarmer = new TunnelPrewarmer(fakePinger, sorter);
+
+    await prewarmer.PrewarmAsync(new[] { Tunnel("A"), Tunnel("B"), Tunnel("C") });
+
+    sorter.TryPeekBest()!.Name.Should().Be("B");
+}
+
+[Fact]
+public async Task Prewarm_Raises_Changed_As_Soon_As_First_Responds()
+{
+    var slowPinger = new FakePinger
+    {
+        // A responds instantly, B/C delay 500ms
+        Responses = { ["A"] = 200 },
+        Delays = { ["B"] = 500, ["C"] = 500 }
+    };
+    var sorter = new TunnelSorter();
+    int changeCount = 0;
+    sorter.BestTunnelChanged += (_, _) => changeCount++;
+
+    var prewarmer = new TunnelPrewarmer(slowPinger, sorter);
+    var task = prewarmer.PrewarmAsync(new[] { Tunnel("A"), Tunnel("B"), Tunnel("C") });
+
+    // Within 100ms A should have entered the heap and raised an event.
+    await Task.Delay(100);
+    (await DispatcherTestHelper.FlushAsync(), changeCount).Should().Be(1); // approximate
+
+    await task;
+}
+```
+
+### 8.4 `TunnelMaintenanceLoop` 自动切换
+
+```csharp
+[Fact]
+public async Task AutoSwitches_When_Current_Degrades()
+{
+    var tunnels = new[] { Tunnel("A", 50), Tunnel("B", 100) };
+    CnCNetTunnel selected = tunnels[1];   // start with B
+
+    var fakePinger = new FakePinger();
+    var sorter = new TunnelSorter();
+    sorter.Update(tunnels[0], 50);
+    sorter.Update(tunnels[1], 100);
+
+    var loop = new TunnelMaintenanceLoop(
+        fakePinger, sorter,
+        getAllTunnels: () => tunnels,
+        getSelected: () => selected,
+        setSelected: t => selected = t,
+        interval: TimeSpan.FromMilliseconds(50));
+
+    // B's ping jumps to 200; on next tick should switch to A
+    fakePinger.Responses["B"] = 200;
+    await Task.Delay(200);
+
+    selected.Name.Should().Be("A");
+}
+```
+
+## 9. 兼容性与回退
+
+- `ITunnelPinger` 默认 `IcmpTunnelPinger`，失败返回 -1（视作最差）
+- 若用户手动选过 tunnel（`_userManuallySelectedTunnel = true`），`BestTunnelChanged` 事件不再覆盖
+- 若所有 tunnel ping 都失败（全 -1），sorter.Peek 返回 null → 回退到原有"取第一个官方 tunnel"逻辑
+- 若 `PriorityQueue` 在某些极端环境不可用（不可能，net8.0 标配），可降级为 `SortedDictionary`
+
+## 10. 工时预估
+
+| 阶段 | 工时 |
 |---|---|
-| `TunnelSorter` 类 + 单测 | 1h |
-| `ITunnelPinger` 抽象 + 改造 `UpdatePing` | 2h |
-| `PrewarmTunnelPingsAsync` + `RefreshTopK` | 2h |
-| `RunTunnelMaintenance` 接入 | 1h |
-| `GameCreationOverlayBuilder` 接入 `SortByRecommended` | 1h |
-| UI 异步刷新（`RefreshTunnelPings`） | 2h |
-| 集成测试 | 2h |
-| 手动验证（真实 IRC） | 1h |
-| **总计** | **~12h**（1.5 个工作日） |
+| `TunnelSortKey` + `TunnelSorter` + 单测 | 3h |
+| `ITunnelPinger` + `IcmpTunnelPinger` 实现 | 1.5h |
+| `TunnelPrewarmer` + 单测 | 2h |
+| `TunnelMaintenanceLoop` + 单测 | 2h |
+| `CnCNetSessionService` 装配 + UI 订阅 | 2h |
+| 集成测试（实网 ping） | 2h |
+| **总计** | **~12.5h**（1.5-2 工作日） |
 
-## 7. 风险
+## 11. 关键决策记录
 
-| 风险 | 缓解 |
+| 决策 | 理由 |
 |---|---|
-| 批量 ping 占用网络（用户正在下载更新） | `MaxDegreeOfParallelism = 8` 限流；启动 30s 后才开始 |
-| 中国 ICMP 被运营商劫持/丢弃 | ping 失败 → PingInMs=-1 → 按 Official 兜底，与现状一致 |
-| Tunnel 列表很大（>100） | 分批 ping（每批 10 个），UI 渐进显示 |
-| 用户手动切换 tunnel 后又被自动切回 | 仅在 `SelectedTunnel == null` 时自动选；用户选过后保留 |
-| ping 单次抖动 | Layer 2 周期重测，多次测量平滑（中位数/最小值） |
-
-## 8. 与其他设计的关系
-
-- 依赖 [auto-refresh-design.md](auto-refresh-design.md) 中描述的统一 refresh（ping 完成后需要刷新 UI）。但 tunnel overlay 不在 lobby 范围内，可以独立实现。
-- 与 [global-state-refactor.md](global-state-refactor.md) 中 `ICnCNetSession` 接口的 `Tunnels` 属性对接。
-
-## 9. 后续扩展（不在本次范围）
-
-1. **Tunnel 健康度评分**：综合 ping + 历史成功率 + 当前 client 数。
-2. **地理就近**：根据用户 IP 推断地理位置，优先推荐同区域 tunnel。
-3. **用户偏好持久化**：记录用户上次选的 tunnel，下次默认选中。
-
----
-
-**请确认**：
-1. 是否同意三层架构（prewarm + 周期性 + UI 排序）？
-2. `MaxDegreeOfParallelism = 8` 是否合理（考虑用户带宽）？
-3. 是否需要用户偏好持久化（"记住我上次选的 tunnel"）？
-4. `ITunnelPinger` 抽象是否同意引入（便于单测）？
+| 用 `PriorityQueue<T,E>`（用户方案） | O(1) peek、O(log n) 增量更新、并发友好 |
+| 堆内允许重复 entry，惰性清除 | `PriorityQueue` 不支持高效 update；30 个 server 每 5 分钟一次重 ping，总 entry 量 < 1000，无内存压力 |
+| `BestTunnelChanged` 事件化 | 让 UI 渐进刷新，无需"等所有 ping 完" |
+| 默认开自动选，用户手动选后让位 | 与"用户至上"一致；避免反复抢用户选择 |
+| TopK=5 re-ping | 平衡精度与流量；避免每 5 分钟全量 ICMP 风暴 |
+| 切换阈值 1.5× | 避免乒乓切换 |

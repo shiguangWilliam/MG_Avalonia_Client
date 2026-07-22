@@ -1,8 +1,15 @@
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using ClientAvalonia.CnCNet;
+using ClientAvalonia.Configuration;
+using ClientAvalonia.Domain.Resources;
+using ClientAvalonia.GlobalState.Environment;
+using ClientAvalonia.GlobalState.Updater;
+using ClientAvalonia.IniUi.Actions;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 using ClientCore;
 using ClientCore.I18N;
 using ClientCore.PlatformShim;
@@ -90,6 +97,13 @@ public static class PreStartup
 
         RemoveObsoleteGameDirectoryFiles();
 
+        // D2: register environment services BEFORE Startup.Execute so any code
+        // inside Startup that calls EnvironmentServices.Resolve<T>() finds the
+        // factories. The previous order (Register after Execute) worked only by
+        // accident because Startup currently doesn't resolve anything during
+        // bootstrap — but the implicit dependency is fragile.
+        RegisterEnvironmentServices();
+
         var startup = new Startup();
 #if DEBUG
         startup.Execute();
@@ -103,6 +117,28 @@ public static class PreStartup
             HandleException(ex);
         }
 #endif
+    }
+
+    /// <summary>Registers L1 domain interfaces for Resolve&lt;T&gt; injection.</summary>
+    private static void RegisterEnvironmentServices()
+    {
+        EnvironmentServices.Register<IGameEnvironment>(() => new ProgramConstantsGameEnvironment());
+        EnvironmentServices.Register<IGameConfiguration>(() => new ClientConfigurationAdapter());
+        EnvironmentServices.Register<ICnCNetSession>(() => new CnCNetSessionServiceAdapter());
+        EnvironmentServices.Register<IResourceCatalog>(
+            () => new GameResourceCatalogAdapter(GameResourceCatalog.Instance));
+        EnvironmentServices.Register<IResourceManifest>(() => new NoOpResourceManifest());
+        EnvironmentServices.Register<IUpdater>(() => new UpdaterAdapter());
+        EnvironmentServices.Register<IMultiplayerColorCatalog>(() => new MultiplayerColorCatalogAdapter());
+        EnvironmentServices.Register<ILobbyCatalogService>(() => LobbyCatalogService.Instance);
+        EnvironmentServices.Register<ISkirmishSettingsService>(() => new SkirmishSettingsService());
+
+        // INI 动作目录：注册内置动作一次（启动期完成），后续窗口导航时由
+        // IniBehaviorApplier 派发。Mod 可在 INI 写 $LeftClickAction=ExitApplication
+        // 把任意按钮绑到这些动作上。
+        var iniCatalog = new IniActionCatalog();
+        BuiltinIniActions.RegisterAll(iniCatalog);
+        EnvironmentServices.Register<IIniActionCatalog>(() => iniCatalog);
     }
 
     /// <summary>Backward-compatible entry used by CLI validators.</summary>

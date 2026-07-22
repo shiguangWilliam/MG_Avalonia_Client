@@ -1,4 +1,5 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.Services;
 
@@ -15,13 +16,14 @@ public static class GameCreationOverlayBehaviors
 
         context.CreateButton.Click += (_, _) =>
         {
-            if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
+            ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+            if (cncnet.IsGameRoomJoinPending)
             {
                 host.ShowStatus("Joining game room — please wait...");
                 return;
             }
 
-            if (CnCNetSessionService.Instance.ActiveGameRoom != null)
+            if (cncnet.ActiveGameRoom != null)
             {
                 host.ShowStatus("Already in a game room.");
                 host.CloseGameCreationOverlay();
@@ -38,7 +40,7 @@ public static class GameCreationOverlayBehaviors
 
             host.CloseGameCreationOverlay();
 
-            if (!CnCNetSessionService.Instance.TryCreateGame(request, out string message))
+            if (!cncnet.TryCreateGame(request, out string message))
             {
                 host.ShowStatus(message);
                 return;

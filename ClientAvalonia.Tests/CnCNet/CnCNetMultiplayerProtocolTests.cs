@@ -15,26 +15,21 @@ namespace ClientAvalonia.Tests.CnCNet;
 /// GAME-parsing suite in <see cref="CnCNetGameMessageParserTests"/>:
 ///   - BuildGameBroadcastPayload produces a CTCP that parses back to the same fields.
 ///   - HumanPlayerOptionsLength / AiPlayerOptionsLength constants are stable.
-///
-/// Serial because we mutate ProgramConstants.CNCNET_PROTOCOL_REVISION / GAME_VERSION.
 /// </summary>
 [Collection("ProgramConstantsSerial")]
 public sealed class CnCNetMultiplayerProtocolTests : System.IDisposable
 {
     private readonly TempGameRoot _root = new();
-    private readonly string _originalRevision = ProgramConstants.CNCNET_PROTOCOL_REVISION;
     private readonly string _originalGameVersion = ProgramConstants.GAME_VERSION;
 
     public CnCNetMultiplayerProtocolTests()
     {
         _root.BindToProgramConstants();
-        ProgramConstants.ApplyCnCNetProtocolRevision(DxAliases.CurrentProtocolRevision);
         ProgramConstants.GAME_VERSION = "2.0.0";
     }
 
     public void Dispose()
     {
-        ProgramConstants.ApplyCnCNetProtocolRevision(_originalRevision);
         ProgramConstants.GAME_VERSION = _originalGameVersion;
         _root.Dispose();
     }
@@ -132,6 +127,26 @@ public sealed class CnCNetMultiplayerProtocolTests : System.IDisposable
         CnCNetMultiplayerProtocol.AiPlayerOptionsLength.Should().Be(2);
         CnCNetMultiplayerProtocol.MaxPlayerCount.Should().Be(8);
         CnCNetMultiplayerProtocol.GameBroadcastFieldCount.Should().Be(DxAliases.GameFieldCount);
-        CnCNetMultiplayerProtocol.LegacyGameBroadcastFieldCount.Should().Be(DxAliases.LegacyGameFieldCount);
+    }
+
+    [Fact]
+    [Trait("DXContract", "DX-PROTOCOL-R13")]
+    public void BuildGameBroadcastPayload_Emits_CompileTimeR13()
+    {
+        var room = new CnCNetActiveGameRoom
+        {
+            RoomName = "X",
+            ChannelName = "#c",
+            Password = "",
+            Tunnel = SampleGameMessages.SampleTunnel("h", 1),
+        };
+
+        string payload = CnCNetMultiplayerProtocol.BuildGameBroadcastPayload(
+            room, "00000", new[] { "P" }, "M", "GM", "H");
+
+        string[] parts = payload["GAME ".Length..].Split(';');
+        parts[DxAliases.IdxRevision].Should().Be(ProgramConstants.CNCNET_PROTOCOL_REVISION);
+        parts[DxAliases.IdxRevision].Should().Be(DxAliases.CurrentProtocolRevision);
+        parts[DxAliases.IdxRevision].Should().NotBe(DxAliases.RejectedLegacyProtocolRevision);
     }
 }

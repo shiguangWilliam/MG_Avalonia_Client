@@ -11,34 +11,26 @@ using Xunit;
 namespace ClientAvalonia.Tests.CnCNet;
 
 /// <summary>
-/// DX CnCNetLobby.cs:1519-1563 — strict 13-field GAME CTCP, with R10 11-field legacy fallback.
+/// DX CnCNetLobby.cs:1519-1563 — strict 13-field GAME CTCP (R13).
 /// Field order is locked by <see cref="DxAliases"/> and exercised via <see cref="SampleGameMessages"/>.
-///
-/// Marked serial because we mutate <see cref="ProgramConstants.CNCNET_PROTOCOL_REVISION"/>
-/// (a process-wide static) to exercise R13 vs R10 paths.
 /// </summary>
 [Collection("ProgramConstantsSerial")]
 public sealed class CnCNetGameMessageParserTests : IDisposable
 {
     private const string HostName = "TestHost";
     private readonly TempGameRoot _root = new();
-    private readonly string _originalRevision = ProgramConstants.CNCNET_PROTOCOL_REVISION;
+    private readonly string _originalGameVersion = ProgramConstants.GAME_VERSION;
 
     public CnCNetGameMessageParserTests()
     {
         // Bind a real (throwaway) game root so ClientConfiguration.Instance can resolve
         // LocalGame (the protocol reads it to set the Incompatible flag).
         _root.BindToProgramConstants();
-
-        // Default to R13 for the 13-field tests; legacy tests override locally.
-        ProgramConstants.ApplyCnCNetProtocolRevision(DxAliases.CurrentProtocolRevision);
     }
 
     public void Dispose()
     {
-        // Restore whatever revision was active before this test ran so we don't leak state
-        // into other test classes that happen to read CNCNET_PROTOCOL_REVISION.
-        ProgramConstants.ApplyCnCNetProtocolRevision(_originalRevision);
+        ProgramConstants.GAME_VERSION = _originalGameVersion;
         _root.Dispose();
     }
 
@@ -172,33 +164,39 @@ public sealed class CnCNetGameMessageParserTests : IDisposable
     }
 
     [Fact]
-    [Trait("DXContract", "DX-GAME-LEGACY-11")]
-    public void Parse_Legacy11Fields_R10Path_Accepted()
+    [Trait("Category", "Usability")]
+    [Trait("DXContract", "DX-GAME-FIELDS")]
+    public void Parse_ElevenFieldR10Layout_IsAccepted_AsWireFallback()
     {
-        // 11 fields + R10 revision → legacy fallback path (MG current protocol uses R10).
-        ProgramConstants.ApplyCnCNetProtocolRevision(DxAliases.LegacyProtocolRevision);
-
-        string payload = SampleGameMessages.BuildGameCtcp(
-            SampleGameMessages.BuildLegacyGameMessage(
-                revision: DxAliases.LegacyProtocolRevision,
-                tunnelHost: "tn.example.org",
-                tunnelPort: 60000));
+        // Live #yuanming-cg-games MG DX hosts emit R10 / 11 fields. Receive path must fall back.
+        string eleven = string.Join(';',
+            "R10", "1.0.4.2", "8", "#yuanming-games-x", "Room", "00000", "Host",
+            "Map", "Mode", "tunnel.example.com:50000", "0");
+        string payload = SampleGameMessages.BuildGameCtcp(eleven);
 
         bool ok = CnCNetMultiplayerProtocol.TryParseGameBroadcast(
-            HostName,
-            payload,
-            SampleGameMessages.SampleTunnels("tn.example.org", 60000),
-            sourceGameId: "mg",
-            out CnCNetHostedGameSummary? game,
-            out string? rejectReason);
+            HostName, payload, SampleGameMessages.SampleTunnels(), "mg",
+            out CnCNetHostedGameSummary? game, out string? rejectReason);
 
-        ok.Should().BeTrue();
-        rejectReason.Should().BeNull();
-        game.Should().NotBeNull();
-        game!.Revision.Should().Be(DxAliases.LegacyProtocolRevision);
-        // Legacy path leaves skillLevel=0 and mapHash="" (not present in 11-field layout).
-        game.SkillLevel.Should().Be(0);
+        ok.Should().BeTrue(because: rejectReason);
+        game!.Revision.Should().Be("R10");
         game.MapHash.Should().BeEmpty();
+        game.SkillLevel.Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("DXContract", "DX-GAME-REVISION")]
+    public void Parse_R10Revision_OnThirteenFields_IsRejected()
+    {
+        // R10 label on a 13-field body is not a known wire dialect.
+        string payload = SampleGameMessages.BuildGameCtcp(
+            SampleGameMessages.BuildGameMessage(revision: DxAliases.RejectedLegacyProtocolRevision));
+
+        bool ok = CnCNetMultiplayerProtocol.TryParseGameBroadcast(
+            HostName, payload, SampleGameMessages.SampleTunnels(), "mg", out _, out string? rejectReason);
+
+        ok.Should().BeFalse();
+        rejectReason.Should().Contain("protocol");
     }
 
     [Fact]
@@ -223,5 +221,56 @@ public sealed class CnCNetGameMessageParserTests : IDisposable
 
         ok.Should().BeFalse();
         rejectReason.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Defense-in-depth: a hostile/buggy peer must never be able to crash the IRC read loop by
+    /// sending a malformed GAME CTCP. These inputs must degrade to a typed rejection, not throw.
+    /// </summary>
+    [Theory]
+    [InlineData("GAME ")]                  // bare prefix, no payload — Substring(5..) would throw
+    [InlineData("GAME")]                   // missing trailing space
+    [InlineData("GAME \u0000\u0001")]      // prefix + control chars only
+    [InlineData("")]                       // empty
+    [Trait("Category", "Security")]
+    public void Parse_MalformedGameCtcp_NeverThrows(string hostileCtcp)
+    {
+        Action act = () => CnCNetMultiplayerProtocol.TryParseGameBroadcast(
+            HostName, hostileCtcp, SampleGameMessages.SampleTunnels(), "mg",
+            out _, out _);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Parse_BareGamePrefix_RejectsWithTooShortReason()
+    {
+        // "GAME " alone (length 5) is the boundary: our defensive guard returns false with a
+        // diagnostic rejectReason so the failure shows up in logs instead of being silently
+        // swallowed or propagated as an unhandled exception.
+        bool ok = CnCNetMultiplayerProtocol.TryParseGameBroadcast(
+            HostName, "GAME ", SampleGameMessages.SampleTunnels(), "mg",
+            out _, out string? rejectReason);
+
+        ok.Should().BeFalse();
+        rejectReason.Should().NotBeNull();
+        rejectReason.Should().Contain("too short");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Parse_GamePrefixWithTruncatedFields_DoesNotThrow()
+    {
+        // 13 fields but one field references an index that fails IPv4 parsing in the past;
+        // the protocol should now catch any leftover FormatException/IndexOutOfRangeException
+        // via the parser-level fallback and return a typed rejection.
+        string payload = "GAME R13;2.0;6;#room;room;00000;Host;map;mode;not_a_host:port;0;5;hash";
+
+        Action act = () => CnCNetMultiplayerProtocol.TryParseGameBroadcast(
+            HostName, payload, SampleGameMessages.SampleTunnels(), "mg",
+            out _, out _);
+
+        act.Should().NotThrow();
     }
 }

@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.Services;
 using Rampastring.Tools;
 
@@ -23,7 +25,31 @@ public static class ShutdownService
     private static readonly object _gate = new();
     private static bool _invoked;
 
-    private static Action _disposeCnCNet = () => CnCNetSessionService.Instance.Dispose();
+    // A4: default action resolves the active ICnCNetSession via the environment
+    // service registry so tests (and future runs with a non-default session) get
+    // the right instance. Falls back to the global singleton if DI is not set up
+    // (e.g. very early crash during startup) — preserving the original behavior.
+    private static Action _disposeCnCNet = () =>
+    {
+        ICnCNetSession? session = EnvironmentServices.TryResolve<ICnCNetSession>();
+        if (session is CnCNetSessionServiceAdapter adapter)
+        {
+            // The adapter wraps CnCNetSessionService which exposes Dispose()
+            // (full teardown: timers, IRC QUIT, keep-alive). ICnCNetSession only
+            // exposes Disconnect() which is a subset, so prefer the underlying
+            // Service when we can see it.
+            adapter.Service.Dispose();
+            return;
+        }
+
+        if (session != null)
+        {
+            session.Disconnect();
+            return;
+        }
+
+        CnCNetSessionService.Instance.Dispose();
+    };
 
     private static Action _shutdownLifetime = () =>
     {

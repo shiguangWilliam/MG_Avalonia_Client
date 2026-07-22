@@ -1,5 +1,6 @@
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
+using ClientAvalonia.Session;
 using ClientCore;
 
 namespace ClientAvalonia.Services;
@@ -7,28 +8,44 @@ namespace ClientAvalonia.Services;
 /// <summary>Maps CnCNet PO order to lobby rows (XNA Players + AIPlayers → consecutive UI rows).</summary>
 public static class MultiplayerSlotLayout
 {
+    /// <summary>Legacy 入口（Phase 3 P3-4：标记为已过时）。新代码用 <see cref="ApplyToSlots"/> + <see cref="IPlayerSlotSink"/>。</summary>
+    [Obsolete("Phase 3 P3-4: 改用 ApplyToSlots + session.SlotSink。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
     public static void ApplyToState(
         LobbyPlayerState state,
         IReadOnlyList<CnCNetGameRoomPlayer> entries,
         string localNick)
     {
         state.ClearSlots();
+        ApplyToSlots(state.Slots, entries, localNick);
+    }
+
+    /// <summary>
+    /// Session-aware 重载（Phase 2 缺口 2.5）：把 PO DTO 写入任意 <see cref="IPlayerSlot"/> 数组。
+    /// 不调用 ClearSlots——调用方负责清空（在 Session 路径下，清空由 SlotSink.ClearAll 完成）。
+    /// </summary>
+    public static void ApplyToSlots(
+        IReadOnlyList<IPlayerSlot> slots,
+        IReadOnlyList<CnCNetGameRoomPlayer> entries,
+        string localNick)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
 
         int row = 0;
         foreach (CnCNetGameRoomPlayer entry in entries)
         {
-            if (row >= LobbyPlayerSlot.MaxSlots)
+            if (row >= slots.Count)
                 break;
 
             if (entry.IsAi)
-                ApplyAi(state.Slots[row], entry);
+                ApplyAi(slots[row], entry);
             else
-                ApplyHuman(state.Slots[row], entry, localNick);
+                ApplyHuman(slots[row], entry, localNick);
 
             row++;
         }
     }
 
+    [Obsolete("Phase 3 P3-4: 改用 IReadOnlyList<IPlayerSlot> 重载。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
     public static List<LobbyPlayerSlot> ExtractAiRows(LobbyPlayerState state)
     {
         var ais = new List<LobbyPlayerSlot>();
@@ -39,13 +56,31 @@ public static class MultiplayerSlotLayout
         return ais;
     }
 
+    /// <summary>Legacy 入口（Phase 3 P3-4：标记为已过时）。新代码用 <see cref="BuildPoList"/>。</summary>
+    [Obsolete("Phase 3 P3-4: 改用 BuildPoList(IReadOnlyList<IPlayerSlot>, string, IReadOnlyList<string>)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
     public static List<CnCNetGameRoomPlayer> BuildPoListFromState(LobbyPlayerState state, string hostName)
-    {
-        var entries = new List<CnCNetGameRoomPlayer>();
+        => BuildPoList(state.Slots, hostName, state.AiNames);
 
-        for (int i = 0; i < state.HumanRowCount; i++)
+    /// <summary>
+    /// Session-aware 重载（Phase 2 缺口 2.5）：从任意 <see cref="IPlayerSlot"/> 数组重建 PO DTO。
+    /// </summary>
+    /// <param name="slots">槽位数组（按顺序：先人类，再 AI；空位跳过）。</param>
+    /// <param name="hostName">房主名（用于 IsHost 标记）。</param>
+    /// <param name="aiNames">AI 名字目录（按 AiLevel 索引）。</param>
+    public static List<CnCNetGameRoomPlayer> BuildPoList(
+        IReadOnlyList<IPlayerSlot> slots,
+        string hostName,
+        IReadOnlyList<string> aiNames)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        ArgumentNullException.ThrowIfNull(aiNames);
+
+        var entries = new List<CnCNetGameRoomPlayer>();
+        int humanCount = slots.HumanRowCount();
+
+        for (int i = 0; i < humanCount; i++)
         {
-            LobbyPlayerSlot slot = state.Slots[i];
+            IPlayerSlot slot = slots[i];
             entries.Add(new CnCNetGameRoomPlayer
             {
                 Name = slot.Name,
@@ -58,9 +93,9 @@ public static class MultiplayerSlotLayout
             });
         }
 
-        for (int i = state.HumanRowCount; i < LobbyPlayerSlot.MaxSlots; i++)
+        for (int i = humanCount; i < slots.Count; i++)
         {
-            LobbyPlayerSlot slot = state.Slots[i];
+            IPlayerSlot slot = slots[i];
             if (!slot.IsOccupied || !slot.IsAi)
                 continue;
 
@@ -68,7 +103,7 @@ public static class MultiplayerSlotLayout
             {
                 IsAi = true,
                 AiLevel = slot.AiLevel,
-                Name = ResolveAiName(state.AiNames, slot.AiLevel),
+                Name = ResolveAiName(aiNames, slot.AiLevel),
                 SideId = slot.SideIndex,
                 ColorId = slot.ColorIndex,
                 TeamId = slot.TeamIndex,
@@ -98,7 +133,7 @@ public static class MultiplayerSlotLayout
         state.RebuildAiRowsFromUi(state.HumanRowCount);
     }
 
-    private static void ApplyHuman(LobbyPlayerSlot slot, CnCNetGameRoomPlayer human, string localNick)
+    private static void ApplyHuman(IPlayerSlot slot, CnCNetGameRoomPlayer human, string localNick)
     {
         slot.Name = human.Name;
         slot.IsAi = false;
@@ -109,7 +144,7 @@ public static class MultiplayerSlotLayout
         slot.StartIndex = Math.Max(0, human.StartingLocation);
     }
 
-    private static void ApplyAi(LobbyPlayerSlot slot, CnCNetGameRoomPlayer ai)
+    private static void ApplyAi(IPlayerSlot slot, CnCNetGameRoomPlayer ai)
     {
         slot.Name = ai.Name;
         slot.IsAi = true;

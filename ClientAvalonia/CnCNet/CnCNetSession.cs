@@ -1,5 +1,6 @@
 using ClientAvalonia.Online.EventArguments;
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
+using ClientAvalonia.CnCNet.Tunnels;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,6 +23,7 @@ public sealed class CnCNetSession : IDisposable
     private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _joinedBroadcastChannels = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _followedGameIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _gameBroadcastRejectHintsShown = new(StringComparer.Ordinal);
     private bool _settingsSavedSubscribed;
 
     private CnCNetIrcConnection? _connection;
@@ -34,6 +36,7 @@ public sealed class CnCNetSession : IDisposable
     private CnCNetActiveGameRoom? _activeGameRoom;
     private CnCNetGameRoomSession? _gameRoom;
     private readonly CnCNetGameBroadcastService _gameBroadcast = new();
+    private readonly CnCNetGameBroadcastDialect _broadcastDialect = new();
     private string _systemId = string.Empty;
     private bool _autoReconnect;
     private int _reconnectAttempts;
@@ -61,6 +64,13 @@ public sealed class CnCNetSession : IDisposable
     public int OnlinePlayerCount { get; private set; } = -1;
 
     public IReadOnlyList<CnCNetTunnel> Tunnels { get; private set; } = [];
+
+    /// <summary>
+    /// Min-heap of tunnels by latency (low-latency-tunnel.md v2). Updated
+    /// automatically whenever tunnel pings complete. Raises
+    /// <see cref="TunnelSorter.BestTunnelChanged"/> on the calling thread.
+    /// </summary>
+    public TunnelSorter TunnelSorter { get; } = new();
 
     public CnCNetIrcConnection? Connection => _connection;
 
@@ -97,7 +107,8 @@ public sealed class CnCNetSession : IDisposable
 
     public void EnsureStarted()
     {
-        LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (legacy GAME={ProgramConstants.UsesLegacyCnCNetGameBroadcast}).");
+        _gameBroadcast.Dialect = _broadcastDialect;
+        LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (emit falls back per channel dialect).");
 
         if (_playerCountService == null)
         {
@@ -213,7 +224,13 @@ public sealed class CnCNetSession : IDisposable
         }
 
         LogActivity($"Loaded {updated.Count} NAT tunnels.");
+        _gameBroadcastRejectHintsShown.Clear();
         RevalidateHostedGamesAgainstTunnels();
+
+        // low-latency-tunnel.md v2: reset the heap on each tunnel-list refresh
+        // so stale entries from the previous list don't bias BestTunnelChanged.
+        TunnelSorter.Clear();
+
         PingListedTunnelsAsync(updated);
 
         if (_activeGameRoom != null && _gameRoom is { IsLocalJoined: true })
@@ -275,6 +292,11 @@ public sealed class CnCNetSession : IDisposable
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 tunnel.UpdatePing();
+
+                // low-latency-tunnel.md v2: feed every successful or failed
+                // measurement into the min-heap so the best-tunnel signal fires
+                // as soon as the fastest tunnel responds.
+                TunnelSorter.Update(tunnel, tunnel.PingInMs);
 
                 if (_activeGameRoom != null
                     && ReferenceEquals(_activeGameRoom.Tunnel, tunnel)
@@ -439,12 +461,16 @@ public sealed class CnCNetSession : IDisposable
 
         string nextChat = NormalizeIrcChannel(next.ChatChannel);
         if (nextChat != localChat && nextChat != cncnetChat)
-            _connection.JoinChannelInstant(next.ChatChannel, "ra1-derp");
+            _connection.JoinChannelPersistent(next.ChatChannel, "ra1-derp");
 
         JoinGameBroadcastChannel(next);
         _connection.RequestChannelNames(next.ChatChannel);
         LobbyState.SetChannelName(next.UiName, next.ChatChannel);
         UpdateChannelListState();
+        // C3: refresh the hosted-game list against the new broadcast channel.
+        // _gamesByBroadcast is keyed by channel name, so this immediately drops
+        // the previous channel's games from the UI. The new channel's games will
+        // appear as their GAME CTCPs arrive (OnGameBroadcast → RefreshHostedGames).
         RefreshHostedGames();
         RefreshLobbyPlayers();
         LogActivity($"Switched to channel {next.UiName} ({next.ChatChannel}).");
@@ -485,8 +511,11 @@ public sealed class CnCNetSession : IDisposable
         if (_joinedBroadcastChannels.Contains(broadcast))
             return;
 
-        // XNA: Channel.Join() every welcome; only mark joined after local JOIN echo.
-        _connection.JoinChannelInstant(game.GameBroadcastChannel!);
+        // DX Persistent Channel.Join: random delay + queue (dedupe key JOIN:#channel).
+        // Instant welcome bursts previously flooded GameSurge; some hubs silently dropped JOINs.
+        bool sent = _connection.JoinChannelPersistent(game.GameBroadcastChannel!);
+        if (!sent)
+            LogActivity($"Failed to JOIN game broadcast channel {broadcast} (not connected).");
     }
 
     /// <summary>Re-JOIN listing channels when membership was lost (XNA welcome / channel rejoin).</summary>
@@ -518,14 +547,21 @@ public sealed class CnCNetSession : IDisposable
     {
         string normalized = NormalizeIrcChannel(channel);
         if (_joinedBroadcastChannels.Add(normalized))
+        {
+            // Prefer R13 until the first peer GAME locks this listing channel.
+            _broadcastDialect.EnterChannel(normalized);
             LogActivity($"Joined game broadcast channel {normalized}.", notifyUi: false);
+        }
     }
 
     private void DropBroadcastChannelMembership(string channel)
     {
         string normalized = NormalizeIrcChannel(channel);
         if (_joinedBroadcastChannels.Remove(normalized))
+        {
+            _broadcastDialect.LeaveChannel(normalized);
             LogActivity($"Left game broadcast channel {normalized}.", notifyUi: false);
+        }
     }
 
     private bool IsCurrentGameBroadcast(string normalizedBroadcastChannel)
@@ -555,6 +591,7 @@ public sealed class CnCNetSession : IDisposable
                 _connection.PartChannel(broadcast);
 
             _joinedBroadcastChannels.Clear();
+            _broadcastDialect.Clear();
             _connection.Disconnect();
         }
     }
@@ -1200,7 +1237,7 @@ public sealed class CnCNetSession : IDisposable
             if (wasFollowed && !followed)
             {
                 _connection.PartChannel(game.GameBroadcastChannel!);
-                _joinedBroadcastChannels.Remove(NormalizeIrcChannel(game.GameBroadcastChannel!));
+                DropBroadcastChannelMembership(game.GameBroadcastChannel!);
                 _followedGameIds.Remove(game.InternalName);
             }
             else if (!wasFollowed && followed)
@@ -1269,9 +1306,18 @@ public sealed class CnCNetSession : IDisposable
         if (_connection == null || _currentGame == null)
             return;
 
+        // DX CnCNetLobby.ConnectionManager_WelcomeMessageReceived → Channel.Join (Persistent):
+        // random anti-flood delay + send queue. Instant JOINs here previously flooded GameSurge
+        // (welcome plan + EnsureGameBroadcastChannelsJoined) and some hubs never echoed JOIN.
         foreach (CnCNetWelcomeChannelPlan.JoinStep step in CnCNetWelcomeChannelPlan.BuildForLocalGame(_currentGame))
-            _connection.JoinChannelInstant(step.Channel, step.Key);
+        {
+            if (step.Role == "broadcast")
+                continue;
 
+            _connection.JoinChannelPersistent(step.Channel, step.Key);
+        }
+
+        JoinGameBroadcastChannel(_currentGame);
         JoinFollowedBroadcastChannels();
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_currentGame.ChatChannel);
@@ -1281,7 +1327,6 @@ public sealed class CnCNetSession : IDisposable
         _reconnectAttempts = 0;
         string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
         LogActivity($"JOIN {chatChannel}, #cncnet + broadcast channels; NAMES requested.");
-        EnsureGameBroadcastChannelsJoined();
         TryRejoinActiveGameRoom();
         StateChanged?.Invoke();
     }
@@ -1352,6 +1397,7 @@ public sealed class CnCNetSession : IDisposable
         _games.Clear();
         _gamesByBroadcast.Clear();
         _joinedBroadcastChannels.Clear();
+        _broadcastDialect.Clear();
         _followedGameIds.Clear();
         LobbyState.SetChannelPlayers([]);
         LobbyState.SetHostedGames([]);
@@ -1603,29 +1649,59 @@ public sealed class CnCNetSession : IDisposable
     }
 
     private static string FormatChatLine(string sender, string message, DateTime time)
-        => $"[{time:HH:mm}] {sender}: {message}";
+        => string.IsNullOrEmpty(sender)
+            ? $"[{time:HH:mm}] {message}"
+            : $"[{time:HH:mm}] {sender}: {message}";
 
     private void OnGameBroadcast(string channel, string sender, string ctcp)
     {
         string normalizedBroadcast = NormalizeIrcChannel(channel);
 
+        // First peer GAME on a joined listing channel locks R13 or R10 for the stay.
+        // Skip our own echo so hosting unlocked-R13 does not pin an R10 channel wrongly.
+        bool fromLocal = sender.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+        _broadcastDialect.ObserveInbound(normalizedBroadcast, ctcp, fromLocalSender: fromLocal);
+
         CnCNetGameEntry? sourceGame = _gameCollection?.FindByBroadcastChannel(normalizedBroadcast);
         if (sourceGame == null)
         {
-            Logger.Log($"CnCNet: ignoring GAME from unknown broadcast channel {normalizedBroadcast}.");
+            // C4: keep the strict known-channel contract (matches XNA GameBroadcastChannel_CTCPReceived:
+            // `cncnetGame == null` → return). Improving the diagnostics here so admins can spot
+            // either a misconfigured GameCollectionConfig.ini or a non-standard broadcast channel
+            // without having to enable verbose logging.
+            string known = _gameCollection == null
+                ? "<no game collection loaded>"
+                : string.Join(", ", _gameCollection.Games
+                    .Where(g => g.HasGameBroadcast)
+                    .Select(g => NormalizeIrcChannel(g.GameBroadcastChannel!)));
+            Logger.Log(
+                $"CnCNet: ignoring GAME from unknown broadcast channel {normalizedBroadcast} "
+                + $"(sender={sender}). Known broadcast channels: [{known}]. "
+                + "Verify GameCollectionConfig.ini / CnCNetGameBroadcastChannel in ClientDefinitions.ini.");
             return;
         }
+
+        // Tunnel list starts empty and is filled asynchronously. Passing an empty list into the
+        // parser makes every GAME reject with "no available tunnels" — which permanently empties
+        // the lobby if the master-list HTTP is slow or unreachable. DX shows a warning in that
+        // case; we skip validation until at least one tunnel is loaded, then
+        // RevalidateHostedGamesAgainstTunnels prunes entries whose tunnel never appears.
+        IReadOnlyList<CnCNetTunnel>? tunnelsForParse = Tunnels.Count > 0 ? Tunnels : null;
 
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(
             sender,
             ctcp,
-            Tunnels,
+            tunnelsForParse,
             out string? rejectReason,
-            sourceGame.InternalName);
+            sourceGameId: sourceGame.InternalName);
         if (game == null)
         {
             if (ctcp.StartsWith("GAME ", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(rejectReason))
+            {
                 Logger.Log($"CnCNet: GAME from {sender} ignored: {rejectReason}");
+                // Surface once-per-reason so an empty lobby is explainable (DX shows chat prompts).
+                NotifyGameBroadcastRejectOnce(rejectReason!);
+            }
 
             return;
         }
@@ -1655,6 +1731,42 @@ public sealed class CnCNetSession : IDisposable
         }
 
         RefreshHostedGames();
+    }
+
+    /// <summary>
+    /// DX CnCNetLobby shows a one-shot chat prompt when GAME CTCPs arrive but cannot be listed
+    /// (no tunnels / invalid field count / …). Mirror that so an empty lobby is diagnosable.
+    /// </summary>
+    private void NotifyGameBroadcastRejectOnce(string rejectReason)
+    {
+        // Collapse noisy per-sender reasons into stable buckets.
+        string bucket = rejectReason.StartsWith("unsupported protocol", StringComparison.OrdinalIgnoreCase)
+            ? "unsupported protocol"
+            : rejectReason.StartsWith("tunnel ", StringComparison.OrdinalIgnoreCase) && rejectReason.Contains("unavailable", StringComparison.Ordinal)
+                ? "tunnel unavailable"
+                : rejectReason.StartsWith("invalid field count", StringComparison.OrdinalIgnoreCase)
+                    ? "invalid field count"
+                    : rejectReason;
+
+        if (!_gameBroadcastRejectHintsShown.Add(bucket))
+            return;
+
+        string hint = bucket switch
+        {
+            "unsupported protocol" =>
+                "Received game broadcasts with an unsupported protocol revision. "
+                + $"This client requires {ProgramConstants.CNCNET_PROTOCOL_REVISION}.",
+            "no available tunnels" =>
+                "Received game broadcasts but no NAT tunnels are loaded yet. Waiting for the tunnel list…",
+            "tunnel unavailable" =>
+                "Received game broadcasts whose tunnel servers are not on the current master list.",
+            "invalid field count" =>
+                "Received game broadcasts with an unexpected field layout "
+                + "(expected stock DX 13 fields / R13, or legacy 11 fields / R10).",
+            _ => $"Received game broadcasts that could not be listed ({bucket}).",
+        };
+
+        LogActivity(hint);
     }
 
     private void RemoveHostedGame(Dictionary<string, CnCNetHostedGameSummary> bucket, CnCNetHostedGameSummary game)
@@ -1703,6 +1815,12 @@ public sealed class CnCNetSession : IDisposable
 
     private List<CnCNetHostedGameSummary> GetHostedGamesForCurrentChannel()
     {
+        // C5/C6 contract (per user rule): the game list shows ONLY the rooms of
+        // the currently-selected channel's broadcast frequency. Switching the
+        // ddCurrentChannel dropdown → SwitchToGame → reassigns _currentGame →
+        // this method returns the new channel's bucket. _gamesByBroadcast is
+        // kept per-channel (not flattened) so users can switch back and forth
+        // without losing cached entries (within HostedGameLifetimeSeconds = 35s).
         if (_currentGame?.HasGameBroadcast != true)
             return [];
 

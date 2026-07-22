@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ClientAvalonia.Session;
 
 namespace ClientAvalonia.Domain;
 
@@ -13,9 +14,10 @@ public static class MapStartLocationRules
     /// <summary>
     /// Whether a joiner (non-host) may claim <paramref name="startLocation1Based"/>.
     /// Returns <c>false</c> when <paramref name="enforceMaxPlayers"/> and the spot is occupied.
+    /// Phase 4 P4-3：签名升级为 <see cref="IPlayerSlot"/>——通过显式 cast 兼容 IList&lt;LobbyPlayerSlot&gt;。
     /// </summary>
     public static bool CanJoinerSelect(
-        IList<LobbyPlayerSlot> slots,
+        IList<IPlayerSlot> slots,
         int startLocation1Based,
         bool enforceMaxPlayers)
     {
@@ -27,7 +29,7 @@ public static class MapStartLocationRules
 
         for (int i = 0; i < slots.Count; i++)
         {
-            LobbyPlayerSlot slot = slots[i];
+            IPlayerSlot slot = slots[i];
             if (slot.IsOccupied && slot.StartIndex == startLocation1Based)
                 return false;
         }
@@ -45,7 +47,7 @@ public static class MapStartLocationRules
         bool enforceMaxPlayers)
     {
         if (startLocation1Based > 0
-            && !CanJoinerSelect(slots, startLocation1Based, enforceMaxPlayers))
+            && !CanJoinerSelect(ToIPlayerSlotList(slots), startLocation1Based, enforceMaxPlayers))
         {
             return false;
         }
@@ -130,4 +132,15 @@ public static class MapStartLocationRules
 
         return null;
     }
+
+    /// <summary>
+    /// Phase 4 P4-3：把 IList&lt;LobbyPlayerSlot&gt; 投影为 IList&lt;IPlayerSlot&gt;。
+    /// 用 cast 而非 LINQ Select，避免分配——数组协变 + 显式 cast 在运行时合法。
+    /// </summary>
+    private static IList<IPlayerSlot> ToIPlayerSlotList(IList<LobbyPlayerSlot> slots)
+        => slots is IPlayerSlot[] array
+            ? array
+            : slots is LobbyPlayerSlot[] lobbyArray
+                ? lobbyArray
+                : (IList<IPlayerSlot>)slots.Select(s => (IPlayerSlot)s).ToList();
 }

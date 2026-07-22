@@ -1,4 +1,5 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
@@ -89,8 +90,9 @@ public static class CnCNetGameLobbyUiHelper
         if (manualReady == null)
             return;
 
-        CnCNetGameRoomPlayer? local = CnCNetSessionService.Instance.GameRoom?.Players
-            .FirstOrDefault(p => p.Name.Equals(CnCNetSessionService.Instance.LocalNick, StringComparison.OrdinalIgnoreCase));
+        ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+        CnCNetGameRoomPlayer? local = cncnet.GameRoom?.Players
+            .FirstOrDefault(p => p.Name.Equals(cncnet.LocalNick, StringComparison.OrdinalIgnoreCase));
 
         manualReady.SetDisplayText(local is { Ready: true } ? "Not Ready" : "I'm Ready");
         LayoutJoinerReadyCluster(root);

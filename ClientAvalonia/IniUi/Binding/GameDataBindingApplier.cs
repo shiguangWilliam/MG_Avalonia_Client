@@ -1,11 +1,13 @@
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 using ClientCore;
-using ClientAvalonia.CnCNet;
 using ClientCore.Settings;
 using Rampastring.Tools;
 
@@ -62,24 +64,33 @@ public static class GameDataBindingApplier
             lbMapList.SetSelectedIndexSilent(selectedIndex);
         }
 
-        ResolveStartInteractionFlags(session.PlayerState, out bool canAssign, out bool canSelectLocal);
+        ResolveStartInteractionFlags(
+            session.PlayerState.Mode,
+            session.PlayerState.AllowHostPlayerOptions,
+            out bool canAssign,
+            out bool canSelectLocal);
         UpdateMapSelectionDisplay(
             root,
             maps,
             selectedIndex,
             resources,
-            session.PlayerState,
+            session.PlayerState.Slots,
             canAssign,
             canSelectLocal);
     }
 
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>，
+    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// </summary>
     public static void ResolveStartInteractionFlags(
-        LobbyPlayerState playerState,
+        LobbyPlayerMode mode,
+        bool allowHostPlayerOptions,
         out bool canAssign,
         out bool canSelectLocal)
     {
         // Skirmish: local player is always the host. Multiplayer: host Assign / joiner Select.
-        if (playerState.Mode == LobbyPlayerMode.Skirmish || playerState.AllowHostPlayerOptions)
+        if (mode == LobbyPlayerMode.Skirmish || allowHostPlayerOptions)
         {
             canAssign = true;
             canSelectLocal = false;
@@ -90,12 +101,22 @@ public static class GameDataBindingApplier
         canSelectLocal = true;
     }
 
+    public static void ResolveStartInteractionFlags(
+        LobbyPlayerState playerState,
+        out bool canAssign,
+        out bool canSelectLocal)
+        => ResolveStartInteractionFlags(playerState.Mode, playerState.AllowHostPlayerOptions, out canAssign, out canSelectLocal);
+
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
+    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// </summary>
     public static void UpdateMapSelectionDisplay(
         UiNodeViewModel root,
         IReadOnlyList<MapEntry> maps,
         int selectedIndex,
         ResourceResolver resources,
-        LobbyPlayerState? playerState = null,
+        IReadOnlyList<IPlayerSlot>? slots = null,
         bool canAssignStarts = false,
         bool canSelectLocalStart = false)
     {
@@ -115,17 +136,36 @@ public static class GameDataBindingApplier
             MapPreviewOverlayApplier.Apply(
                 previewBox,
                 map,
-                playerState,
+                slots,
                 canAssignStarts,
                 canSelectLocalStart);
         }
     }
 
-    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
+    public static void UpdateMapSelectionDisplay(
+        UiNodeViewModel root,
+        IReadOnlyList<MapEntry> maps,
+        int selectedIndex,
+        ResourceResolver resources,
+        LobbyPlayerState? playerState = null,
+        bool canAssignStarts = false,
+        bool canSelectLocalStart = false)
+        => UpdateMapSelectionDisplay(
+            root,
+            maps,
+            selectedIndex,
+            resources,
+            playerState?.Slots,
+            canAssignStarts,
+            canSelectLocalStart);
+
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
+    /// </summary>
     public static void RefreshMapStartMarkers(
         UiNodeViewModel root,
         MapEntry? map,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot> slots,
         bool canAssignStarts,
         bool canSelectLocalStart)
     {
@@ -136,10 +176,19 @@ public static class GameDataBindingApplier
         MapPreviewOverlayApplier.Apply(
             previewBox,
             map,
-            playerState,
+            slots,
             canAssignStarts,
             canSelectLocalStart);
     }
+
+    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
+    public static void RefreshMapStartMarkers(
+        UiNodeViewModel root,
+        MapEntry? map,
+        LobbyPlayerState playerState,
+        bool canAssignStarts,
+        bool canSelectLocalStart)
+        => RefreshMapStartMarkers(root, map, playerState.Slots, canAssignStarts, canSelectLocalStart);
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
     {
@@ -217,9 +266,10 @@ public static class GameDataBindingApplier
                 ddChannel.Node.Props["ChannelLobbyWired"] = true;
                 ddChannel.SelectionChanged += () =>
                 {
+                    ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
                     int idx = ddChannel.SelectedIndex;
-                    if (idx >= 0 && idx != CnCNetSessionService.Instance.SelectedChannelIndex)
-                        CnCNetSessionService.Instance.SwitchToChannel(idx);
+                    if (idx >= 0 && idx != cncnet.SelectedChannelIndex)
+                        cncnet.SwitchToChannel(idx);
                 };
             }
         }
@@ -266,7 +316,7 @@ public static class GameDataBindingApplier
                 {
                     if (all[i].Name == name)
                     {
-                        CnCNetSessionService.Instance.SetChatColorIndex(i);
+                        EnvironmentServices.Resolve<ICnCNetSession>().SetChatColorIndex(i);
                         UiNodeViewModel? tbChat = FindVm(root, "tbChatInput");
                         if (tbChat != null)
                             ApplyChatInputColor(tbChat);
@@ -318,13 +368,13 @@ public static class GameDataBindingApplier
         if (tbChat == null)
             return;
 
-        tbChat.IsEnabled = CnCNetSessionService.Instance.Connection?.IsConnected == true;
+        tbChat.IsEnabled = EnvironmentServices.Resolve<ICnCNetSession>().Connection?.IsConnected == true;
         ApplyChatInputColor(tbChat);
     }
 
     private static void ApplyChatInputColor(UiNodeViewModel tbChat)
     {
-        int colorIndex = CnCNetSessionService.Instance.LobbyState.SelectedChatColorIndex;
+        int colorIndex = EnvironmentServices.Resolve<ICnCNetSession>().LobbyState.SelectedChatColorIndex;
         if (colorIndex < 0)
             colorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
 
@@ -369,7 +419,7 @@ public static class GameDataBindingApplier
         {
             // Chat input is enabled when we are joined to the room AND connected to IRC.
             bool enabled = gameRoom is { IsLocalJoined: true }
-                           && CnCNetSessionService.Instance.Connection?.IsConnected == true;
+                           && EnvironmentServices.Resolve<ICnCNetSession>().Connection?.IsConnected == true;
             tbChat.IsEnabled = enabled;
             ApplyChatInputColor(tbChat);
         }

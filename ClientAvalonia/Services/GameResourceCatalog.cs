@@ -1,5 +1,6 @@
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
+using ClientAvalonia.Domain.Resources;
 using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
@@ -174,6 +175,23 @@ public sealed class GameResourceCatalog
         return !wasFavorite;
     }
 
+    /// <summary>
+    /// A1 fix: interface-typed overload so <see cref="IResourceCatalog"/> consumers
+    /// (and unit tests with mock <see cref="IMapResource"/> implementations) are
+    /// accepted without being forced to construct <see cref="MapEntry"/> instances.
+    /// The legacy <c>(MapEntry, GameModeEntry?)</c> overload delegates here for
+    /// backward compatibility with internal callers (e.g. <c>MainWindow</c>).
+    /// </summary>
+    public bool ToggleFavoriteMap(IMapResource map, IGameModeResource? gameMode)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        EnsureLoaded();
+        string modeName = gameMode?.Name ?? map.GameModes.FirstOrDefault() ?? "Default";
+        bool wasFavorite = UserINISettings.Instance.IsFavoriteMap(map.Sha1, map.UntranslatedName, modeName);
+        UserINISettings.Instance.ToggleFavoriteMap(map.Sha1, modeName, wasFavorite);
+        return !wasFavorite;
+    }
+
     public int PickRandomMapIndex(IReadOnlyList<MapEntry> visibleMaps, int playerCount = 2)
     {
         if (visibleMaps.Count == 0)
@@ -190,6 +208,46 @@ public sealed class GameResourceCatalog
         for (int i = 0; i < visibleMaps.Count; i++)
         {
             if (visibleMaps[i].Sha1 == picked.Sha1 && visibleMaps[i].BaseFilePath == picked.BaseFilePath)
+                return i;
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// A1 fix: interface-typed overload so <see cref="IResourceCatalog"/> consumers
+    /// (and unit tests with mock <see cref="IMapResource"/> implementations) are
+    /// accepted. Index matching falls back to reference equality then Sha1 equality
+    /// (interface implementations may not expose <c>BaseFilePath</c>, so we cannot
+    /// use the same comparison as the legacy overload).
+    /// </summary>
+    public int PickRandomMapIndex(IReadOnlyList<IMapResource> visibleMaps, int playerCount = 2)
+    {
+        ArgumentNullException.ThrowIfNull(visibleMaps);
+        if (visibleMaps.Count == 0)
+            return -1;
+
+        List<IMapResource> candidates = visibleMaps
+            .Where(m => m.MaxPlayers == 0 || m.MaxPlayers >= playerCount)
+            .ToList();
+
+        if (candidates.Count == 0)
+            candidates = visibleMaps.ToList();
+
+        IMapResource picked = candidates[Random.Shared.Next(candidates.Count)];
+
+        // Prefer reference equality (covers the common MapEntry case, matches
+        // legacy behavior exactly); fall back to Sha1 for mock/cross-type matches.
+        for (int i = 0; i < visibleMaps.Count; i++)
+        {
+            IMapResource m = visibleMaps[i];
+            if (ReferenceEquals(m, picked))
+                return i;
+        }
+
+        for (int i = 0; i < visibleMaps.Count; i++)
+        {
+            if (string.Equals(visibleMaps[i].Sha1, picked.Sha1, StringComparison.Ordinal))
                 return i;
         }
 

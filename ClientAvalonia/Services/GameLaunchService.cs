@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Core;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using Rampastring.Tools;
@@ -35,25 +36,35 @@ public sealed class GameLaunchService
         set => GameProcessLauncher.SingleCoreAffinity = value;
     }
 
+    /// <summary>
+    /// Lazily resolve <see cref="ICnCNetSession"/>. Returns null if no factory registered
+    /// (e.g. during very early construction). The launch flow tolerates null.
+    /// </summary>
+    private static ICnCNetSession? ResolveCnCNet()
+    {
+        try { return EnvironmentServices.Resolve<ICnCNetSession>(); }
+        catch (InvalidOperationException) { return null; }
+    }
+
     public GameLaunchService()
     {
         GameProcessLauncher.GameProcessStarting += () =>
         {
             ProgramConstants.IsLaunchingGame = true;
-            CnCNetSessionService.Instance.BeginLaunchPresenceKeepAlive();
+            ResolveCnCNet()?.BeginLaunchPresenceKeepAlive();
             GameProcessStarting?.Invoke();
         };
         GameProcessLauncher.GameProcessStarted += () =>
         {
             ProgramConstants.IsInGame = true;
-            CnCNetSessionService.Instance.NotifyGameProcessStarted();
+            ResolveCnCNet()?.NotifyGameProcessStarted();
             GameProcessStarted?.Invoke();
         };
         GameProcessLauncher.GameProcessExited += () =>
         {
             ProgramConstants.IsInGame = false;
             ProgramConstants.IsLaunchingGame = false;
-            CnCNetSessionService.Instance.NotifyGameProcessExited();
+            ResolveCnCNet()?.NotifyGameProcessExited();
             OnLauncherProcessExited();
         };
     }
@@ -97,7 +108,7 @@ public sealed class GameLaunchService
                 || process == null)
             {
                 ProgramConstants.IsLaunchingGame = false;
-                CnCNetSessionService.Instance.EndLaunchPresenceKeepAlive();
+                ResolveCnCNet()?.EndLaunchPresenceKeepAlive();
                 GameLaunchDiagnostics.LogCnCNetState("launch-failed");
                 return false;
             }
@@ -117,7 +128,7 @@ public sealed class GameLaunchService
         catch (Exception ex)
         {
             ProgramConstants.IsLaunchingGame = false;
-            CnCNetSessionService.Instance.EndLaunchPresenceKeepAlive();
+            ResolveCnCNet()?.EndLaunchPresenceKeepAlive();
             message = ex.Message;
             GameLaunchDiagnostics.LogCnCNetState("launch-exception");
             ClientDialogService.ShowError(errorOwner, "Error launching game", message);

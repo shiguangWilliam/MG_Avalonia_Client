@@ -1,385 +1,339 @@
-# 新功能设计：地图玩家数 → 默认 AI 数量匹配
+# Auto AI Slots 设计文档：按地图 MaxPlayers 自动填充 AI 槽位
 
-> **状态**：设计稿，待审批。
+> **状态**：v2 — 简化为"直接填充"模式（用户 2026-07-19 反馈）。
+> 不保留用户既定 AI 配置；如未来有保留需求再追加。
 
-## 1. 需求
+## 1. 问题陈述
 
-> 地图玩家数量 - 默认 AI 数量匹配。比如地图只有两个人，则只添加一个 AI，其余槽位空，由此实现更方便的操作。
+遭遇战（Skirmish）模式下，玩家进入 lobby 或切图后，**默认 AI 槽位数量与地图容量不匹配**：
 
-例如：
-- 1v1 地图（2 个 spawn）→ 自动添加 1 个 AI
-- 2v2 地图（4 个 spawn）→ 自动添加 3 个 AI（默认）
-- 8 人 free-for-all 地图 → 自动添加 7 个 AI
+- 小地图（2 人）：默认仍有 7 个 AI 槽（共 8 槽）→ 看似合理，但启动后大部分 AI 没位置
+- 大地图（8 人）：默认 AI 数量不变 → 玩家得手动一个个加 AI
 
-避免用户每次进入 SkirmishLobby 都要手动删多余的 AI 槽位或添加不足的 AI。
+当前 `LobbyPlayerState.LoadDefaultSkirmishSlots()` 固定填充到 8 槽，与具体地图无关。
 
-## 2. 现状调研
+## 2. 目标（用户方案）
 
-### 2.1 默认槽位初始化
+> "对于 AI 槽位问题，不需要保留用户既定的配置，**直接填充槽位即可**。如果有保留的需求，后续会追加。"
 
-`LobbyPlayerState.LoadDefaultSkirmishSlots()`：
+简化后的规则：
+- 进入 lobby / 切图时：**清空所有 AI 槽位**，按地图 `MaxPlayers` **填满** AI
+- 不判断"用户当前 AI 数 vs 新地图容量"
+- 不保留任何用户既有 AI 配置（难度、阵营、颜色、起点）
+- 单人模式（Skirmish / Campaign）生效；联机模式（CnCNetGameLobby / LANGameLobby）**不自动填充**（玩家可自由加入）
 
-```csharp
-public void LoadDefaultSkirmishSlots()
-{
-    ClearSlots();
-    Slots[0].Name = ProgramConstants.PLAYERNAME;
-    Slots[0].IsHumanLocal = true;
-    // ...
+## 3. 与原方案的对比
 
-    if (AiNames.Count == 0)
-        return;
-
-    // 现状：永远只添加 1 个 AI 到 slot[1]
-    Slots[1].Name = AiNames[0];
-    Slots[1].IsAi = true;
-    // ...
-}
-```
-
-**问题**：不管地图支持多少玩家，都只放 1 个 AI。8 人图也得手动加 6 个。
-
-### 2.2 调用路径
-
-```
-MainWindow.ApplyLobbyData(windowName="SkirmishLobby")
-   └─► LobbyPlayerSlotUiRules.ConfigureForSkirmish(_lobbySession.PlayerState);
-   └─► if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
-            _lobbySession.PlayerState.LoadDefaultSkirmishSlots();   ← 触发点
-```
-
-**关键判断**：只在"没有已保存的 skirmish 设置"时才走默认。所以老用户（已经玩过一次）不会受影响。
-
-### 2.3 可用数据
-
-`MapEntry` 已经有 `MaxPlayers` 字段（详见 `GameResourceCatalog` 加载）：
-
-```csharp
-public sealed class MapEntry
-{
-    public string DisplayName { get; set; }
-    public string UntranslatedName { get; set; }
-    public int MaxPlayers { get; set; }       // ← 关键
-    public string Sha1 { get; set; }
-    public bool EnforceMaxPlayers { get; set; }
-    public int[] StartLocations { get; set; }
-    // ...
-}
-```
-
-`SkirmishLaunchValidator.Validate(map, gameMode, players)` 已经用 `MaxPlayers` 做校验。
-
-### 2.4 设置持久化
-
-`TryLoadSkirmishSettings()` / `SaveSkirmishSettings()` 把当前槽位状态写入 INI 文件（`spawn.ini`）。AI 数量也是持久化的。
-
-## 3. 设计方案
-
-### 3.1 触发时机选择
-
-两个备选触发时机：
-
-| 时机 | 优点 | 缺点 |
+| 维度 | 旧方案（保留用户配置） | 新方案（直接填充） |
 |---|---|---|
-| **A. 进 lobby 时**（首次未存设置） | 与现状一致，零侵入 | 用户换地图后不会自动重新匹配（除非清空存档） |
-| **B. 选地图时**（每次切换地图） | 真正"自动匹配"的语义；用户不用动 | 与用户手动加的 AI 冲突；行为可能让用户困惑 |
+| 切图行为 | 只在用户 AI 数 > MaxPlayers-1 时裁剪 | 一律清空并按新地图填满 |
+| 用户调过的难度/阵营/颜色 | 保留 | 覆盖 |
+| 初始进入 lobby | 填到 MaxPlayers-1 个 AI | 填到 MaxPlayers-1 个 AI（相同） |
+| 实现复杂度 | 2 个方法（ApplyInitialFill + TrimExcessAiOnMapChange） | 1 个方法（AutoFillToMapCapacity）|
+| 工时 | 5h | 3h |
+| 测试用例 | 5 个 | 3 个 |
+| 用户预期 | 复杂但可能失望（"为啥我调的难度没了"） | 一致可预期（每次切图都重置） |
 
-**推荐方案**：**A + B 混合**。
-- 首次进 lobby（无存档）→ 按"当前选中的地图（通常是上次玩的）"匹配
-- 切换地图时（`lbMapList.SelectionChanged`）→ 仅当**当前 AI 数量大于新地图 MaxPlayers - 1**时自动减；**不主动加**（避免覆盖用户故意设的少量 AI）
+## 4. 设计
 
-### 3.2 匹配规则
+### 4.1 核心规则
 
 ```
-设 N = map.MaxPlayers
+OnLobbyEnter(map):
+    AutoFillToMapCapacity(state, map.MaxPlayers)   # 见 4.3
 
-首次进 lobby（无存档）：
-   slot[0] = 本地玩家
-   slot[1..N-1] = AI（默认中等难度）
-   slot[N..] = 空
+OnMapChange(oldMap, newMap):                       # 仅 Skirmish/Lobby（非联机）
+    AutoFillToMapCapacity(state, newMap.MaxPlayers)
 
-切换地图时：
-   if (当前 AI 数 > N - 1)
-       把多余的 AI 移除（保留靠前的）
-   // 否则不动
+AutoFillToMapCapacity(state, maxPlayers):
+    state.Slots.Clear()                            # 不保留用户配置
+    state.Slots.Add(LocalHuman())                  # 槽 0：本地玩家
+    for i in 1 .. maxPlayers-1:
+        state.Slots.Add(DefaultAi(i))              # 其余槽位填默认 AI
 ```
 
-例：
-- 切到 1v1 图（N=2），当前 4 个 AI → 移除 3 个，留 1 个
-- 切到 1v1 图（N=2），当前 0 个 AI → 不动（保持 0，因为可能用户故意）
-- 切到 8 人图（N=8），当前 1 个 AI → 不动（用户可手动加）
+**填满定义**：本地玩家占 1 槽，AI 占 `MaxPlayers - 1` 槽，总计 = `MaxPlayers`。
 
-### 3.3 边界情况
+### 4.2 触发时机
 
-| 情况 | 处理 |
-|---|---|
-| 地图 `MaxPlayers` 未知（=0） | fallback：保留现状（1 个 AI） |
-| 用户从"少 AI"切到"多 AI"图 | 不主动加 AI，避免覆盖用户意图 |
-| 用户清空所有 AI 后切图 | 不补 AI |
-| 多人联机模式 | **不应用此规则**（联机槽位由玩家加入决定） |
-| 地图 enforce `MaxPlayers`（`EnforceMaxPlayers=true`） | 必须严格匹配，移除多余 AI 是强制的 |
+| 时机 | 现状 hook | 改造 |
+|---|---|---|
+| 进入 SkirmishLobby | `MainWindow.OpenSkirmishLobby()` → `LoadDefaultSkirmishSlots()` | 把 `LoadDefaultSkirmishSlots` 改为调用 `AutoFillToMapCapacity(defaultMap.MaxPlayers)` |
+| 切图（地图列表点击） | `MainWindow.lbMapList_SelectionChanged` | 切图后调用 `AutoFillToMapCapacity(newMap.MaxPlayers)` |
+| 切图（轮换/Random） | `mwRandomMapButton_Click` | 同上 |
+| 进入联机 lobby | `MultiplayerGameLobby` 加载 | **不变**（不自动填 AI） |
 
-## 4. 类设计
-
-### 4.1 新增类：`DefaultAiSlotPolicy`
+### 4.3 `DefaultAiSlotPolicy` 类设计
 
 ```csharp
-// 新文件：ClientAvalonia/Domain/DefaultAiSlotPolicy.cs
-namespace ClientAvalonia.Domain;
+// 新文件：ClientAvalonia/IniUi/Lobby/DefaultAiSlotPolicy.cs
+namespace ClientAvalonia.IniUi.Lobby;
 
 /// <summary>
-/// Decides how many AI slots to populate based on the currently selected
-/// map's MaxPlayers. Two modes:
-///   - InitialFill:   used on first skirmish entry (no saved settings).
-///   - TrimOnMapChange: used when user switches maps; only removes excess AIs,
-///                      never adds (preserves user intent).
+/// Single-mode skirmish AI slot policy: clear and fill to map capacity.
+/// 
+/// This policy is intentionally non-preserving — every map change resets AI
+/// slots to defaults. If preservation becomes a requirement later, a separate
+/// <c>PreservingAiSlotPolicy</c> can be added behind an <c>IAiSlotPolicy</c>
+/// interface without modifying call sites.
 /// </summary>
 public static class DefaultAiSlotPolicy
 {
     /// <summary>
-    /// Populate slot[1..N-1] with default-difficulty AI for the first skirmish entry.
-    /// Slot 0 is the local human player. Slots beyond N are left empty.
+    /// Clears all slots and refills them: 1 local human + (maxPlayers - 1) default AIs.
     /// </summary>
-    public static void ApplyInitialFill(LobbyPlayerState state, int mapMaxPlayers, string defaultAiName)
+    public static void AutoFillToMapCapacity(LobbyPlayerState state, int maxPlayers, GameResourceCatalog resources)
     {
-        if (mapMaxPlayers <= 0)
-            mapMaxPlayers = 2;   // fallback: assume 1v1
+        if (maxPlayers < 1) maxPlayers = 1;
+        if (maxPlayers > 8) maxPlayers = 8;  // CnCNet lobby slot hard cap
 
-        state.Slots[0].Name = ProgramConstants.PLAYERNAME;
-        state.Slots[0].IsHumanLocal = true;
-        state.Slots[0].SideIndex = 0;
-        state.Slots[0].ColorIndex = 0;
-        state.Slots[0].TeamIndex = 0;
-        state.Slots[0].StartIndex = 0;
+        state.Slots.Clear();
 
-        // Fill slot[1..N-1] with default AI
-        for (int i = 1; i < mapMaxPlayers && i < LobbyPlayerSlot.MaxSlots; i++)
+        // Slot 0: local human player
+        var localHuman = new LobbySlot
         {
-            state.Slots[i].Name = defaultAiName;
-            state.Slots[i].IsAi = true;
-            state.Slots[i].AiLevel = 0;   // easy/medium per DX convention
-            state.Slots[i].SideIndex = 0;
-            state.Slots[i].ColorIndex = i;
-            state.Slots[i].TeamIndex = 0;
-            state.Slots[i].StartIndex = 0;
-        }
+            PlayerType = LobbyPlayerType.Human,
+            Name = ProgramConstants.PLAYERNAME1,
+            SideIndex = -1,           // Random
+            ColorIndex = 0,
+            StartIndex = -1,          // assigned by map start marker
+            TeamIndex = 0,
+            IsLocal = true,
+        };
+        state.Slots.Add(localHuman);
 
-        // Clear slots beyond map's MaxPlayers
-        for (int i = mapMaxPlayers; i < LobbyPlayerSlot.MaxSlots; i++)
+        // Slots 1..maxPlayers-1: default AI
+        for (int i = 1; i < maxPlayers; i++)
         {
-            state.Slots[i].Name = string.Empty;
-            state.Slots[i].IsAi = false;
-            state.Slots[i].IsHumanLocal = false;
+            state.Slots.Add(NewDefaultAi(i, resources));
         }
     }
 
-    /// <summary>
-    /// When the user switches maps, trim AI slots if current AI count exceeds
-    /// the new map's MaxPlayers - 1. Never adds AIs.
-    /// </summary>
-    public static void TrimExcessAiOnMapChange(LobbyPlayerState state, int newMapMaxPlayers)
+    private static LobbySlot NewDefaultAi(int slotIndex, GameResourceCatalog resources)
     {
-        if (newMapMaxPlayers <= 0)
-            return;   // unknown, do nothing
-
-        int maxAi = newMapMaxPlayers - 1;
-        int currentAi = 0;
-        foreach (LobbyPlayerSlot slot in state.Slots)
-            if (slot.IsAi) currentAi++;
-
-        if (currentAi <= maxAi)
-            return;   // not exceeding, leave user intent alone
-
-        // Remove excess AIs, keeping the first `maxAi` of them
-        int aiKept = 0;
-        for (int i = 0; i < state.Slots.Length; i++)
+        // Defaults: medium difficulty, random side, deterministic color by slot, auto start.
+        // Color is assigned by slot index modulo palette size to avoid immediate conflicts.
+        return new LobbySlot
         {
-            if (!state.Slots[i].IsAi)
-                continue;
-
-            if (aiKept < maxAi)
-            {
-                aiKept++;
-            }
-            else
-            {
-                state.Slots[i].Name = string.Empty;
-                state.Slots[i].IsAi = false;
-                state.Slots[i].IsHumanLocal = false;
-            }
-        }
+            PlayerType = LobbyPlayerType.AI,
+            Name = AIPlayerName(slotIndex),
+            AiDifficulty = 1,                 // 0=easy, 1=medium, 2=hard
+            SideIndex = -1,                   // Random
+            ColorIndex = slotIndex,           // simplest deterministic scheme
+            StartIndex = -1,
+            TeamIndex = 0,
+        };
     }
+
+    private static string AIPlayerName(int slotIndex)
+        => $"AI {slotIndex}";
 }
 ```
 
-### 4.2 接入点
+### 4.4 与 Auto-Refresh 设计的协同
 
-#### 4.2.1 `LobbyPlayerState.LoadDefaultSkirmishSlots` 改造
-
-```csharp
-// 旧
-public void LoadDefaultSkirmishSlots() { /* 1 个 AI */ }
-
-// 新
-public void LoadDefaultSkirmishSlots(int mapMaxPlayers)
-{
-    ClearSlots();
-    string defaultAiName = AiNames.Count > 0 ? AiNames[0] : "AI";
-    DefaultAiSlotPolicy.ApplyInitialFill(this, mapMaxPlayers, defaultAiName);
-}
-```
-
-#### 4.2.2 `MainWindow.ApplyLobbyData` 改造
+由于本设计落地时 [`auto-refresh-design.md`](./auto-refresh-design.md) 也将实施，切图触发的 AI 重填应封装为 `LobbyAction`：
 
 ```csharp
-// 旧
-if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
-    _lobbySession.PlayerState.LoadDefaultSkirmishSlots();
-
-// 新
-if (!_lobbySession.PlayerState.TryLoadSkirmishSettings())
-{
-    MapEntry? defaultMap = _gameResources.Maps.FirstOrDefault();
-    int maxPlayers = defaultMap?.MaxPlayers ?? 0;
-    _lobbySession.PlayerState.LoadDefaultSkirmishSlots(maxPlayers);
-}
-```
-
-#### 4.2.3 地图切换时调用 Trim
-
-`MainWindow` 现有的 `lbMapList.SelectionChanged` 回调：
-
-```csharp
-lbMapList.SelectionChanged += () =>
-{
-    MapEntry? newMap = _lobbySession.GetSelectedMap(lbMapList.SelectedIndex);
-    if (newMap != null && CurrentWindow == "SkirmishLobby")
-    {
-        DefaultAiSlotPolicy.TrimExcessAiOnMapChange(_lobbySession.PlayerState, newMap.MaxPlayers);
-        // 然后走 Auto-Refresh 设计的统一 refresh（见 auto-refresh-design.md）
-    }
-
-    // 现有的 UpdateMapSelectionDisplay ...
-};
-```
-
-**注**：联机模式（`CnCNetGameLobby`）不接入此策略，保留现状。
-
-## 5. 测试用例
-
-```csharp
-public sealed class DefaultAiSlotPolicyTests
-{
-    [Fact]
-    public void InitialFill_2PlayerMap_Adds_1Ai()
-    {
-        var state = new LobbyPlayerState();
-        state.AiNames.Add("EasyAI");
-
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 2, defaultAiName: "EasyAI");
-
-        state.Slots[0].IsHumanLocal.Should().BeTrue();
-        state.Slots[1].IsAi.Should().BeTrue();
-        state.Slots[2].IsOccupied.Should().BeFalse();
-    }
-
-    [Fact]
-    public void InitialFill_8PlayerMap_Adds_7Ai()
-    {
-        var state = new LobbyPlayerState();
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 8, defaultAiName: "AI");
-
-        state.HumanRowCount.Should().Be(1);
-        state.AiRowCount.Should().Be(7);
-    }
-
-    [Fact]
-    public void InitialFill_UnknownMaxPlayers_FallsBack_To_2Player()
-    {
-        var state = new LobbyPlayerState();
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 0, defaultAiName: "AI");
-
-        state.AiRowCount.Should().Be(1, "fallback should assume 1v1");
-    }
-
-    [Fact]
-    public void TrimOnMapChange_From8To2_Removes_ExcessAis()
-    {
-        var state = new LobbyPlayerState();
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 8, defaultAiName: "AI");
-
-        DefaultAiSlotPolicy.TrimExcessAiOnMapChange(state, newMapMaxPlayers: 2);
-
-        state.AiRowCount.Should().Be(1);
-    }
-
-    [Fact]
-    public void TrimOnMapChange_From2To8_DoesNot_AddAis()
-    {
-        var state = new LobbyPlayerState();
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 2, defaultAiName: "AI");
-
-        DefaultAiSlotPolicy.TrimExcessAiOnMapChange(state, newMapMaxPlayers: 8);
-
-        state.AiRowCount.Should().Be(1, "must preserve user intent — never add AIs on map change");
-    }
-
-    [Fact]
-    public void TrimOnMapChange_UnknownMaxPlayers_NoOp()
-    {
-        var state = new LobbyPlayerState();
-        DefaultAiSlotPolicy.ApplyInitialFill(state, mapMaxPlayers: 4, defaultAiName: "AI");
-
-        DefaultAiSlotPolicy.TrimExcessAiOnMapChange(state, newMapMaxPlayers: 0);
-
-        state.AiRowCount.Should().Be(3, "unknown MaxPlayers should not touch state");
-    }
-}
-```
-
-## 6. 工作量预估
-
-| 步骤 | 工时 |
-|---|---|
-| `DefaultAiSlotPolicy` 类 | 1h |
-| 接入 `LoadDefaultSkirmishSlots` + `ApplyLobbyData` | 1h |
-| 接入 `lbMapList.SelectionChanged` trim | 1h |
-| 单元测试 | 1h |
-| 手动验证（MG/LNOD/QEC 三 mod 试一次） | 1h |
-| **总计** | **5h**（半个工作日） |
-
-## 7. 风险
-
-| 风险 | 缓解 |
-|---|---|
-| 用户已经存了 skirmish 设置，新逻辑被覆盖 | 仅在 `!TryLoadSkirmishSettings()` 时应用，老用户不受影响 |
-| 默认 AI 难度选错 | 用 DX 默认值（AiLevel=0），与 `LoadDefaultSkirmishSlots` 现状一致 |
-| Trim 策略误删用户故意加的 AI | Trim 只在 AI 数 > MaxPlayers-1 时移除，且只移除靠后的 |
-| 与 Auto-Refresh 设计冲突 | 两个设计正交：AI 槽位变更走 `LobbyAction` 后再触发 refresh |
-
-## 8. 与 Auto-Refresh 设计的协同
-
-如果 [auto-refresh-design.md](auto-refresh-design.md) 已实施，地图切换的 `LobbyAction` 可以是：
-
-```csharp
+// 新文件：ClientAvalonia/IniUi/Actions/Lobby/ChangeMapAction.cs
 public sealed class ChangeMapAction : LobbyAction
 {
-    private readonly int _newMapIndex;
+    private readonly int _mapIndex;
+
+    public ChangeMapAction(int mapIndex) { _mapIndex = mapIndex; }
 
     public override void Execute(LobbyActionContext ctx)
     {
-        MapEntry? newMap = ctx.Session.GetSelectedMap(_newMapIndex);
-        ctx.Session.FilterIndex = ...;
-        DefaultAiSlotPolicy.TrimExcessAiOnMapChange(ctx.PlayerState, newMap?.MaxPlayers ?? 0);
+        var newMap = ctx.Resources.Maps[_mapIndex];
+        ctx.Session.SelectedMapIndex = _mapIndex;
+
+        // Skirmish/Lobby: refill AI slots (per DefaultAiSlotPolicy v2).
+        // CnCNet/LAN: do NOT touch (multiplayer slots are managed by join/part events).
+        if (IsSinglePlayerWindow(ctx.WindowName))
+        {
+            DefaultAiSlotPolicy.AutoFillToMapCapacity(ctx.Player, newMap.MaxPlayers, ctx.Resources);
+        }
     }
+
+    private static bool IsSinglePlayerWindow(string name)
+        => name.Equals("SkirmishLobby", StringComparison.OrdinalIgnoreCase);
 }
 ```
 
-executor 末尾自动 refresh，无需手写。
+`ActionExecutor` 的 refresh pipeline 自动刷新 dropdown 和 start marker，无需在 policy 内手动 refresh。
 
----
+## 5. 触发流程图
 
-**请确认**：
-1. 触发时机选 A（仅首次）、B（每次切图都自动匹配）、还是 A+B 混合（推荐）？
-2. Trim 策略是否同意"只减不加"？
-3. 默认 AI 难度选 0（DX 默认）还是 1（中等）？
+```
+进入 SkirmishLobby
+       │
+       ▼
+LoadDefaultSkirmishSlots()            ← 改造点
+       │
+       ▼
+DefaultAiSlotPolicy.AutoFillToMapCapacity(state, defaultMap.MaxPlayers, resources)
+       │
+       ▼
+[ActionExecutor 触发 refresh]
+       │
+       ▼
+UI 显示：1 玩家 + (maxPlayers-1) AI
+
+
+切图（用户点地图列表）
+       │
+       ▼
+mwLbMapList_SelectionChanged
+       │
+       ▼
+executor.Execute(new ChangeMapAction(newMapIndex))
+       │
+       ▼
+ChangeMapAction.Execute(ctx)
+       ├──► ctx.Session.SelectedMapIndex = newMapIndex
+       └──► DefaultAiSlotPolicy.AutoFillToMapCapacity(ctx.Player, newMap.MaxPlayers, ...)
+       │
+       ▼
+[refresh pipeline 全量刷新]
+       │
+       ▼
+UI 显示：新地图 + 重置后的 AI 槽位
+```
+
+## 6. 边界情况
+
+| 情况 | 处理 |
+|---|---|
+| 地图 `MaxPlayers` 缺失或 0 | 视为 1（仅本地玩家） |
+| `MaxPlayers > 8` | 截断到 8（CnCNet 槽位上限） |
+| `MaxPlayers == 1` | 仅本地玩家，0 AI（训练/教学地图） |
+| 切回同一张图 | 也清空重填（简单一致） |
+| 用户中途加 AI 后切图 | 全部清空（明确：不保留） |
+| 联机模式 | 不触发（`IsSinglePlayerWindow` 守卫） |
+| Campaign 模式 | Campaign 用 mission script，不走 skirmish lobby，**不触发** |
+
+## 7. 测试用例
+
+```csharp
+// 新文件：ClientAvalonia.Tests/IniUi/Lobby/DefaultAiSlotPolicyTests.cs
+
+[Fact]
+public void AutoFill_2PlayerMap_Leaves_1_Local_1_Ai()
+{
+    var state = new LobbyPlayerState();
+    var resources = NewTestCatalog();
+
+    DefaultAiSlotPolicy.AutoFillToMapCapacity(state, maxPlayers: 2, resources);
+
+    state.Slots.Should().HaveCount(2);
+    state.Slots[0].PlayerType.Should().Be(LobbyPlayerType.Human);
+    state.Slots[1].PlayerType.Should().Be(LobbyPlayerType.AI);
+}
+
+[Fact]
+public void AutoFill_8PlayerMap_Leaves_1_Local_7_Ai()
+{
+    var state = new LobbyPlayerState();
+    var resources = NewTestCatalog();
+
+    DefaultAiSlotPolicy.AutoFillToMapCapacity(state, maxPlayers: 8, resources);
+
+    state.Slots.Should().HaveCount(8);
+    state.Slots[0].IsLocal.Should().BeTrue();
+    state.Slots.Skip(1).All(s => s.PlayerType == LobbyPlayerType.AI).Should().BeTrue();
+}
+
+[Fact]
+public void AutoFill_Clears_Existing_User_Edits()
+{
+    // User had tweaked colors/difficulties; on map change everything resets.
+    var state = new LobbyPlayerState();
+    state.Slots.Add(NewHuman());
+    state.Slots.Add(NewAi(colorIndex: 5, aiDifficulty: 2));
+    state.Slots.Add(NewAi(colorIndex: 7, aiDifficulty: 0));
+
+    DefaultAiSlotPolicy.AutoFillToMapCapacity(state, maxPlayers: 3, NewTestCatalog());
+
+    state.Slots.Should().HaveCount(3);
+    state.Slots[1].ColorIndex.Should().Be(1, "default color scheme by slot index");
+    state.Slots[1].AiDifficulty.Should().Be(1, "default medium");
+}
+
+[Fact]
+public void AutoFill_Clamps_Illegal_MaxPlayers()
+{
+    var state = new LobbyPlayerState();
+
+    DefaultAiSlotPolicy.AutoFillToMapCapacity(state, maxPlayers: 0, NewTestCatalog());
+    state.Slots.Should().HaveCount(1);
+
+    DefaultAiSlotPolicy.AutoFillToMapCapacity(state, maxPlayers: 99, NewTestCatalog());
+    state.Slots.Should().HaveCount(8);
+}
+
+[Fact]
+public void ChangeMapAction_Refills_On_Map_Switch()
+{
+    var ctx = NewLobbyContext(windowName: "SkirmishLobby");
+    var executor = ctx.NewFullExecutor();
+    ctx.Player.Slots.Add(NewHuman());
+    ctx.Player.Slots.Add(NewAi(colorIndex: 5));  // user tweak
+
+    executor.Execute(new ChangeMapAction(mapIndex: 1));  // map 1 has MaxPlayers=2
+
+    ctx.Player.Slots.Should().HaveCount(2);
+    ctx.Player.Slots[1].ColorIndex.Should().Be(1, "user tweak was reset");
+}
+
+[Fact]
+public void ChangeMapAction_Does_Not_Refill_In_CnCNet_Lobby()
+{
+    var ctx = NewLobbyContext(windowName: "CnCNetGameLobby");
+    var executor = ctx.NewFullExecutor();
+    ctx.Player.Slots.Add(NewHuman());
+    ctx.Player.Slots.Add(NewHuman());  // another player joined
+
+    executor.Execute(new ChangeMapAction(mapIndex: 1));
+
+    ctx.Player.Slots.Should().HaveCount(2, "multiplayer slots must not be auto-filled");
+}
+```
+
+## 8. 工时预估
+
+| 阶段 | 工时 |
+|---|---|
+| `DefaultAiSlotPolicy` 实现 | 1h |
+| `ChangeMapAction` 接入（依赖 auto-refresh 基础设施） | 0.5h |
+| `LoadDefaultSkirmishSlots` 改造 | 0.5h |
+| 单元测试（6 个用例） | 1h |
+| 手动测试 3 个 mod（MG / LNOD / QEC） | 1h |
+| **总计** | **~4h**（半个工作日，比原方案少 1h） |
+
+## 9. 关键决策记录
+
+| 决策 | 理由 |
+|---|---|
+| 不保留用户配置 | 用户明确确认（2026-07-19）。简化实现 + 一致可预期 |
+| 切图时清空所有槽位 | 简单一致；如果只动 AI 不动人，逻辑复杂且用户困惑 |
+| 联机模式不触发 | 多人槽位由玩家加入/离开事件驱动，自动填 AI 会破坏联机体验 |
+| Campaign 不触发 | Campaign 有独立 mission script 管理 slots |
+| ColorIndex 用 slot index 取模 | 最简单的确定性配色，避免开局即冲突；用户随时可调 |
+| 触发点封进 `ChangeMapAction` | 与 auto-refresh 设计协同，统一 refresh 管线 |
+| 提供 `IAiSlotPolicy` 预留点（未引入） | 等到真有"保留"需求再加；YAGNI |
+
+## 10. 未来扩展
+
+如用户后续追加"保留用户配置"需求：
+
+```csharp
+public interface IAiSlotPolicy
+{
+    void OnMapChange(LobbyPlayerState state, int newMaxPlayers, GameResourceCatalog resources);
+}
+
+public sealed class PreservingAiSlotPolicy : IAiSlotPolicy { /* future */ }
+public sealed class ResettingAiSlotPolicy : IAiSlotPolicy { /* current v2 */ }
+```
+
+调用点从 `DefaultAiSlotPolicy.AutoFillToMapCapacity(...)` 改为 `_aiSlotPolicy.OnMapChange(...)`，注入即可切换。其他代码不变。

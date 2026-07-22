@@ -252,22 +252,31 @@ public sealed class ClientEnvironment
     public string? ResolveGenericWindowIni()
         => ResolveNamedIni("GenericWindow.ini");
 
-    /// <summary>Dedicated window INI, else [windowName] inside GenericWindow.ini.</summary>
+    /// <summary>Dedicated window INI when it contains a usable section; else [section] in GenericWindow.ini.</summary>
     public (string IniPath, string Section)? TryResolveOverlaySection(string windowName, string genericSectionName)
     {
         string? dedicated = ResolveWindowIni(windowName);
         if (dedicated != null)
-            return (dedicated, windowName);
+        {
+            try
+            {
+                IniDocument doc = IniDocument.Load(dedicated);
+                string section = ResolveIniSectionForWindow(doc, windowName);
+                if (doc.GetSection(section) != null)
+                    return (dedicated, section);
+            }
+            catch
+            {
+                // Fall through to GenericWindow.ini (same as DX when a dedicated file is unusable).
+            }
+        }
 
         string? generic = ResolveGenericWindowIni();
-        if (generic == null)
+        if (generic == null || !File.Exists(generic))
             return null;
 
-        if (!File.Exists(generic))
-            return null;
-
-        IniDocument doc = IniDocument.Load(generic);
-        if (doc.GetSection(genericSectionName) == null)
+        IniDocument genericDoc = IniDocument.Load(generic);
+        if (genericDoc.GetSection(genericSectionName) == null)
             return null;
 
         return (generic, genericSectionName);
@@ -275,9 +284,11 @@ public sealed class ClientEnvironment
 
     /// <summary>
     /// Control-driven INI resolution (aligned with ClientGUI/INItializableWindow + XNAWindow):
-    /// returns the window INI path together with the logical window name. The caller does
-    /// NOT require a top-level [WindowName] section — IniUiTreeBuilder will fall back to
-    /// [GenericWindow] and then to a synthetic empty root, exactly as the DX client does.
+    /// returns the window INI path together with the <em>INI section</em> to load as the root.
+    /// Navigation may use logical names like <c>CnCNetGameLobby</c>, but MG's INI chain puts the
+    /// real window attributes on <c>[MultiplayerGameLobby]</c> (via BasedOn). Loading with the
+    /// logical name falls back to <c>[GenericWindow]</c> and treats <c>[MultiplayerGameLobby]</c>
+    /// as a foreign lobby (skipped), leaving a black viewport with a few orphan toolbar scraps.
     /// </summary>
     public (string IniPath, string SectionName)? ResolveWindowLoadTarget(string windowName)
     {
@@ -291,14 +302,68 @@ public sealed class ClientEnvironment
         // Last-resort fallback: if neither a dedicated window INI nor a lobby INI exists,
         // try GenericWindow.ini (XNAWindow.SetAttributesFromIni() generic fallback).
         iniPath ??= ResolveGenericWindowIni();
+        if (iniPath == null)
+            return null;
 
-        return iniPath == null ? null : (iniPath, windowName);
+        string sectionName = ResolveWindowIniSection(iniPath, windowName);
+        return (iniPath, sectionName);
     }
+
+    /// <summary>
+    /// Map logical window names onto the INI section that actually carries Size / $CC /
+    /// $BaseSection (DX IniNameOverride vs Name). Prefer an exact section match; else aliases.
+    /// </summary>
+    private static string ResolveWindowIniSection(string iniPath, string windowName)
+    {
+        try
+        {
+            IniDocument doc = IniDocument.Load(iniPath);
+            return ResolveIniSectionForWindow(doc, windowName);
+        }
+        catch
+        {
+            // Fall through to the navigation name; LoadWindow still has GenericWindow fallback.
+        }
+
+        return windowName;
+    }
+
+    private static string ResolveIniSectionForWindow(IniDocument doc, string windowName)
+    {
+        if (doc.GetSection(windowName) != null)
+            return windowName;
+
+        foreach ((string logical, string section) in WindowSectionAliases)
+        {
+            if (windowName.Equals(logical, StringComparison.OrdinalIgnoreCase)
+                && doc.GetSection(section) != null)
+            {
+                return section;
+            }
+        }
+
+        return windowName;
+    }
+
+    /// <summary>
+    /// DX-shaped IniNameOverride → Name aliases. Keep navigation / behaviors on the logical name;
+    /// only the load target section is remapped.
+    /// </summary>
+    private static readonly (string LogicalName, string SectionName)[] WindowSectionAliases =
+    [
+        ("CnCNetGameLobby", "MultiplayerGameLobby"),
+        ("LANGameLobby", "MultiplayerGameLobby"),
+        ("CnCNetGameLoadingLobby", "GameLoadingLobby"),
+        ("LANGameLoadingLobby", "GameLoadingLobby"),
+    ];
 
     private static bool IsGameLobbyWindowName(string windowName)
         => windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase);
+           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("CnCNetGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("GameLoadingLobby", StringComparison.OrdinalIgnoreCase);
 
     private string? ResolveNamedIni(string fileName)
     {
