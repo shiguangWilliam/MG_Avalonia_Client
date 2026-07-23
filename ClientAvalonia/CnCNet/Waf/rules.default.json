@@ -1,0 +1,214 @@
+{
+  "version": 2,
+  "description": "CnCNet ingress WAF rule pack. Operators may override with Client/WafRules.json (same schema). Runtime loads: user override → Client/WafRules.default.json → embedded default.",
+  "policyAlignment": [
+    "Discord Community Guidelines (harassment, spam, scams, sexual content, violent threats — subset, keyword/regex only)",
+    "Meta Community Standards (hate speech / bullying / scams / adult solicitation — subset)",
+    "Telegram / WeChat-style chat: promo+contact spam, fraud, insults, sexual solicitation",
+    "CnCNet hosting-bot IRC fingerprints (local protocol heuristics)"
+  ],
+  "hostBotTunnels": [
+    "175.178.174.40:50000"
+  ],
+  "sensitivity": {
+    "0": { "warn": 30, "hide": 100, "drop": 9999 },
+    "1": { "warn": 25, "hide": 80, "drop": 9999 },
+    "2": { "warn": 15, "hide": 55, "drop": 180 }
+  },
+  "protocol": [
+    { "id": "proto.game.r8", "score": 40, "reason": "GAME 使用已弃用的 R8 协议（常见挂房机）" },
+    { "id": "proto.game.field_count", "score": 50, "reason": "GAME 字段数异常" },
+    { "id": "proto.tunnel.blacklist", "score": 80, "reason": "命中已知挂房机隧道样本" },
+    { "id": "proto.tunnel.shared_hosts", "score": 30, "reason": "同一隧道短时出现多个「房主」", "threshold": 3 },
+    { "id": "proto.game.burst", "score": 15, "reason": "房间广播刷新异常频繁", "minCount": 4, "windowSeconds": 20, "perBurst": 15, "cap": 60 },
+    { "id": "proto.game.fake_players", "score": 35, "reason": "玩家名单呈模板化假名" },
+    { "id": "proto.game.template_fingerprint", "score": 35, "reason": "相同房间模板被不同昵称反复挂出", "threshold": 2 },
+    { "id": "proto.invite.flood", "score": 40, "reason": "短时大量游戏邀请（INVITE）", "minCount": 3, "windowSeconds": 30, "perExtra": 10, "cap": 80 }
+  ],
+  "pm": {
+    "burst": {
+      "id": "content.pm.burst",
+      "reason": "私信短时刷屏",
+      "minCount": 4,
+      "windowSeconds": 30,
+      "baseScore": 20,
+      "perMessage": 10,
+      "cap": 70
+    },
+    "firstContactPromo": {
+      "id": "content.pm.first_contact_promo",
+      "reason": "冷私信疑似推广",
+      "score": 20,
+      "minScore": 25,
+      "triggerClasses": [ "content.url", "content.contact", "content.promo" ]
+    }
+  },
+  "contentClasses": [
+    {
+      "id": "content.url",
+      "score": 25,
+      "reason": "文本含外链",
+      "pmReason": "私信含外链",
+      "enabled": true,
+      "regexes": [
+        "https?://|www\\.|[a-z0-9\\-]+\\.(com|net|org|cc|xyz|top|vip|cn|tk|pw|gg|me|io|ru|uk)(/|\\b)"
+      ],
+      "keywords": []
+    },
+    {
+      "id": "content.contact",
+      "score": 30,
+      "reason": "疑似联系方式/拉群引流",
+      "enabled": true,
+      "regexes": [
+        "qq[:：\\s]?\\d{5,11}|[qQ扣]{1,2}\\s*群[:：\\s]?\\d{5,11}|宣传\\s*群[:：\\s]?\\d{5,11}|宣群[:：\\s]?\\d{5,11}|群号[:：\\s]?\\d{5,11}|加\\s*[qQ扣]{1,2}[:：\\s]?\\d{5,11}|微信|wechat|v\\.?x|加群|裙号|飞机号|宣传群|telegram|tg[:：\\s/@]|t\\.me/|discord(?:\\.gg|\\.com/invite)?|dc[:：\\s]|whatsapp|wa\\.me/|line\\.me/|skype|add\\s*me\\s*on|dm\\s*me|pm\\s*me|message\\s*me|contact\\s*me|join\\s*(?:my\\s+)?(?:group|discord|server|guild|clan)|group\\s*(?:id|no\\.?|number)?[:：\\s]?\\d{5,11}|invite\\s*(?:link|code)"
+      ],
+      "keywords": [
+        "加群", "裙号", "飞机号", "微信", "wechat", "QQ群", "扣扣", "宣传群",
+        "discord", "telegram", "whatsapp", "skype", "add me", "dm me", "pm me",
+        "join group", "join discord", "invite link", "contact me"
+      ]
+    },
+    {
+      "id": "content.promo",
+      "score": 25,
+      "reason": "疑似推广/广告话术",
+      "enabled": true,
+      "regexes": [
+        "代.?练",
+        "陪.?玩",
+        "充.?值",
+        "工.?作.?室",
+        "卖.?号",
+        "收.?号",
+        "低.?价",
+        "免.?费.?领",
+        "私.?聊.?领",
+        "扫.?码",
+        "elo\\s*boost|rank\\s*boost|power\\s*level"
+      ],
+      "keywords": [
+        "代练", "陪玩", "充值", "低价", "折扣", "优惠券", "加群", "拉人", "推广", "广告", "宣传",
+        "宣传群", "免费领", "内部号", "卖号", "收号", "工作室", "加我", "私聊领", "点击领取", "扫码",
+        "代肝", "代打", "上分", "陪打", "低价出", "收皮肤", "卖皮肤", "开黑群",
+        "cheap", "boosting", "booster", "coaching", "elo boost", "rank boost", "power leveling",
+        "free coins", "free skins", "free boost", "buy account", "sell account", "account shop",
+        "join group", "join discord", "add me", "dm me", "pm me", "message me",
+        "promo", "promotion", "discount", "special offer", "limited offer", "click here",
+        "advertise", "advertising", "recruiting", "hiring boosters", "paid coaching"
+      ]
+    },
+    {
+      "id": "content.fraud",
+      "score": 45,
+      "reason": "疑似欺诈/涉证敏感诱导",
+      "enabled": true,
+      "regexes": [
+        "验证.?码.?发",
+        "把.?密码",
+        "转.?账",
+        "汇.?款",
+        "银.?行.?卡",
+        "seed\\s*phrase|mnemonic|steam\\s*guard"
+      ],
+      "keywords": [
+        "验证码发给", "把密码", "转账", "汇款", "中奖", "领取奖金", "银行卡", "短信验证",
+        "木马", "外挂下载", "盗号", "钓鱼", "刷单", "返利日结", "保证回本",
+        "wire transfer", "gift card", "verify account", "send code", "seed phrase", "mnemonic",
+        "steam guard", "login code", "account recovery", "password reset", "phishing",
+        "crypto wallet", "send bitcoin", "western union"
+      ]
+    },
+    {
+      "id": "content.sexual",
+      "score": 50,
+      "reason": "疑似色情/色情引流内容",
+      "enabled": true,
+      "regexes": [],
+      "keywords": [
+        "约炮", "裸聊", "色情", "黄片", "援交", "包夜", "一夜情", "成人直播", "色情网站",
+        "onlyfans", "porn", "xxx video", "camgirl", "sex chat", "nsfw link", "adult video"
+      ]
+    },
+    {
+      "id": "content.abuse",
+      "score": 35,
+      "reason": "疑似辱骂/人身攻击（社交聊天常见骚扰类）",
+      "enabled": true,
+      "regexes": [
+        "你.?妈.?死",
+        "妈.?死了",
+        "死.?你.?妈",
+        "你.?妈.?的",
+        "草.?你.?妈",
+        "操.?你.?妈",
+        "日.?你.?妈"
+      ],
+      "keywords": [
+        "傻逼", "傻b", "傻B", "脑残", "智障", "白痴", "废物", "狗东西", "狗娘养", "混蛋", "滚蛋",
+        "去死", "你妈的", "他妈的", "操你妈", "草泥马", "日你妈", "全家死", "死全家",
+        "你妈死了", "你妈死", "妈死了", "死你妈", "你妈逼", "你麻痹", "尼玛死", "泥马死",
+        "nmsl", "cnmb", "wcnm", "sb你", "你个sb", "弱智", "垃圾人", "贱人", "婊子",
+        "滚蛋吧", "傻叉", "傻X", "妈卖批", "你麻痹的", "去你妈", "我日你",
+        "fuck you", "fuck u", "fucking idiot", "asshole", "son of a bitch", "piece of shit",
+        "kill yourself", "kys", "go die", "retard", "stfu", "shut the fuck up",
+        "motherfucker", "dumbass", "bastard", "you suck"
+      ]
+    },
+    {
+      "id": "content.hate",
+      "score": 45,
+      "reason": "疑似仇恨/歧视言论（对齐常见平台 hate speech 子集）",
+      "enabled": true,
+      "regexes": [
+        "死.?妈",
+        "妈.?死"
+      ],
+      "keywords": [
+        "黑鬼", "支那", "死妈", "妈死", "种族清洗",
+        "nigger", "nigga die", "kill all jews", "gas the", "white power", "heil hitler",
+        "go back to china", "ching chong"
+      ]
+    },
+    {
+      "id": "content.threat",
+      "score": 50,
+      "reason": "疑似暴力威胁",
+      "enabled": true,
+      "regexes": [
+        "弄.?死.?你",
+        "砍.?死.?你",
+        "杀.?了.?你",
+        "打.?死.?你",
+        "i\\s*will\\s*kill\\s*you|i'?ll\\s*kill\\s*you"
+      ],
+      "keywords": [
+        "弄死你", "砍死你", "杀了你", "打死你", "爆你头", "上门砍", "报复你",
+        "i will kill you", "i'll kill you", "im gonna kill", "bomb your house", "shoot you",
+        "rape you", "doxx you", "swat you"
+      ]
+    },
+    {
+      "id": "content.self_harm",
+      "score": 40,
+      "reason": "疑似自伤/自杀诱导内容",
+      "enabled": true,
+      "regexes": [],
+      "keywords": [
+        "自杀教程", "怎么自杀", "割腕方法", "安乐死药",
+        "how to kill yourself", "suicide method", "best way to suicide"
+      ]
+    },
+    {
+      "id": "content.child_safety",
+      "score": 80,
+      "reason": "疑似涉及未成年人不当性相关内容（高优先级）",
+      "enabled": true,
+      "regexes": [],
+      "keywords": [
+        "未成年约", "幼女", "萝莉约炮", "正太约炮",
+        "underage sex", "child porn", "cp trade", "teen escort underage"
+      ]
+    }
+  ]
+}

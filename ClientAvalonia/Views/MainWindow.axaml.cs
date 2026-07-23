@@ -83,16 +83,19 @@ public partial class MainWindow : Window, IUiNavigationHost
         ClientStartupService.LocalVersionsChecked += OnLocalVersionsChecked;
         _gameResources.Loaded += OnGameResourcesLoaded;
         _cncnet.StateChanged += OnCnCNetStateChanged;
+        _cncnet.PrivateMessageArrived += OnPrivateMessageArrived;
         _cncnet.GameRoomJoined += OnCnCNetGameRoomJoined;
         _cncnet.GameRoomJoinFailed += OnCnCNetGameRoomJoinFailed;
         _cncnet.GameStarting += OnCnCNetGameStarting;
         _cncnet.GameRoomHostAbandoned += OnCnCNetGameRoomHostAbandoned;
+        if (_cncnet is CnCNetSessionServiceAdapter adapter)
+            adapter.Service.WafAlertRaised += OnCnCNetWafAlert;
         _cncnet.EnsureStarted();
         InitializeComponent();
         KeyDown += OnKeyDown;
         Loaded += OnWindowLoaded;
         Closing += OnMainWindowClosing;
-        PART_TopBarHost.Bar.BindNavigation(NavigateTo, LogoutToMainMenu);
+        PART_TopBarHost.Bar.BindNavigation(NavigateTo, LogoutToMainMenu, () => OpenPrivateMessagingOverlay());
         _updateService.RefreshInitialStatus();
     }
 
@@ -295,6 +298,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                 AudioOptionsApplier.Apply(_overlayRoot);
                 UpdaterOptionsApplier.Apply(_overlayRoot);
                 ComponentsOptionsApplier.Apply(_overlayRoot);
+                WafBlocklistApplier.Apply(_overlayRoot, CnCNetSessionService.Instance.IngressWaf);
                 // After INI/setting binds: force footer labels (empty Translation keys must not win).
                 OptionsFooterChrome.ApplyToViewModel(_overlayRoot);
             }
@@ -319,7 +323,14 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
+        if (_floatingOverlayWindow?.Equals("PrivateMessagingWindow", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            _cncnet.SetViewingPrivateMessagePeer(null);
+            ResetOverlayPanelChrome();
+        }
+
         CloseFloatingOverlayCore(restoreIniOverlayView: true);
+        UpdateTopBar();
     }
 
     public void OpenGameCreationOverlay()
@@ -831,7 +842,12 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         OptionsWindowLayout.SetActiveTab(_overlayRoot, index);
         _overlayRoot.RefreshLayout();
-        ShowStatus($"Options tab {index + 1}/6");
+
+        // Security tab (index 4): refresh blocklist view when entering.
+        if (index == 4)
+            WafBlocklistApplier.Apply(_overlayRoot, CnCNetSessionService.Instance.IngressWaf);
+
+        ShowStatus($"Options tab {index + 1}/7");
     }
 
     public void CheckForUpdates() => _updateService.CheckForUpdates();
@@ -1658,7 +1674,87 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (string.IsNullOrWhiteSpace(status))
             status = _cncnet.Connection?.IsConnected == true ? "已连接" : "Offline";
 
-        PART_TopBarHost.Bar.UpdateState(status, _cncnet.OnlinePlayerCount);
+        PART_TopBarHost.Bar.UpdateState(
+            status,
+            _cncnet.OnlinePlayerCount,
+            isConnected: _cncnet.Connection?.IsConnected == true,
+            unreadPrivateMessages: _cncnet.UnreadPrivateMessageCount);
+    }
+
+    public void OpenPrivateMessagingOverlay(string? focusNick = null)
+    {
+        if (_cncnet.Connection?.IsConnected != true)
+        {
+            ShowStatus("私信需要先连接 CnCNet。");
+            return;
+        }
+
+        if (IsFloatingOverlayOpen
+            && _floatingOverlayWindow?.Equals("PrivateMessagingWindow", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            if (PART_OverlayRawView.Content is PrivateMessagingPanel openPanel)
+            {
+                if (!string.IsNullOrWhiteSpace(focusNick))
+                    _cncnet.EnsurePrivateConversation(focusNick);
+                openPanel.Refresh(focusNick);
+                if (!string.IsNullOrWhiteSpace(openPanel.SelectedNick))
+                    _cncnet.SetViewingPrivateMessagePeer(openPanel.SelectedNick);
+                openPanel.FocusInput();
+            }
+
+            return;
+        }
+
+        if (IsFloatingOverlayOpen)
+            CloseFloatingOverlaySilently();
+
+        if (!string.IsNullOrWhiteSpace(focusNick))
+            _cncnet.EnsurePrivateConversation(focusNick);
+
+        var panel = new PrivateMessagingPanel();
+        panel.Bind(
+            listPeers: () =>
+            {
+                var list = _cncnet.GetPrivateConversationSummaries().ToList();
+                var known = new HashSet<string>(list.Select(p => p.Nick), StringComparer.OrdinalIgnoreCase);
+                string local = _cncnet.LocalNick;
+                foreach (string raw in _cncnet.LobbyState.ChannelPlayers)
+                {
+                    string nick = raw.Trim().TrimStart('@', '+', '%', '~', '&');
+                    if (string.IsNullOrWhiteSpace(nick)
+                        || nick.Equals(local, StringComparison.OrdinalIgnoreCase)
+                        || known.Contains(nick))
+                        continue;
+                    list.Add((nick, 0));
+                    known.Add(nick);
+                }
+
+                return list;
+            },
+            listMessages: nick => _cncnet.GetPrivateMessages(nick)
+                .Select(l => l.DisplayText)
+                .ToList(),
+            send: (nick, text) =>
+            {
+                _cncnet.SendPrivateMessage(nick, text);
+                _cncnet.SetViewingPrivateMessagePeer(nick);
+            },
+            close: () =>
+            {
+                _cncnet.SetViewingPrivateMessagePeer(null);
+                ResetOverlayPanelChrome();
+                CloseFloatingOverlayCore(restoreIniOverlayView: true);
+                UpdateTopBar();
+            },
+            peerSelected: nick => _cncnet.SetViewingPrivateMessagePeer(nick));
+
+        ShowRawHostOverlay(panel, 600, 520, "私信 (F4)");
+        _floatingOverlayWindow = "PrivateMessagingWindow";
+        panel.Refresh(focusNick ?? _cncnet.LastPrivateMessagePartner);
+        if (!string.IsNullOrWhiteSpace(panel.SelectedNick))
+            _cncnet.SetViewingPrivateMessagePeer(panel.SelectedNick);
+        panel.FocusInput();
+        UpdateTopBar();
     }
 
     private bool ShouldShowTopBar()
@@ -1891,6 +1987,14 @@ public partial class MainWindow : Window, IUiNavigationHost
                 ShowStatus($"CnCNet: {_cncnet.LobbyState.ConnectionStatus}");
         }
 
+        if (IsFloatingOverlayOpen
+            && _floatingOverlayWindow?.Equals("PrivateMessagingWindow", StringComparison.OrdinalIgnoreCase) == true
+            && PART_OverlayRawView.Content is PrivateMessagingPanel pmPanel)
+        {
+            // Keep the user's selected peer; do not jump to LastPrivateMessagePartner.
+            pmPanel.Refresh();
+        }
+
         if (_activeRoot != null && CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
             RefreshCnCNetGameRoomUiFromSession(_activeRoot);
 
@@ -1898,6 +2002,66 @@ public partial class MainWindow : Window, IUiNavigationHost
             StateBindingApplier.Apply(_activeRoot, _bindingSession.State, "MainMenu");
 
         UpdateTopBar();
+    }
+
+    private void OnPrivateMessageArrived(string peer, string preview)
+    {
+        UpdateTopBar();
+
+        if (CnCNetPrivateMessagePolicy.PopupsDisabled())
+            return;
+
+        string clip = preview.Length > 60 ? preview[..60] + "…" : preview;
+        ShowStatus($"私信 · {peer}: {clip}");
+    }
+
+    private async void OnCnCNetWafAlert(ClientAvalonia.CnCNet.Waf.WafAlert alert)
+    {
+        try
+        {
+            string surface = alert.Event.Surface switch
+            {
+                ClientAvalonia.CnCNet.Waf.WafSurface.PrivateMessage => "私信",
+                ClientAvalonia.CnCNet.Waf.WafSurface.LobbyChat => "大厅聊天",
+                ClientAvalonia.CnCNet.Waf.WafSurface.GameRoomChat => "房间聊天",
+                ClientAvalonia.CnCNet.Waf.WafSurface.ListingText => "房间列表文案",
+                _ => "联机协议",
+            };
+
+            string actor = string.IsNullOrWhiteSpace(alert.Event.SenderNick)
+                ? (alert.Event.Game?.ChannelName ?? "未知来源")
+                : alert.Event.SenderNick;
+
+            string message =
+                $"来源：{actor}\n" +
+                $"场景：{surface}\n" +
+                $"等级：{alert.Decision.Severity} (score={alert.Decision.Score})\n" +
+                $"原因：{alert.Decision.Summary}";
+
+            bool offerBlock = alert.Decision.SuggestedBlockKeys.Count > 0;
+            bool addBlock = await ClientDialogService.ShowWafAlertAsync(
+                this,
+                "CnCNet 入网防护",
+                message,
+                offerBlock).ConfigureAwait(true);
+
+            if (!addBlock || _cncnet is not CnCNetSessionServiceAdapter adapter)
+                return;
+
+            string note = alert.Decision.Summary;
+            if (string.IsNullOrWhiteSpace(note))
+                note = $"{surface}/{alert.Decision.Severity}";
+
+            adapter.Service.IngressWaf.BlockFromAlert(alert.Event, alert.Decision, note);
+
+            ShowStatus("已写入 WAF 屏蔽名单（含同型消息体）");
+            if (IsOptionsOverlayOpen && _overlayRoot != null)
+                WafBlocklistApplier.Apply(_overlayRoot, adapter.Service.IngressWaf);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"WAF alert UI failed: {ex.Message}");
+        }
     }
 
     /// <summary>Read session → UI only; never pushes PO/GAME/GO back to the network.</summary>
@@ -2077,6 +2241,13 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
+        if (e.Key == Key.F4)
+        {
+            OpenPrivateMessagingOverlay();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.F12 && !IsFloatingOverlayOpen)
         {
             OpenFloatingOverlay("OptionsWindow");
@@ -2120,6 +2291,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             Key.D4 or Key.NumPad4 => 3,
             Key.D5 or Key.NumPad5 => 4,
             Key.D6 or Key.NumPad6 => 5,
+            Key.D7 or Key.NumPad7 => 6,
             _ => null,
         };
 

@@ -106,6 +106,36 @@ public interface ICnCNetSession
     /// <summary>发送聊天消息到当前频道。</summary>
     void SendChatMessage(string message);
 
+    /// <summary>发送私信（PRIVMSG nick）。</summary>
+    void SendPrivateMessage(string recipient, string message);
+
+    /// <summary>私信会话摘要（按最近活动排序）。</summary>
+    IReadOnlyList<(string Nick, int Unread)> GetPrivateConversationSummaries();
+
+    /// <summary>指定对方的私信历史。</summary>
+    IReadOnlyList<CnCNetChatLine> GetPrivateMessages(string peerNick);
+
+    /// <summary>未读私信总数。</summary>
+    int UnreadPrivateMessageCount { get; }
+
+    /// <summary>最近私信对象（用于 F4 打开时定位）。</summary>
+    string? LastPrivateMessagePartner { get; }
+
+    /// <summary>私信面板当前聚焦的对方；来自该对方的消息不增加未读。</summary>
+    string? ViewingPrivateMessagePeer { get; }
+
+    /// <summary>设置/清除私信面板聚焦对象（打开/关闭/切换会话时调用）。</summary>
+    void SetViewingPrivateMessagePeer(string? peerNick);
+
+    /// <summary>新私信到达（已入库）；用于状态栏提醒。参数：对方 nick、预览正文。</summary>
+    event Action<string, string>? PrivateMessageArrived;
+
+    /// <summary>确保与对方有会话并标记已读。</summary>
+    void EnsurePrivateConversation(string peerNick);
+
+    /// <summary>标记私信已读；peerNick 为空则全部已读。</summary>
+    void MarkPrivateMessagesRead(string? peerNick = null);
+
     /// <summary>设置本机玩家准备状态（CTCP READY/AIDLE）。</summary>
     void SetGameRoomReady(bool ready, bool autoReady = false);
 

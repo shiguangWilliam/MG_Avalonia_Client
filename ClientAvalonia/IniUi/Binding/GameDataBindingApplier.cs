@@ -351,8 +351,15 @@ public static class GameDataBindingApplier
 
         if (state.ChatLines.Count > 0)
         {
-            ApplyColoredChatLines(lbChat, state.ChatLines);
-            return;
+            // PMs use Scope=PrivateMessage and must not pollute the lobby channel listbox.
+            var lobbyLines = state.ChatLines
+                .Where(l => l.Scope == CnCNetChatScope.LobbyChannel)
+                .ToList();
+            if (lobbyLines.Count > 0)
+            {
+                ApplyColoredChatLines(lbChat, lobbyLines);
+                return;
+            }
         }
 
         var fallback = state.ConnectionLog.Count > 0
@@ -440,7 +447,19 @@ public static class GameDataBindingApplier
     {
         FindVm(root, "btnNewGame")?.SetDisplayText("Create Game");
         FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game");
-        FindVm(root, "btnLogout")?.SetDisplayText("Logout");
+
+        UiNodeViewModel? btnMainMenu = FindVm(root, "btnMainMenu");
+        UiNodeViewModel? btnLogout = FindVm(root, "btnLogout");
+        if (btnMainMenu != null && btnMainMenu.IsVisible)
+        {
+            btnMainMenu.SetDisplayText("Main Menu");
+            if (btnLogout != null)
+                btnLogout.IsVisible = false;
+        }
+        else
+        {
+            btnLogout?.SetDisplayText("Logout");
+        }
     }
 
     public static void ApplyCampaignOverlay(
@@ -459,6 +478,8 @@ public static class GameDataBindingApplier
         UiNodeViewModel? lbCampaignList = FindVm(root, "lbCampaignList");
         if (lbCampaignList != null)
         {
+            var disabledBrush = new SolidColorBrush(Color.FromRgb(120, 112, 104));
+            var enabledBrush = new SolidColorBrush(Color.FromRgb(242, 230, 216));
             var listItems = missions.Select(m => new CatalogListItemViewModel
             {
                 Text = m.DisplayName,
@@ -467,20 +488,110 @@ public static class GameDataBindingApplier
                     : GameAssetResolver.LoadSideIcon(resources, m.SideName, lbCampaignList),
                 IsHeader = m.IsHeader,
                 IsEnabled = m.Enabled,
+                ForegroundBrush = m.IsHeader
+                    ? null
+                    : (m.Enabled ? enabledBrush : disabledBrush),
+                ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
             }).ToList();
 
             lbCampaignList.SetCatalogListItems(listItems);
             int firstSelectable = FindFirstSelectableMissionIndex(missions);
             session.LastSelectableCampaignIndex = firstSelectable;
             lbCampaignList.SelectedIndex = firstSelectable >= 0 ? firstSelectable : 0;
-            WireCampaignSelection(lbCampaignList, FindVm(root, "tbMissionDescription"), session, resources);
+            WireCampaignSelection(
+                lbCampaignList,
+                FindVm(root, "tbMissionDescription"),
+                FindVm(root, "btnLaunch"),
+                session,
+                resources);
         }
 
         ApplyCampaignSideTabState(root, sideFilter);
         ApplyCampaignDifficulty(root, resources);
         EnsureCampaignControlSizes(root);
+        ApplyCampaignActionButtonLabels(root);
         GameAssetResolver.ApplyCampaignSideIcons(root, resources);
         GameAssetResolver.ApplyCampaignActionButtonTextures(root, resources);
+    }
+
+    private static void ApplyCampaignActionButtonLabels(UiNodeViewModel root)
+    {
+        // Primary chrome is orange; default IdleTexture button fg (#FFA648) vanishes on it.
+        Color launchFg = Color.FromRgb(32, 22, 12);
+        Color cancelFg = Color.FromRgb(242, 230, 216);
+
+        UiNodeViewModel? launch = FindVm(root, "btnLaunch");
+        if (launch != null)
+        {
+            launch.SetDisplayText(PickLocalizedLabel(launch.Text, "开始", "Launch"));
+            launch.SetForeground(launchFg);
+            launch.Node.Props["FontSize"] = 14;
+            launch.RefreshLayout();
+        }
+
+        UiNodeViewModel? cancel = FindVm(root, "btnCancel");
+        if (cancel != null)
+        {
+            cancel.SetDisplayText(PickLocalizedLabel(cancel.Text, "返回", "Cancel"));
+            cancel.SetForeground(cancelFg);
+            cancel.Node.Props["FontSize"] = 14;
+            cancel.RefreshLayout();
+        }
+
+        ApplySideTabLabel(root, "GDI", "同盟国联军", "Allied");
+        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Soviet");
+        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Ackville");
+    }
+
+    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zh, string en)
+    {
+        UiNodeViewModel? tab = FindVm(root, id);
+        if (tab == null)
+            return;
+
+        tab.SetDisplayText(PickLocalizedLabel(tab.Text, zh, en));
+        tab.RefreshLayout();
+    }
+
+    /// <summary>MG INI often stores <c>中文;English</c> bilingual labels.</summary>
+    private static string PickLocalizedLabel(string? raw, string chineseFallback, string englishFallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return chineseFallback;
+
+        int sep = raw.IndexOf(';');
+        if (sep < 0)
+            return raw.Trim();
+
+        string left = raw[..sep].Trim();
+        string right = raw[(sep + 1)..].Trim();
+        bool preferChinese = ContainsCjk(left) || !ContainsLatinWord(left);
+        if (preferChinese)
+            return string.IsNullOrEmpty(left) ? (string.IsNullOrEmpty(right) ? chineseFallback : right) : left;
+
+        return string.IsNullOrEmpty(right) ? (string.IsNullOrEmpty(left) ? englishFallback : left) : right;
+    }
+
+    private static bool ContainsCjk(string text)
+    {
+        foreach (char c in text)
+        {
+            if (c >= 0x4E00 && c <= 0x9FFF)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsLatinWord(string text)
+    {
+        foreach (char c in text)
+        {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -519,10 +630,11 @@ public static class GameDataBindingApplier
             if (button == null)
                 continue;
 
+            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
+            // clips the label completely when Avalonia Height is set explicitly.
             if (button.Width <= 1)
                 button.Node.Props["Width"] = 147d;
-            if (button.Height <= 1)
-                button.Node.Props["Height"] = 23d;
+            button.Node.Props["Height"] = 36d;
             button.RefreshLayout();
         }
     }
@@ -530,6 +642,7 @@ public static class GameDataBindingApplier
     public static void WireCampaignSelection(
         UiNodeViewModel listVm,
         UiNodeViewModel? descriptionVm,
+        UiNodeViewModel? launchButton,
         LobbySessionState session,
         ResourceResolver resources)
     {
@@ -540,7 +653,7 @@ public static class GameDataBindingApplier
         {
             int index = listVm.SelectedIndex;
             MissionEntry? mission = session.GetSelectedMission(index);
-            if (mission != null && (mission.IsHeader || !mission.Enabled))
+            if (mission != null && mission.IsHeader)
             {
                 int fallback = session.LastSelectableCampaignIndex;
                 if (fallback >= 0 && fallback != index)
@@ -550,11 +663,20 @@ public static class GameDataBindingApplier
                 }
             }
 
-            if (mission != null && mission.Enabled && !mission.IsHeader)
+            // Allow selecting disabled missions so players can read the briefing + locked hint.
+            if (mission != null && !mission.IsHeader)
                 session.LastSelectableCampaignIndex = index;
 
-            descriptionVm.SetDisplayText(mission?.Description ?? string.Empty);
+            string? lockedHint = mission != null && !mission.IsHeader && !mission.Enabled
+                ? "该战役尚未开放或未启用，无法开始。"
+                : null;
+
+            MissionBriefingParsed briefing = MissionBriefingParser.Parse(mission?.Description);
+            descriptionVm.SetMissionBriefing(briefing, lockedHint);
             descriptionVm.SetPreviewImage(GameAssetResolver.LoadMissionPreview(resources, mission, descriptionVm));
+
+            if (launchButton != null)
+                launchButton.IsEnabled = mission != null && mission.Enabled && !mission.IsHeader;
         }
 
         listVm.SelectionChanged -= UpdateDescription;
@@ -584,7 +706,9 @@ public static class GameDataBindingApplier
 
         int saved = Math.Clamp(UserINISettings.Instance.Difficulty, 0, 2);
         trackbar.SelectedIndex = saved;
-        GameAssetResolver.ApplyDifficultyTrackbarTextures(trackbar, resources);
+        // Do not overlay DX trackbar thumb textures — Avalonia Slider already draws a thumb,
+        // and a second static image reads as stray "dots" next to the briefing scrollbar.
+        trackbar.SetThumbImage(null);
     }
 
     private static int FindFirstSelectableMissionIndex(IReadOnlyList<MissionEntry> missions)

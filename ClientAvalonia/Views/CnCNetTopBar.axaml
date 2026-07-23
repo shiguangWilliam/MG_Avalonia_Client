@@ -17,7 +17,7 @@
     </Grid.ColumnDefinitions>
     <Button x:Name="BtnMainMenu" Grid.Column="0" Content="主菜单 (F2)" Margin="0,0,6,0" Padding="8,2" />
     <Button x:Name="BtnCnCNetLobby" Grid.Column="1" Content="CnCNet 大厅 (F3)" Margin="0,0,6,0" Padding="8,2" />
-    <Button x:Name="BtnPrivateMessages" Grid.Column="2" Content="私信 (F4)" Margin="0,0,6,0" Padding="8,2" IsEnabled="False" />
+    <Button x:Name="BtnPrivateMessages" Grid.Column="2" Content="私信 (F4)" Margin="0,0,6,0" Padding="8,2" />
     <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
       <TextBlock x:Name="LblConnectionStatus" Foreground="#FFCC9933" VerticalAlignment="Center" Text="Offline" />
       <TextBlock Foreground="#AAAAAA" VerticalAlignment="Center" Text="MG PLAYERS ONLINE:" />

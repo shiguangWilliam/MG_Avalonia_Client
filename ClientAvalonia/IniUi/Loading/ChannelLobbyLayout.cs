@@ -43,7 +43,7 @@ internal static class ChannelLobbyLayout
         PositionList(tree, "lbPlayerList", playerListX, 20, PlayerListWidth, bottomToolbarY - 26 - 20);
         PositionList(tree, "lbChatMessages", chatX, TopContentY, chatWidth, listHeight);
 
-        PositionBottomButtons(tree, bottomToolbarY, parentW);
+        PositionBottomButtons(tree, bottomToolbarY, parentW, windowSectionName);
         PositionChatInput(tree, chatX, chatWidth, bottomToolbarY);
         PositionHeaderRow(tree, chatX, chatWidth, playerListX);
     }
@@ -60,11 +60,25 @@ internal static class ChannelLobbyLayout
         node.Props["Height"] = (double)Math.Max(height, 80);
     }
 
-    private static void PositionBottomButtons(UiNodeTree tree, int y, int parentW)
+    private static void PositionBottomButtons(UiNodeTree tree, int y, int parentW, string windowSectionName)
     {
         SetButton(tree, "btnNewGame", SideMargin, y);
         SetButton(tree, "btnJoinGame", SideMargin + ButtonWidth + ButtonGap, y);
-        SetButton(tree, "btnLogout", parentW - 145, y);
+
+        // XNA LANLobby uses btnMainMenu; CnCNetLobby uses btnLogout. MG LANLobby.ini
+        // BasedOn=CnCNetLobby.ini and also declares btnMainMenu at the same corner —
+        // keep only the LAN main-menu button so the two do not overlap.
+        bool isLan = windowSectionName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase);
+        if (isLan && tree.FindNode("btnMainMenu") != null)
+        {
+            SetButton(tree, "btnMainMenu", parentW - 145, y);
+            HideButton(tree, "btnLogout");
+        }
+        else
+        {
+            SetButton(tree, "btnLogout", parentW - 145, y);
+            HideButton(tree, "btnMainMenu");
+        }
     }
 
     private static void SetButton(UiNodeTree tree, string id, int x, int y)
@@ -77,6 +91,16 @@ internal static class ChannelLobbyLayout
         btn.Props["CanvasTop"] = (double)y;
         btn.Props["Width"] = (double)ButtonWidth;
         btn.Props["Height"] = (double)ButtonHeight;
+        btn.Props["IsVisible"] = true;
+    }
+
+    private static void HideButton(UiNodeTree tree, string id)
+    {
+        UiNode? btn = tree.FindNode(id);
+        if (btn == null)
+            return;
+
+        btn.Props["IsVisible"] = false;
     }
 
     private static void PositionChatInput(UiNodeTree tree, int chatX, int chatWidth, int y)

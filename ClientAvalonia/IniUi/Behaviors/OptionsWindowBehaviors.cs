@@ -4,7 +4,8 @@ public static class OptionsWindowBehaviors
 {
     private static readonly string[] TabIds =
     [
-        "btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet", "btnTabUpdater", "btnTabComponents",
+        "btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet",
+        "btnTabSecurity", "btnTabUpdater", "btnTabComponents",
     ];
 
     public static void Register(BehaviorRegistry registry, IUiNavigationHost host)
@@ -16,6 +17,6 @@ public static class OptionsWindowBehaviors
         }
 
         registry.Register("tabControl", _ =>
-            host.ShowStatus("Options: press 1–6 to switch tabs"));
+            host.ShowStatus("Options: press 1–7 to switch tabs"));
     }
 }

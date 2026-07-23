@@ -1,4 +1,5 @@
 using ClientAvalonia.CnCNet.Protocol;
+using ClientAvalonia.CnCNet.Waf;
 using ClientCore;
 using Rampastring.Tools;
 
@@ -15,6 +16,9 @@ public sealed class CnCNetHostedGameSummary
     public required string ChannelName { get; init; }
 
     public string Revision { get; init; } = string.Empty;
+
+    /// <summary>Semicolon field count from the GAME CTCP (11 = R10, 13 = R13).</summary>
+    public int FieldCount { get; init; }
 
     public int MaxPlayers { get; init; }
 
@@ -56,9 +60,23 @@ public sealed class CnCNetHostedGameSummary
 
     public DateTime LastRefreshUtc { get; init; } = DateTime.UtcNow;
 
-    public string DisplayLine => Locked
-        ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
-        : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
+    /// <summary>Ingress WAF risk (set after parse; default Allow).</summary>
+    public WafSeverity RiskLevel { get; set; } = WafSeverity.Allow;
+
+    public string RiskSummary { get; set; } = string.Empty;
+
+    public string DisplayLine
+    {
+        get
+        {
+            string baseLine = Locked
+                ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
+                : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
+            return RiskLevel >= WafSeverity.Warn
+                ? $"[风险] {baseLine}"
+                : baseLine;
+        }
+    }
 }
 
 /// <summary>Parses inbound GAME CTCP via <see cref="CnCNetMultiplayerProtocol"/> (DXMain-aligned).</summary>

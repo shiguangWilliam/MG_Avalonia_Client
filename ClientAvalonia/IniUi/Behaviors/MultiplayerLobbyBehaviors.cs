@@ -70,7 +70,7 @@ public static class MultiplayerLobbyBehaviors
             host.TryJoinSelectedCnCNetGame();
         });
 
-        registry.Register("btnLogout", _ =>
+        void LogoutToMainMenu()
         {
             if (host.IsFloatingOverlayOpen)
             {
@@ -80,6 +80,10 @@ public static class MultiplayerLobbyBehaviors
             }
 
             host.LogoutToMainMenu();
-        });
+        }
+
+        registry.Register("btnLogout", _ => LogoutToMainMenu());
+        // LANLobby.ini defines btnMainMenu (XNA parity); same action as CnCNet btnLogout.
+        registry.Register("btnMainMenu", _ => LogoutToMainMenu());
     }
 }

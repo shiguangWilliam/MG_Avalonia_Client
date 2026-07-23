@@ -205,6 +205,7 @@ public static class CnCNetMultiplayerProtocol
             RoomName = parts[4],
             ChannelName = parts[3],
             Revision = revision,
+            FieldCount = parts.Length,
             MaxPlayers = Conversions.IntFromString(parts[2], 0),
             PlayerCount = players.Length,
             Players = players,

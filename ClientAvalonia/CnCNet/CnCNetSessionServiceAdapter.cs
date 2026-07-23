@@ -37,6 +37,7 @@ public sealed class CnCNetSessionServiceAdapter : ICnCNetSession
         _service.GameStarting += info => GameStarting?.Invoke(info);
         _service.GameRoomHostAbandoned += () => GameRoomHostAbandoned?.Invoke();
         _service.StateChanged += () => StateChanged?.Invoke();
+        _service.PrivateMessageArrived += (peer, preview) => PrivateMessageArrived?.Invoke(peer, preview);
     }
 
     /// <inheritdoc />
@@ -121,6 +122,42 @@ public sealed class CnCNetSessionServiceAdapter : ICnCNetSession
 
     /// <inheritdoc />
     public void SendChatMessage(string message) => _service.SendChatMessage(message);
+
+    /// <inheritdoc />
+    public void SendPrivateMessage(string recipient, string message)
+        => _service.SendPrivateMessage(recipient, message);
+
+    /// <inheritdoc />
+    public IReadOnlyList<(string Nick, int Unread)> GetPrivateConversationSummaries()
+        => _service.GetPrivateConversationSummaries();
+
+    /// <inheritdoc />
+    public IReadOnlyList<CnCNetChatLine> GetPrivateMessages(string peerNick)
+        => _service.GetPrivateMessages(peerNick);
+
+    /// <inheritdoc />
+    public int UnreadPrivateMessageCount => _service.UnreadPrivateMessageCount;
+
+    /// <inheritdoc />
+    public string? LastPrivateMessagePartner => _service.LastPrivateMessagePartner;
+
+    /// <inheritdoc />
+    public string? ViewingPrivateMessagePeer => _service.ViewingPrivateMessagePeer;
+
+    /// <inheritdoc />
+    public event Action<string, string>? PrivateMessageArrived;
+
+    /// <inheritdoc />
+    public void SetViewingPrivateMessagePeer(string? peerNick)
+        => _service.SetViewingPrivateMessagePeer(peerNick);
+
+    /// <inheritdoc />
+    public void EnsurePrivateConversation(string peerNick)
+        => _service.EnsurePrivateConversation(peerNick);
+
+    /// <inheritdoc />
+    public void MarkPrivateMessagesRead(string? peerNick = null)
+        => _service.MarkPrivateMessagesRead(peerNick);
 
     /// <inheritdoc />
     public void SetGameRoomReady(bool ready, bool autoReady = false)

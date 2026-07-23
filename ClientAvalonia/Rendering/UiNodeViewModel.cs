@@ -5,6 +5,7 @@ using System.Windows.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ClientAvalonia.IniUi.Behaviors;
+using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Services;
@@ -335,6 +336,91 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(Text));
         OnPropertyChanged(nameof(ShowButtonText));
         OnPropertyChanged(nameof(ButtonLabel));
+    }
+
+    public string? BriefingTitle { get; private set; }
+
+    public string? BriefingLocation { get; private set; }
+
+    public IReadOnlyList<string> BriefingObjectives { get; private set; } = [];
+
+    public string? BriefingBody { get; private set; }
+
+    public string? BriefingStatusHint { get; private set; }
+
+    public bool UseStructuredBriefing { get; private set; }
+
+    public bool HasBriefingTitle => !string.IsNullOrWhiteSpace(BriefingTitle);
+
+    public bool HasBriefingLocation => !string.IsNullOrWhiteSpace(BriefingLocation);
+
+    public bool HasBriefingObjectives => BriefingObjectives.Count > 0;
+
+    public bool HasBriefingBody => !string.IsNullOrWhiteSpace(BriefingBody);
+
+    public bool HasBriefingStatusHint => !string.IsNullOrWhiteSpace(BriefingStatusHint);
+
+    public void SetMissionBriefing(MissionBriefingParsed briefing, string? statusHint = null)
+    {
+        BriefingTitle = briefing.Title;
+        BriefingLocation = briefing.Location;
+        BriefingObjectives = briefing.Objectives;
+        BriefingBody = briefing.Body;
+        BriefingStatusHint = statusHint;
+        UseStructuredBriefing = briefing.IsStructured;
+        _displayTextOverride = briefing.IsStructured
+            ? BuildPlainBriefingFallback(briefing, statusHint)
+            : AppendStatusHint(briefing.RawFallback, statusHint);
+
+        OnPropertyChanged(nameof(BriefingTitle));
+        OnPropertyChanged(nameof(BriefingLocation));
+        OnPropertyChanged(nameof(BriefingObjectives));
+        OnPropertyChanged(nameof(BriefingBody));
+        OnPropertyChanged(nameof(BriefingStatusHint));
+        OnPropertyChanged(nameof(UseStructuredBriefing));
+        OnPropertyChanged(nameof(HasBriefingTitle));
+        OnPropertyChanged(nameof(HasBriefingLocation));
+        OnPropertyChanged(nameof(HasBriefingObjectives));
+        OnPropertyChanged(nameof(HasBriefingBody));
+        OnPropertyChanged(nameof(HasBriefingStatusHint));
+        OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(ShowButtonText));
+        OnPropertyChanged(nameof(ButtonLabel));
+    }
+
+    private static string BuildPlainBriefingFallback(MissionBriefingParsed briefing, string? statusHint)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(briefing.Title))
+            sb.AppendLine(briefing.Title);
+        if (!string.IsNullOrWhiteSpace(briefing.Location))
+            sb.AppendLine($"地点：{briefing.Location}");
+        if (!string.IsNullOrWhiteSpace(briefing.Body))
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine(briefing.Body);
+        }
+
+        if (briefing.Objectives.Count > 0)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine("任务目标：");
+            for (int i = 0; i < briefing.Objectives.Count; i++)
+                sb.AppendLine($"{i + 1}. {briefing.Objectives[i]}");
+        }
+
+        return AppendStatusHint(sb.ToString().Trim(), statusHint);
+    }
+
+    private static string AppendStatusHint(string text, string? statusHint)
+    {
+        if (string.IsNullOrWhiteSpace(statusHint))
+            return text ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+            return statusHint;
+        return $"{text.TrimEnd()}\n\n{statusHint}";
     }
 
     public void SetComboItems(IEnumerable<string> items)

@@ -1,3 +1,4 @@
+using ClientAvalonia.CnCNet.Waf;
 using Avalonia.Media;
 
 namespace ClientAvalonia.CnCNet;
@@ -22,4 +23,8 @@ public sealed class CnCNetChatLine
     /// exactly as before — backward compatible.
     /// </summary>
     public CnCNetChatScope Scope { get; init; } = CnCNetChatScope.LobbyChannel;
+
+    public WafSeverity RiskLevel { get; init; } = WafSeverity.Allow;
+
+    public string RiskSummary { get; init; } = string.Empty;
 }

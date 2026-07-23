@@ -1,5 +1,7 @@
 using Avalonia.Threading;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.CnCNet.Waf;
+using System.Collections.Concurrent;
 using System.Linq;
 
 namespace ClientAvalonia.Services;
@@ -11,6 +13,11 @@ public sealed class CnCNetSessionService : IDisposable
     public static CnCNetSessionService Instance { get; } = new();
 
     private readonly CnCNetSession _session = CnCNetSession.Instance;
+    private readonly CnCNetIngressWaf _ingressWaf = new(
+        settings: null,
+        persistUserList: true,
+        rules: WafRulePackLoader.LoadFromGamePath());
+    private readonly ConcurrentDictionary<string, DateTime> _alertThrottle = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? StateChanged;
 
@@ -21,6 +28,11 @@ public sealed class CnCNetSessionService : IDisposable
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
     public event Action? GameRoomHostAbandoned;
+
+    /// <summary>UI-thread WAF alerts (Warn/Hide/Drop heuristics). Throttled per actor.</summary>
+    public event Action<WafAlert>? WafAlertRaised;
+
+    public ICnCNetIngressWaf IngressWaf => _ingressWaf;
 
     public Func<CnCNetGameOptionsState>? GameOptionsProvider
     {
@@ -64,11 +76,33 @@ public sealed class CnCNetSessionService : IDisposable
 
     private CnCNetSessionService()
     {
+        _ingressWaf.LoadUserList();
+        _session.IngressWaf = _ingressWaf;
+        _ingressWaf.AlertRaised += OnIngressWafAlert;
+
         _session.StateChanged += OnCoreStateChanged;
+        _session.PrivateMessageArrived += (peer, preview) =>
+            Dispatcher.UIThread.Post(() => PrivateMessageArrived?.Invoke(peer, preview));
         _session.GameRoomJoined += room => Dispatcher.UIThread.Post(() => GameRoomJoined?.Invoke(room));
         _session.GameStarting += info => Dispatcher.UIThread.Post(() => GameStarting?.Invoke(info));
         _session.GameRoomJoinFailed += msg => Dispatcher.UIThread.Post(() => GameRoomJoinFailed?.Invoke(msg));
         _session.GameRoomHostAbandoned += () => Dispatcher.UIThread.Post(() => GameRoomHostAbandoned?.Invoke());
+    }
+
+    private void OnIngressWafAlert(WafAlert alert)
+    {
+        string key = alert.Event.SenderNick;
+        if (string.IsNullOrEmpty(key) && alert.Event.Game != null)
+            key = alert.Event.Game.ChannelName;
+        if (string.IsNullOrEmpty(key))
+            key = alert.Decision.MatchedRuleIds.FirstOrDefault() ?? "waf";
+
+        DateTime now = DateTime.UtcNow;
+        if (_alertThrottle.TryGetValue(key, out DateTime last) && now - last < TimeSpan.FromSeconds(12))
+            return;
+
+        _alertThrottle[key] = now;
+        Dispatcher.UIThread.Post(() => WafAlertRaised?.Invoke(alert));
     }
 
     /// <summary>Pull latest session lobby state (call when opening CnCNetLobby).</summary>
@@ -110,7 +144,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€?please wait.";
+            message = "Already joining a game room ?please wait.";
             return false;
         }
 
@@ -121,7 +155,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€?please wait.";
+            message = "Already joining a game room ?please wait.";
             return false;
         }
 
@@ -132,7 +166,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room â€?please wait.";
+            message = "Already joining a game room ?please wait.";
             return false;
         }
 
@@ -200,6 +234,32 @@ public sealed class CnCNetSessionService : IDisposable
         => _session.GameRoom?.UpdateGameLobbySettings(roomName, maxPlayers, skillLevel, password);
 
     public void SendChatMessage(string message) => _session.SendChatMessage(message);
+
+    public void SendPrivateMessage(string recipient, string message)
+        => _session.SendPrivateMessage(recipient, message);
+
+    public IReadOnlyList<(string Nick, int Unread)> GetPrivateConversationSummaries()
+        => _session.GetPrivateConversationSummaries();
+
+    public IReadOnlyList<CnCNetChatLine> GetPrivateMessages(string peerNick)
+        => _session.GetPrivateMessages(peerNick);
+
+    public int UnreadPrivateMessageCount => _session.UnreadPrivateMessageCount;
+
+    public string? LastPrivateMessagePartner => _session.LastPrivateMessagePartner;
+
+    public string? ViewingPrivateMessagePeer => _session.ViewingPrivateMessagePeer;
+
+    public event Action<string, string>? PrivateMessageArrived;
+
+    public void SetViewingPrivateMessagePeer(string? peerNick)
+        => _session.SetViewingPrivateMessagePeer(peerNick);
+
+    public void EnsurePrivateConversation(string peerNick)
+        => _session.EnsurePrivateConversation(peerNick);
+
+    public void MarkPrivateMessagesRead(string? peerNick = null)
+        => _session.MarkPrivateMessagesRead(peerNick);
 
     public void NotifyGameProcessStarted() => _session.NotifyGameProcessStarted();
 

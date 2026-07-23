@@ -331,9 +331,63 @@ public sealed class IniUiTreeBuilderSemanticsTests
         tree.FindNode("btnOrphan").Should().NotBeNull();
     }
 
+    /// <summary>
+    /// CampaignSelector is DX-code-built: BasedOn=GenericWindow.ini may carry shared leftovers
+    /// like [chkPersistentMode]. Those must NOT be invented as Campaign children (DX ignores them).
+    /// Overlay-declared controls (btnLaunch) still adopt normally.
+    /// </summary>
+    [Fact]
+    public void CampaignSelector_Skips_BasedOn_Only_Orphans_From_GenericWindow()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"camp-orphan-{System.Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "GenericWindow.ini"), """
+                [GenericWindow]
+                BackgroundTexture=genbg.png
+
+                [ExtraControls]
+                0=panelBorderTop:XNAExtraPanel
+
+                [panelBorderTop]
+                Size=10,9
+
+                [chkPersistentMode]
+                Text=Stay connected outside of the CnCNet lobby
+                """);
+
+            File.WriteAllText(Path.Combine(dir, "CampaignSelector.ini"), """
+                [INISystem]
+                BasedOn=GenericWindow.ini
+
+                [CampaignSelector]
+                Size=800,600
+
+                [btnLaunch]
+                Text=Launch
+                Location=10,10
+                """);
+
+            IniFileAst ast = IniAstBuilder.BuildFromFile(Path.Combine(dir, "CampaignSelector.ini"));
+            var registry = DefaultControlRegistry.Create();
+            var builder = new IniUiTreeBuilder(registry, new PropertyResolver(registry, new PassthroughLocalizationService()));
+            UiNodeTree tree = builder.Build(ast, "CampaignSelector");
+
+            tree.FindNode("btnLaunch").Should().NotBeNull("overlay-declared control must remain");
+            tree.FindNode("panelBorderTop").Should().NotBeNull("ExtraControls still create chrome");
+            tree.FindNode("chkPersistentMode").Should().BeNull(
+                "BasedOn-only GenericWindow leftovers must not appear on Campaign");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private sealed class PassthroughLocalizationService : ILocalizationService
     {
-        public string Localize(string? windowName, string? nodeId, string key, string value, bool notify = true)
-            => value;
+        public string Localize(string? windowName, string controlName, string attributeName, string defaultValue, bool notify = true)
+            => defaultValue;
     }
 }

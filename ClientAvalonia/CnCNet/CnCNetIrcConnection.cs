@@ -1,6 +1,7 @@
 using ClientAvalonia.Online.EventArguments;
 using ClientCore;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -38,6 +39,8 @@ public sealed class CnCNetIrcConnection : IDisposable
     private readonly Dictionary<string, int> _channelUserCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _localJoinedChannels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _localJoinedChannelWireNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (string Ident, string Host)> _actorByNick =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -179,6 +182,27 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     /// <summary>User-facing connection progress (not raw RMP/SRM traffic).</summary>
     public event Action<string>? ActivityLogged;
+
+    /// <summary>Look up last-seen IRC ident/host for a nick (from PRIVMSG/NOTICE/JOIN prefixes).</summary>
+    public bool TryGetActor(string nick, out string ident, out string host)
+    {
+        ident = string.Empty;
+        host = string.Empty;
+        if (string.IsNullOrWhiteSpace(nick))
+            return false;
+        if (!_actorByNick.TryGetValue(nick.Trim(), out (string Ident, string Host) actor))
+            return false;
+        ident = actor.Ident;
+        host = actor.Host;
+        return true;
+    }
+
+    private void RememberActorFromPrefix(string prefix)
+    {
+        if (!IrcUserPrefix.TryParse(prefix, out string nick, out string ident, out string host))
+            return;
+        _actorByNick[nick] = (ident, host);
+    }
 
     public void ConnectAsync()
     {
@@ -390,6 +414,19 @@ public sealed class CnCNetIrcConnection : IDisposable
         string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
         string colorPrefix = $"{(char)3}{ircColorId:D2}";
         SendImmediate($"PRIVMSG {normalized} :{colorPrefix}{message}");
+    }
+
+    /// <summary>DX-compatible private message (no IRC color prefix).</summary>
+    public void SendPrivateMessage(string nick, string message)
+    {
+        if (string.IsNullOrWhiteSpace(nick) || string.IsNullOrWhiteSpace(message))
+            return;
+
+        string target = nick.Trim();
+        if (target.StartsWith('#'))
+            return;
+
+        SendImmediate(FormatPrivateMessageWire(target, message));
     }
 
     public void Dispose()
@@ -745,7 +782,12 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     private static bool MessageTargetsChannel(string message, string normalizedChannel)
     {
-        foreach (string prefix in new[] { "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART " })
+        // JOIN/NAMES/PART/PRIVMSG/… — channel-switch must flush pending JOINs or 474 bans
+        // will keep re-firing from the delayed persistent queue.
+        foreach (string prefix in new[]
+                 {
+                     "JOIN ", "NAMES ", "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART ",
+                 })
         {
             if (!message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -931,11 +973,10 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (parameters.Count < 2 || parameters[1].Length == 0)
             return;
 
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string sender, out string ident, out string host))
             return;
 
-        string sender = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string target = parameters[0];
         string message = parameters[1];
 
@@ -957,8 +998,15 @@ public sealed class CnCNetIrcConnection : IDisposable
                     return;
                 }
 
+                // Private ACTION: pass the raw SOH payload so Session formats once.
+                // Pre-formatting here caused "[time] nick: ====> nick body" double wrap.
                 if (IsLocalUser(target))
-                    PrivateMessageReceived?.Invoke(this, new CnCNetPrivateMessageEventArgs(sender, display));
+                {
+                    PrivateMessageReceived?.Invoke(
+                        this,
+                        new CnCNetPrivateMessageEventArgs(sender, message, ident, host));
+                }
+
                 return;
             }
 
@@ -973,16 +1021,29 @@ public sealed class CnCNetIrcConnection : IDisposable
         }
 
         if (IsLocalUser(target))
-            PrivateMessageReceived?.Invoke(this, new CnCNetPrivateMessageEventArgs(sender, message));
+        {
+            PrivateMessageReceived?.Invoke(
+                this,
+                new CnCNetPrivateMessageEventArgs(sender, message, ident, host));
+        }
     }
+
+    /// <summary>Test hook: feed a raw IRC line through the same parser as the socket loop.</summary>
+    internal void ProcessIncomingLineForTests(string line) => HandleLine(line);
+
+    /// <summary>Test hook: set the nick used by <see cref="IsLocalUser"/>.</summary>
+    internal void SetCurrentNickForTests(string nick) => SetCurrentNick(nick);
+
+    /// <summary>DX-compatible PRIVMSG nick wire form (no color prefix).</summary>
+    internal static string FormatPrivateMessageWire(string nick, string message)
+        => $"PRIVMSG {nick.Trim()} :{message}";
 
     private void HandleCtcp(string prefix, string target, string ctcpPayload)
     {
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string sender, out _, out _))
             return;
 
-        string sender = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string ctcp = ctcpPayload.Trim('\u0001');
 
         if (IsChannelTarget(target))
@@ -1008,11 +1069,10 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (parameters.Count == 0)
             return;
 
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string user, out _, out _))
             return;
 
-        string user = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string channel = NormalizeChannelParameter(parameters[0]);
         if (IsLocalUser(user))
         {

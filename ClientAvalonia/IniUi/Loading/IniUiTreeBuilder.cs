@@ -176,16 +176,30 @@ public sealed class IniUiTreeBuilder
         if (SectionLooksLikeForeignWindow(name, windowName, section))
             return true;
 
-        // NOTE: We deliberately do NOT restrict adoption to overlay-declared sections.
-        // DX's BasedOn merge is additive (CCIniFile / XNAWindowBase.ReadChildControlAttributes):
-        // the merged IniDocument is the source of truth, and every non-meta section in it —
-        // whether declared in the overlay or inherited from a BasedOn parent — participates in
-        // control-tree construction. Earlier code gated adoption on overlaySections to "give the
-        // modder explicit control", but that silently dropped inherited sections whenever a mod
-        // used multi-level BasedOn chains (QEC: SkirmishLobby -> MultiplayerGameLobby ->
-        // GenericWindow), losing btnLaunchGame / chat boxes / map preview etc.
+        // DX XNAWindow / CampaignSelector only styles existing children (or ExtraControls/$CC).
+        // It never invents controls from orphan BasedOn sections. Avalonia must adopt orphans
+        // for INI-driven lobbies (QEC SkirmishLobby → MultiplayerGameLobby), but for DX
+        // code-built overlays like CampaignSelector, BasedOn-only leftovers such as
+        // GenericWindow.ini's [chkPersistentMode] must not become real UI.
+        if (RestrictOrphansToOverlayFile(windowName)
+            && overlaySections.Count > 0
+            && !overlaySections.Contains(name))
+            return true;
+
+        // NOTE: Do NOT globally restrict adoption to overlay sections — that breaks QEC
+        // BasedOn chains where btnLaunchGame lives in MultiplayerGameLobby.ini.
         return false;
     }
+
+    /// <summary>
+    /// Windows that DX builds in C# (then themes via INI). Orphan adoption should only
+    /// materialize sections declared in the window's own INI file.
+    /// </summary>
+    private static bool RestrictOrphansToOverlayFile(string windowName)
+        => windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("PrivacyNotification", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("UpdateQueryWindow", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("ManualUpdateQueryWindow", StringComparison.OrdinalIgnoreCase);
 
     private static bool SectionLooksLikeForeignWindow(string sectionName, string activeWindow, IniSection section)
     {
