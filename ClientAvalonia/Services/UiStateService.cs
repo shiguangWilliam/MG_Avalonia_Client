@@ -1,4 +1,6 @@
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.Core;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using ClientUpdater;
@@ -27,8 +29,14 @@ public sealed class UiStateService : IUiStateService
     {
         GameVersion = ReadGameVersion();
         UpdateStatusText = "Click to check for updates.";
-        int count = CnCNetSessionService.Instance.OnlinePlayerCount;
+        int count = ResolveOnlinePlayerCount();
         OnlinePlayerCountText = count >= 0 ? count.ToString() : "—";
+    }
+
+    private static int ResolveOnlinePlayerCount()
+    {
+        try { return EnvironmentServices.Resolve<ICnCNetSession>().OnlinePlayerCount; }
+        catch (InvalidOperationException) { return -1; }
     }
 
     public void SetUpdateStatusText(string text) => UpdateStatusText = text;

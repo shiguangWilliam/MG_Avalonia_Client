@@ -12,11 +12,11 @@ and the constant lives in `Fixture/DxAliases.cs`. Update the table when DX moves
 | Contract ID | DX anchor | What it locks |
 |-------------|-----------|---------------|
 | `DX-GAME-FIELDS` | `DXGUI/Multiplayer/CnCNet/CnCNetLobby.cs:1519-1563` | GAME CTCP 13-field order: revision, gameVersion, maxPlayers, channel, displayName, flags, players, map, gameMode, tunnel(host:port), loadedGameId, skillLevel, mapHash |
-| `DX-GAME-REJECT-COUNT` | same | field counts other than 13 (or 11 via legacy) are rejected |
-| `DX-GAME-REVISION` | same `:1541` | revision must equal `ProgramConstants.CNCNET_PROTOCOL_REVISION` |
+| `DX-GAME-REJECT-COUNT` | same | field counts other than 13 are rejected (DX strict) |
+| `DX-GAME-REVISION` | same `:1541` | revision must equal const `ProgramConstants.CNCNET_PROTOCOL_REVISION` (=R13) |
 | `DX-GAME-FLAGS-DEFAULTS` | same `:1547-1551` | locked/passworded/closed/loaded/ladder defaults |
 | `DX-GAME-NOTUNNEL-REJECT` | same `:1572-1589` | reject when `tunnels.Count == 0` |
-| `DX-GAME-LEGACY-11` | same | R10 11-field fallback path |
+| `DX-PROTOCOL-R13` | `ClientCore/ProgramConstants.cs` | compile-time `CNCNET_PROTOCOL_REVISION = "R13"`; no R10 override / no 11-field legacy |
 | `DX-PASSWORD-SHA1-CHANNEL` | `DXGUI/Multiplayer/CnCNet/CnCNetLobby.cs:1052` | DX upstream (create + primary join): `SHA1(channelName)[..10]` |
 | `MG-PASSWORD-SHA1-CHANNEL-ROOM` | MG `clientdx.exe` IL | MG join fallback: `SHA1(channelName + roomName)[..10]` ASCII |
 | `LNOD-DX-CHANNEL-CONVENTION` | LNOD `Client/client.log` JOIN | empty Collection → `#cncnet-{LocalGame}` / `#cncnet-{LocalGame}-games` |

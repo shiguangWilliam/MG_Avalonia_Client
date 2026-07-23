@@ -20,13 +20,14 @@ internal static class OptionsWindowLayout
         "AudioOptionsPanel",
         "GameOptionsPanel",
         "CnCNetOptionsPanel",
+        "SecurityOptionsPanel",
         "UpdaterOptionsPanel",
         "ComponentsPanel",
     ];
 
     private static readonly string[] TabTitles =
     [
-        "显示", "音频", "游戏", "CnCNet", "更新", "组件",
+        "显示", "音频", "游戏", "CnCNet", "安全", "更新", "组件",
     ];
 
     private static readonly Dictionary<string, string> ControlToPanel = BuildControlToPanelMap();
@@ -65,6 +66,7 @@ internal static class OptionsWindowLayout
         RendererOptionsBootstrap.Apply(tree);
         OptionsGameControlsBootstrap.Apply(tree);
         OptionsCnCNetControlsBootstrap.Apply(tree);
+        OptionsSecurityControlsBootstrap.Apply(tree);
         OptionsAudioControlsBootstrap.Apply(tree);
         OptionsUpdaterControlsBootstrap.Apply(tree);
         OptionsComponentsControlsBootstrap.Apply(tree);
@@ -75,8 +77,13 @@ internal static class OptionsWindowLayout
 
     private static void EnsureTabButtons(UiNode root)
     {
-        string[] ids = ["btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet", "btnTabUpdater", "btnTabComponents"];
+        string[] ids =
+        [
+            "btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet",
+            "btnTabSecurity", "btnTabUpdater", "btnTabComponents",
+        ];
         int x = 12;
+        const double tabWidth = 74.0;
         for (int i = 0; i < ids.Length; i++)
         {
             if (root.Children.Any(c => c.Id.Equals(ids[i], StringComparison.OrdinalIgnoreCase)))
@@ -85,14 +92,14 @@ internal static class OptionsWindowLayout
             var btn = CreatePanelNode(ids[i], "XNAClientButton", "DxTabButton");
             btn.Props["CanvasLeft"] = (double)x;
             btn.Props["CanvasTop"] = 12.0;
-            btn.Props["Width"] = 90.0;
+            btn.Props["Width"] = tabWidth;
             btn.Props["Height"] = 26.0;
             btn.Props["Text"] = TabTitles[i];
             btn.Props["TabIndex"] = i;
             btn.Props["IsTabSelected"] = i == 0;
             btn.Parent = root;
             root.Children.Add(btn);
-            x += 92;
+            x += (int)tabWidth + 2;
         }
 
         foreach (UiNode child in root.Children)
@@ -102,7 +109,7 @@ internal static class OptionsWindowLayout
 
             child.TemplateKey = "DxTabButton";
             if (!child.Props.ContainsKey("Width"))
-                child.Props["Width"] = 90.0;
+                child.Props["Width"] = tabWidth;
             if (!child.Props.ContainsKey("Height"))
                 child.Props["Height"] = 26.0;
         }
@@ -128,8 +135,13 @@ internal static class OptionsWindowLayout
 
     private static void PositionTabButtons(UiNode root)
     {
-        string[] ids = ["btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet", "btnTabUpdater", "btnTabComponents"];
+        string[] ids =
+        [
+            "btnTabDisplay", "btnTabAudio", "btnTabGame", "btnTabCnCNet",
+            "btnTabSecurity", "btnTabUpdater", "btnTabComponents",
+        ];
         int x = 12;
+        const double tabWidth = 74.0;
         for (int i = 0; i < ids.Length; i++)
         {
             UiNode? btn = root.Children.FirstOrDefault(c => c.Id.Equals(ids[i], StringComparison.OrdinalIgnoreCase));
@@ -138,11 +150,12 @@ internal static class OptionsWindowLayout
 
             btn.Props["CanvasLeft"] = (double)x;
             btn.Props["CanvasTop"] = 12.0;
-            btn.Props["Width"] = 90.0;
+            btn.Props["Width"] = tabWidth;
             btn.Props["Height"] = 26.0;
             btn.TemplateKey = "DxTabButton";
             btn.Props["TabIndex"] = i;
-            x += 92;
+            btn.Props["Text"] = TabTitles[i];
+            x += (int)tabWidth + 2;
         }
     }
 
@@ -187,7 +200,7 @@ internal static class OptionsWindowLayout
         btn.Props["Text"] = text;
         btn.Props["IsVisible"] = true;
         btn.Props["Width"] = 92.0;
-        btn.Props["Height"] = 23.0;
+        btn.Props["Height"] = 32.0;
     }
 
     private static void PositionFooterButtons(UiNodeTree tree)
@@ -197,11 +210,11 @@ internal static class OptionsWindowLayout
         if (btnSave != null)
         {
             btnSave.Props["CanvasLeft"] = 12.0;
-            btnSave.Props["CanvasTop"] = (double)(DialogHeight - 35);
+            btnSave.Props["CanvasTop"] = (double)(DialogHeight - 40);
             btnSave.Props["IsVisible"] = true;
             btnSave.Props["Text"] = OptionsFooterChrome.ResolveSaveText();
             btnSave.Props["Width"] = 92.0;
-            btnSave.Props["Height"] = 23.0;
+            btnSave.Props["Height"] = 32.0;
         }
 
         UiNode? btnCancel = tree.Root.Children.FirstOrDefault(c =>
@@ -209,11 +222,11 @@ internal static class OptionsWindowLayout
         if (btnCancel != null)
         {
             btnCancel.Props["CanvasLeft"] = (double)(DialogWidth - 104);
-            btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 35);
+            btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 40);
             btnCancel.Props["IsVisible"] = true;
             btnCancel.Props["Text"] = OptionsFooterChrome.ResolveCancelText();
             btnCancel.Props["Width"] = 92.0;
-            btnCancel.Props["Height"] = 23.0;
+            btnCancel.Props["Height"] = 32.0;
         }
     }
 
@@ -303,6 +316,14 @@ internal static class OptionsWindowLayout
 
     private static string InferPanel(string controlId)
     {
+        if (controlId.StartsWith("chkWaf", StringComparison.OrdinalIgnoreCase)
+            || controlId.StartsWith("lblWaf", StringComparison.OrdinalIgnoreCase)
+            || controlId.StartsWith("tbWaf", StringComparison.OrdinalIgnoreCase)
+            || controlId.StartsWith("btnWaf", StringComparison.OrdinalIgnoreCase)
+            || controlId.Equals("ddWafSensitivity", StringComparison.OrdinalIgnoreCase)
+            || controlId.Equals("lbWafBlocklist", StringComparison.OrdinalIgnoreCase))
+            return "SecurityOptionsPanel";
+
         if (controlId.StartsWith("chkPing", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkWriteInstall", StringComparison.OrdinalIgnoreCase)
             || controlId.StartsWith("chkPlaySound", StringComparison.OrdinalIgnoreCase)
@@ -393,6 +414,7 @@ internal static class OptionsWindowLayout
             "chkDisablePrivateMessagePopup", "chkConnectOnStartup", "chkAllowGameInvitesFromFriendsOnly",
             "chkDiscordIntegration", "chkPingUnofficialTunnels", "chkWriteInstallPathToRegistry",
             "chkSteamIntegration", "lblAllowPrivateMessagesFrom", "ddAllowPrivateMessagesFrom",
+            "lblAllowPrivateMessagesFromHint",
         })
             map[id] = "CnCNetOptionsPanel";
 
@@ -419,6 +441,17 @@ internal static class OptionsWindowLayout
             "chkAutoCheck", "btnForceUpdate",
         })
             map[id] = "UpdaterOptionsPanel";
+
+        foreach (string id in new[]
+        {
+            "lblWafIntro", "chkWafEnabled", "chkWafCheckProtocol", "chkWafCheckListingText",
+            "chkWafCheckChannelChat", "chkWafCheckPrivateChat", "chkWafAutoHideHighRisk",
+            "chkWafAllowHeuristicDrop", "lblWafSensitivity", "ddWafSensitivity",
+            "lblWafBlocklistCount", "lbWafBlocklist", "lblWafBlockKey", "tbWafBlockKey",
+            "lblWafBlockNote", "tbWafBlockNote", "btnWafStrategies",
+            "btnWafBlockAdd", "btnWafBlockRemove", "btnWafBlockClear",
+        })
+            map[id] = "SecurityOptionsPanel";
 
         return map;
     }

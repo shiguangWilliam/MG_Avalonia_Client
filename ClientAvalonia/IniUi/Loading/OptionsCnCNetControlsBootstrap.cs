@@ -72,6 +72,11 @@ internal static class OptionsCnCNetControlsBootstrap
                 "Friends".L10N("Client:DTAConfig:PMFriends") + "," +
                 "None".L10N("Client:DTAConfig:PMNone");
         }
+
+        UiNode hint = EnsureOnPanel(tree, panel, "lblAllowPrivateMessagesFromHint", "XNALabel", "DxLabel");
+        hint.Props["Text"] = "提示：来源策略优先于内容防护；选「所有人」时完全依赖设置→安全中的入网 WAF。";
+        hint.Props["Width"] = 520.0;
+        hint.Props["Height"] = 32.0;
     }
 
     /// <summary>Find-or-create and always reparent onto the CnCNet panel (INI often leaves the dropdown on root).</summary>

@@ -1,16 +1,19 @@
 using ClientAvalonia.Online.EventArguments;
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
+using ClientAvalonia.CnCNet.Tunnels;
+using ClientAvalonia.CnCNet.Waf;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Avalonia.Media;
 using ClientCore;
+using ClientCore.Enums;
 using ClientCore.Settings;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.CnCNet;
 
-using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.</summary>
 public sealed class CnCNetSession : IDisposable
 {
@@ -22,6 +25,11 @@ public sealed class CnCNetSession : IDisposable
     private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _joinedBroadcastChannels = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _followedGameIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _gameBroadcastRejectHintsShown = new(StringComparer.Ordinal);
+    /// <summary>Channels that returned permanent JOIN denial (e.g. IRC 474 +b). Do not auto-retry.</summary>
+    private readonly HashSet<string> _joinPermanentlyDenied = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CnCNetPrivateMessageThread> _privateThreads =
+        new(StringComparer.OrdinalIgnoreCase);
     private bool _settingsSavedSubscribed;
 
     private CnCNetIrcConnection? _connection;
@@ -34,6 +42,7 @@ public sealed class CnCNetSession : IDisposable
     private CnCNetActiveGameRoom? _activeGameRoom;
     private CnCNetGameRoomSession? _gameRoom;
     private readonly CnCNetGameBroadcastService _gameBroadcast = new();
+    private readonly CnCNetGameBroadcastDialect _broadcastDialect = new();
     private string _systemId = string.Empty;
     private bool _autoReconnect;
     private int _reconnectAttempts;
@@ -62,6 +71,13 @@ public sealed class CnCNetSession : IDisposable
 
     public IReadOnlyList<CnCNetTunnel> Tunnels { get; private set; } = [];
 
+    /// <summary>
+    /// Min-heap of tunnels by latency (low-latency-tunnel.md v2). Updated
+    /// automatically whenever tunnel pings complete. Raises
+    /// <see cref="TunnelSorter.BestTunnelChanged"/> on the calling thread.
+    /// </summary>
+    public TunnelSorter TunnelSorter { get; } = new();
+
     public CnCNetIrcConnection? Connection => _connection;
 
     public CnCNetGameCollection? GameCollection => _gameCollection;
@@ -88,6 +104,12 @@ public sealed class CnCNetSession : IDisposable
 
     public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts { get; set; }
 
+    /// <summary>Ingress WAF between IRC truth and lobby state writes. Owned/configured by SessionService.</summary>
+    public ICnCNetIngressWaf? IngressWaf { get; set; }
+
+    /// <summary>Test-only override for <see cref="CnCNetPrivateMessagePolicy.FromUserSettings"/>.</summary>
+    internal AllowPrivateMessagesFromEnum? PrivateMessagePolicyOverrideForTests { get; set; }
+
     private const double HostedGameLifetimeSeconds = 35;
     private const int GameRoomJoinTimeoutSeconds = 45;
     private const int MaxGameRoomJoinRetries = 1;
@@ -97,7 +119,8 @@ public sealed class CnCNetSession : IDisposable
 
     public void EnsureStarted()
     {
-        LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (legacy GAME={ProgramConstants.UsesLegacyCnCNetGameBroadcast}).");
+        _gameBroadcast.Dialect = _broadcastDialect;
+        LogActivity($"Protocol revision {ProgramConstants.CNCNET_PROTOCOL_REVISION} (emit falls back per channel dialect).");
 
         if (_playerCountService == null)
         {
@@ -213,7 +236,13 @@ public sealed class CnCNetSession : IDisposable
         }
 
         LogActivity($"Loaded {updated.Count} NAT tunnels.");
+        _gameBroadcastRejectHintsShown.Clear();
         RevalidateHostedGamesAgainstTunnels();
+
+        // low-latency-tunnel.md v2: reset the heap on each tunnel-list refresh
+        // so stale entries from the previous list don't bias BestTunnelChanged.
+        TunnelSorter.Clear();
+
         PingListedTunnelsAsync(updated);
 
         if (_activeGameRoom != null && _gameRoom is { IsLocalJoined: true })
@@ -275,6 +304,11 @@ public sealed class CnCNetSession : IDisposable
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 tunnel.UpdatePing();
+
+                // low-latency-tunnel.md v2: feed every successful or failed
+                // measurement into the min-heap so the best-tunnel signal fires
+                // as soon as the fastest tunnel responds.
+                TunnelSorter.Update(tunnel, tunnel.PingInMs);
 
                 if (_activeGameRoom != null
                     && ReferenceEquals(_activeGameRoom.Tunnel, tunnel)
@@ -428,8 +462,20 @@ public sealed class CnCNetSession : IDisposable
         if (previous != null)
         {
             string prevChat = NormalizeIrcChannel(previous.ChatChannel);
+            _connection.ClearSendQueueForChannel(previous.ChatChannel);
             if (prevChat != localChat && prevChat != cncnetChat)
                 _connection.PartChannel(previous.ChatChannel);
+
+            // Leaving a game's listing frequency must PART + cancel pending JOINs; otherwise a
+            // banned broadcast (IRC 474) keeps retrying forever after the user switched away.
+            if (previous.HasGameBroadcast)
+            {
+                string prevBroadcast = previous.GameBroadcastChannel!;
+                _connection.ClearSendQueueForChannel(prevBroadcast);
+                // Always PART: membership may be pending (JOIN in flight / 474 pending).
+                _connection.PartChannel(prevBroadcast);
+                DropBroadcastChannelMembership(prevBroadcast);
+            }
         }
 
         _currentGame = next;
@@ -438,13 +484,25 @@ public sealed class CnCNetSession : IDisposable
         _namesRetryCount = 0;
 
         string nextChat = NormalizeIrcChannel(next.ChatChannel);
-        if (nextChat != localChat && nextChat != cncnetChat)
-            _connection.JoinChannelInstant(next.ChatChannel, "ra1-derp");
+        if (IsJoinPermanentlyDenied(nextChat))
+        {
+            LogActivity(
+                $"Cannot switch into {next.UiName}: previously banned from {nextChat} (IRC 474).",
+                notifyUi: true);
+        }
+        else if (nextChat != localChat && nextChat != cncnetChat)
+        {
+            _connection.JoinChannelPersistent(next.ChatChannel, "ra1-derp");
+        }
 
         JoinGameBroadcastChannel(next);
         _connection.RequestChannelNames(next.ChatChannel);
         LobbyState.SetChannelName(next.UiName, next.ChatChannel);
         UpdateChannelListState();
+        // C3: refresh the hosted-game list against the new broadcast channel.
+        // _gamesByBroadcast is keyed by channel name, so this immediately drops
+        // the previous channel's games from the UI. The new channel's games will
+        // appear as their GAME CTCPs arrive (OnGameBroadcast → RefreshHostedGames).
         RefreshHostedGames();
         RefreshLobbyPlayers();
         LogActivity($"Switched to channel {next.UiName} ({next.ChatChannel}).");
@@ -485,8 +543,19 @@ public sealed class CnCNetSession : IDisposable
         if (_joinedBroadcastChannels.Contains(broadcast))
             return;
 
-        // XNA: Channel.Join() every welcome; only mark joined after local JOIN echo.
-        _connection.JoinChannelInstant(game.GameBroadcastChannel!);
+        if (IsJoinPermanentlyDenied(broadcast))
+        {
+            LogActivity(
+                $"Skipping JOIN {broadcast}: permanently denied (ban/invite). Channel list will stay empty for this game.",
+                notifyUi: false);
+            return;
+        }
+
+        // DX Persistent Channel.Join: random delay + queue (dedupe key JOIN:#channel).
+        // Instant welcome bursts previously flooded GameSurge; some hubs silently dropped JOINs.
+        bool sent = _connection.JoinChannelPersistent(game.GameBroadcastChannel!);
+        if (!sent)
+            LogActivity($"Failed to JOIN game broadcast channel {broadcast} (not connected).");
     }
 
     /// <summary>Re-JOIN listing channels when membership was lost (XNA welcome / channel rejoin).</summary>
@@ -518,14 +587,22 @@ public sealed class CnCNetSession : IDisposable
     {
         string normalized = NormalizeIrcChannel(channel);
         if (_joinedBroadcastChannels.Add(normalized))
+        {
+            _joinPermanentlyDenied.Remove(normalized);
+            // Prefer R13 until the first peer GAME locks this listing channel.
+            _broadcastDialect.EnterChannel(normalized);
             LogActivity($"Joined game broadcast channel {normalized}.", notifyUi: false);
+        }
     }
 
     private void DropBroadcastChannelMembership(string channel)
     {
         string normalized = NormalizeIrcChannel(channel);
         if (_joinedBroadcastChannels.Remove(normalized))
+        {
+            _broadcastDialect.LeaveChannel(normalized);
             LogActivity($"Left game broadcast channel {normalized}.", notifyUi: false);
+        }
     }
 
     private bool IsCurrentGameBroadcast(string normalizedBroadcastChannel)
@@ -555,6 +632,8 @@ public sealed class CnCNetSession : IDisposable
                 _connection.PartChannel(broadcast);
 
             _joinedBroadcastChannels.Clear();
+            _joinPermanentlyDenied.Clear();
+            _broadcastDialect.Clear();
             _connection.Disconnect();
         }
     }
@@ -767,6 +846,148 @@ public sealed class CnCNetSession : IDisposable
         StateChanged?.Invoke();
     }
 
+    /// <summary>Send a private IRC message (DX PRIVMSG nick :text, no color prefix).</summary>
+    public void SendPrivateMessage(string recipient, string message)
+    {
+        if (_connection is not { IsConnected: true })
+            return;
+
+        string nick = StripIrcPrefixes(recipient).Trim();
+        string text = message.Trim();
+        if (string.IsNullOrWhiteSpace(nick) || string.IsNullOrWhiteSpace(text))
+            return;
+
+        if (text.Length > 200)
+            text = text[..200];
+
+        _connection.SendPrivateMessage(nick, text);
+
+        var line = new CnCNetChatLine
+        {
+            Scope = CnCNetChatScope.PrivateMessage,
+            Sender = LocalNick,
+            DisplayText = FormatChatLine(LocalNick, text, DateTime.Now),
+            TextColor = CnCNetIrcChatText.DefaultChatColor,
+        };
+        AppendPrivateMessage(nick, line, incrementUnread: false);
+        LastPrivateMessagePartner = nick;
+        StateChanged?.Invoke();
+    }
+
+    public IReadOnlyList<(string Nick, int Unread)> GetPrivateConversationSummaries()
+        => _privateThreads.Values
+            .OrderByDescending(t => t.LastActivityUtc)
+            .Select(t => (t.PeerNick, t.UnreadCount))
+            .ToList();
+
+    public IReadOnlyList<CnCNetChatLine> GetPrivateMessages(string peerNick)
+    {
+        string nick = StripIrcPrefixes(peerNick);
+        return _privateThreads.TryGetValue(nick, out CnCNetPrivateMessageThread? thread)
+            ? thread.Messages
+            : [];
+    }
+
+    public int UnreadPrivateMessageCount => _privateThreads.Values.Sum(t => t.UnreadCount);
+
+    public string? LastPrivateMessagePartner { get; private set; }
+
+    /// <summary>
+    /// Peer currently focused in the PM overlay. Incoming messages from this nick do not
+    /// increment unread and do not raise status-bar popups.
+    /// </summary>
+    public string? ViewingPrivateMessagePeer { get; private set; }
+
+    /// <summary>
+    /// Raised after a private message is stored (UI may show a brief status toast).
+    /// Args: peer nick, preview text (already sanitized for display).
+    /// </summary>
+    public event Action<string, string>? PrivateMessageArrived;
+
+    public void SetViewingPrivateMessagePeer(string? peerNick)
+    {
+        if (string.IsNullOrWhiteSpace(peerNick))
+        {
+            ViewingPrivateMessagePeer = null;
+            return;
+        }
+
+        ViewingPrivateMessagePeer = StripIrcPrefixes(peerNick);
+        if (_privateThreads.TryGetValue(ViewingPrivateMessagePeer, out CnCNetPrivateMessageThread? thread)
+            && thread.MarkRead())
+        {
+            StateChanged?.Invoke();
+        }
+    }
+
+    public void EnsurePrivateConversation(string peerNick)
+    {
+        string nick = StripIrcPrefixes(peerNick);
+        if (string.IsNullOrWhiteSpace(nick))
+            return;
+
+        if (!_privateThreads.ContainsKey(nick))
+            _privateThreads[nick] = new CnCNetPrivateMessageThread(nick);
+
+        LastPrivateMessagePartner = nick;
+        _privateThreads[nick].MarkRead();
+        StateChanged?.Invoke();
+    }
+
+    public void MarkPrivateMessagesRead(string? peerNick = null)
+    {
+        bool changed = false;
+        if (string.IsNullOrWhiteSpace(peerNick))
+        {
+            foreach (CnCNetPrivateMessageThread thread in _privateThreads.Values)
+                changed |= thread.MarkRead();
+        }
+        else if (_privateThreads.TryGetValue(StripIrcPrefixes(peerNick), out CnCNetPrivateMessageThread? thread))
+        {
+            changed = thread.MarkRead();
+        }
+
+        if (changed)
+            StateChanged?.Invoke();
+    }
+
+    private void AppendPrivateMessage(string peerNick, CnCNetChatLine line, bool incrementUnread)
+    {
+        string nick = StripIrcPrefixes(peerNick);
+        if (!_privateThreads.TryGetValue(nick, out CnCNetPrivateMessageThread? thread))
+        {
+            thread = new CnCNetPrivateMessageThread(nick);
+            _privateThreads[nick] = thread;
+        }
+
+        thread.Append(line, incrementUnread);
+    }
+
+    /// <summary>Test hook: clear PM threads between serial tests.</summary>
+    internal void ResetPrivateMessagingForTests()
+    {
+        _privateThreads.Clear();
+        LastPrivateMessagePartner = null;
+        ViewingPrivateMessagePeer = null;
+        PrivateMessagePolicyOverrideForTests = null;
+    }
+
+    /// <summary>Test hook: seed chat-channel membership used by PM accept policy.</summary>
+    internal void SeedChannelUsersForTests(params string[] nicks)
+    {
+        _channelUsers.Clear();
+        foreach (string nick in nicks)
+        {
+            string name = StripIrcPrefixes(nick);
+            if (!string.IsNullOrWhiteSpace(name))
+                _channelUsers.Add(name);
+        }
+    }
+
+    /// <summary>Test hook: run the same path as <see cref="OnPrivateMessageReceived"/>.</summary>
+    internal void ProcessPrivateMessageReceivedForTests(string sender, string message)
+        => OnPrivateMessageReceived(null, new CnCNetPrivateMessageEventArgs(sender, message));
+
     public void SetChatColorIndex(int index)
     {
         LobbyState.SelectedChatColorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(index);
@@ -953,13 +1174,50 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnChannelJoinFailed(int code, string channel, string detail)
     {
+        string normalized = NormalizeIrcChannel(channel);
+        _connection?.ClearSendQueueForChannel(channel);
+
+        // Permanent denials: ban (+b), channel does not exist, too many channels.
+        // Transient: 439 (target change too fast), 471 (limit) may recover — still avoid tight loops.
+        bool permanent = code is 474 or 473 or 476 or 405;
+        if (permanent)
+            _joinPermanentlyDenied.Add(normalized);
+
         if (!string.IsNullOrWhiteSpace(channel) && IsKnownBroadcastChannel(channel))
         {
             DropBroadcastChannelMembership(channel);
-            if (_autoReconnect)
+            if (permanent)
             {
-                LogActivity($"Game broadcast channel join failed (IRC {code}) ??will retry.", notifyUi: false);
+                LogActivity(
+                    $"Game broadcast JOIN denied for {normalized} (IRC {code}) — not retrying. {detail}".Trim(),
+                    notifyUi: true);
+                return;
+            }
+
+            if (_autoReconnect && !IsJoinPermanentlyDenied(normalized))
+            {
+                LogActivity($"Game broadcast channel join failed (IRC {code}) — will retry.", notifyUi: false);
                 EnsureGameBroadcastChannelsJoined();
+            }
+
+            return;
+        }
+
+        // Chat-channel ban while switching (e.g. #cncnet-mo +b): stop and surface clearly.
+        if (_currentGame != null
+            && NormalizeIrcChannel(_currentGame.ChatChannel).Equals(normalized, StringComparison.OrdinalIgnoreCase))
+        {
+            if (code == 474)
+            {
+                LogActivity(
+                    $"Cannot join chat channel {_currentGame.UiName} ({normalized}): you are banned.",
+                    notifyUi: true);
+            }
+            else
+            {
+                LogActivity(
+                    $"Cannot join chat channel {_currentGame.UiName} ({normalized}) (IRC {code}): {detail}".Trim(),
+                    notifyUi: true);
             }
 
             return;
@@ -990,11 +1248,11 @@ public sealed class CnCNetSession : IDisposable
 
         string message = code switch
         {
-            473 => "Cannot join ??game room is locked.",
-            471 => "Cannot join ??game room is full.",
+            473 => "Cannot join — game room is locked.",
+            471 => "Cannot join — game room is full.",
             475 => "Incorrect game room password.",
             474 => "You are banned from this game room.",
-            439 => "Cannot join ??changing channels too fast. Wait a moment and try again.",
+            439 => "Cannot join — changing channels too fast. Wait a moment and try again.",
             _ => string.IsNullOrWhiteSpace(detail)
                 ? $"Cannot join game room (IRC {code})."
                 : detail.TrimEnd('.') + ".",
@@ -1002,6 +1260,9 @@ public sealed class CnCNetSession : IDisposable
 
         FailGameRoomJoin(message);
     }
+
+    private bool IsJoinPermanentlyDenied(string normalizedChannel)
+        => _joinPermanentlyDenied.Contains(NormalizeIrcChannel(normalizedChannel));
 
     public void Dispose()
     {
@@ -1091,7 +1352,18 @@ public sealed class CnCNetSession : IDisposable
     {
         if (ctcp.StartsWith("INVITE ", StringComparison.Ordinal))
         {
-            HandleGameInvite(sender, ctcp[7..]);
+            WafDecision inviteDecision = EvaluateCtcpWaf(
+                WafIngressKind.ChannelCtcp,
+                WafSurface.Protocol,
+                channel,
+                sender,
+                ctcpCommand: "INVITE",
+                ctcpPayload: ctcp[7..],
+                displayText: ctcp[7..]);
+            if (inviteDecision.Severity == WafSeverity.Drop)
+                return;
+
+            HandleGameInvite(sender, ctcp[7..], skipWaf: true);
             return;
         }
 
@@ -1100,13 +1372,91 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnPrivateCtcp(object? sender, PrivateCTCPEventArgs e)
     {
-        if (e.Message.StartsWith("INVITE ", StringComparison.Ordinal))
-            HandleGameInvite(e.Sender, e.Message[7..]);
+        string payload = e.Message ?? string.Empty;
+        string command = payload;
+        string args = string.Empty;
+        int sp = payload.IndexOf(' ');
+        if (sp > 0)
+        {
+            command = payload[..sp];
+            args = payload[(sp + 1)..];
+        }
+
+        WafDecision decision = EvaluateCtcpWaf(
+            WafIngressKind.PrivateCtcp,
+            WafSurface.PrivateMessage,
+            channel: string.Empty,
+            sender: e.Sender,
+            ctcpCommand: command,
+            ctcpPayload: args,
+            displayText: args);
+
+        if (decision.Severity == WafSeverity.Drop)
+            return;
+
+        if (payload.StartsWith("INVITE ", StringComparison.Ordinal))
+            HandleGameInvite(e.Sender, payload[7..], skipWaf: true);
     }
 
     private void OnPrivateMessageReceived(object? sender, CnCNetPrivateMessageEventArgs e)
     {
-        LogActivity($"PM from {e.Sender}: {e.Message}", notifyUi: false);
+        string peer = StripIrcPrefixes(e.Sender);
+        if (string.IsNullOrWhiteSpace(peer))
+            return;
+
+        AllowPrivateMessagesFromEnum policy =
+            PrivateMessagePolicyOverrideForTests ?? CnCNetPrivateMessagePolicy.FromUserSettings();
+        bool inChannel = _channelUsers.Contains(peer);
+        if (!CnCNetPrivateMessagePolicy.ShouldAccept(policy, inChannel))
+        {
+            LogActivity($"PM from {peer} ignored (AllowPrivateMessagesFrom={policy}).", notifyUi: false);
+            return;
+        }
+
+        bool isAction = CnCNetIrcChatText.TryNormalizeActionCtcp(e.Message, out string actionBody);
+        string textSource = isAction ? actionBody : e.Message;
+        (string text, Color color) = CnCNetIrcChatText.Parse(
+            textSource, CnCNetIrcChatText.DefaultChatColor);
+
+        WafDecision decision = EvaluateChatWaf(
+            isAction ? WafIngressKind.PrivateAction : WafIngressKind.PrivateChat,
+            WafSurface.PrivateMessage,
+            channel: string.Empty,
+            sender: peer,
+            displayText: text,
+            rawBody: e.Message,
+            senderIdent: e.Ident,
+            senderHost: e.Host);
+
+        if (decision.Severity == WafSeverity.Drop)
+            return;
+
+        // Private ACTION: "[time] nick: ====> body" (nick once — do not pre-embed nick in body).
+        string display = FormatChatLine(peer, isAction ? $"====> {text}" : text, DateTime.Now);
+        if (decision.Severity >= WafSeverity.Warn)
+            display = "[风险] " + display;
+
+        var line = new CnCNetChatLine
+        {
+            Scope = CnCNetChatScope.PrivateMessage,
+            Sender = peer,
+            DisplayText = display,
+            TextColor = color,
+            RiskLevel = decision.Severity,
+            RiskSummary = decision.Summary,
+        };
+
+        bool viewingThisPeer = ViewingPrivateMessagePeer != null
+            && ViewingPrivateMessagePeer.Equals(peer, StringComparison.OrdinalIgnoreCase);
+
+        AppendPrivateMessage(peer, line, incrementUnread: !viewingThisPeer);
+        LastPrivateMessagePartner = peer;
+        LogActivity($"PM from {peer}: {text}", notifyUi: false);
+
+        if (!viewingThisPeer)
+            PrivateMessageArrived?.Invoke(peer, text);
+
+        StateChanged?.Invoke();
     }
 
     private void OnUserKicked(object? sender, KickEventArgs e)
@@ -1160,8 +1510,22 @@ public sealed class CnCNetSession : IDisposable
             _channelUsers.Add(newName);
     }
 
-    private void HandleGameInvite(string sender, string arguments)
+    private void HandleGameInvite(string sender, string arguments, bool skipWaf = false)
     {
+        if (!skipWaf)
+        {
+            WafDecision decision = EvaluateCtcpWaf(
+                WafIngressKind.PrivateCtcp,
+                WafSurface.Protocol,
+                channel: string.Empty,
+                sender,
+                ctcpCommand: "INVITE",
+                ctcpPayload: arguments,
+                displayText: arguments);
+            if (decision.Severity == WafSeverity.Drop)
+                return;
+        }
+
         string[] parts = arguments.Split(';');
         if (parts.Length < 2)
             return;
@@ -1200,7 +1564,7 @@ public sealed class CnCNetSession : IDisposable
             if (wasFollowed && !followed)
             {
                 _connection.PartChannel(game.GameBroadcastChannel!);
-                _joinedBroadcastChannels.Remove(NormalizeIrcChannel(game.GameBroadcastChannel!));
+                DropBroadcastChannelMembership(game.GameBroadcastChannel!);
                 _followedGameIds.Remove(game.InternalName);
             }
             else if (!wasFollowed && followed)
@@ -1269,9 +1633,18 @@ public sealed class CnCNetSession : IDisposable
         if (_connection == null || _currentGame == null)
             return;
 
+        // DX CnCNetLobby.ConnectionManager_WelcomeMessageReceived → Channel.Join (Persistent):
+        // random anti-flood delay + send queue. Instant JOINs here previously flooded GameSurge
+        // (welcome plan + EnsureGameBroadcastChannelsJoined) and some hubs never echoed JOIN.
         foreach (CnCNetWelcomeChannelPlan.JoinStep step in CnCNetWelcomeChannelPlan.BuildForLocalGame(_currentGame))
-            _connection.JoinChannelInstant(step.Channel, step.Key);
+        {
+            if (step.Role == "broadcast")
+                continue;
 
+            _connection.JoinChannelPersistent(step.Channel, step.Key);
+        }
+
+        JoinGameBroadcastChannel(_currentGame);
         JoinFollowedBroadcastChannels();
         _namesRetryCount = 0;
         _connection.RequestChannelNames(_currentGame.ChatChannel);
@@ -1281,7 +1654,6 @@ public sealed class CnCNetSession : IDisposable
         _reconnectAttempts = 0;
         string chatChannel = NormalizeIrcChannel(_currentGame.ChatChannel);
         LogActivity($"JOIN {chatChannel}, #cncnet + broadcast channels; NAMES requested.");
-        EnsureGameBroadcastChannelsJoined();
         TryRejoinActiveGameRoom();
         StateChanged?.Invoke();
     }
@@ -1352,6 +1724,7 @@ public sealed class CnCNetSession : IDisposable
         _games.Clear();
         _gamesByBroadcast.Clear();
         _joinedBroadcastChannels.Clear();
+        _broadcastDialect.Clear();
         _followedGameIds.Clear();
         LobbyState.SetChannelPlayers([]);
         LobbyState.SetHostedGames([]);
@@ -1567,6 +1940,9 @@ public sealed class CnCNetSession : IDisposable
 
     private void OnChatMessageReceived(string channel, string sender, string message)
     {
+        bool isAction = CnCNetIrcChatText.TryNormalizeActionCtcp(message, out string actionBody);
+        string parseSource = isAction ? actionBody : message;
+
         // Route to the in-room timeline when the message arrived on the active game-room channel.
         // This mirrors DX: the room Channel.MessageAdded feeds CnCNetGameLobby.Channel_MessageAdded
         // -> lbChatMessages, independent of the lobby channel.
@@ -1577,10 +1953,28 @@ public sealed class CnCNetSession : IDisposable
                 StringComparison.OrdinalIgnoreCase))
         {
             (string roomText, Color roomColor) = CnCNetIrcChatText.Parse(
-                message, CnCNetIrcChatText.DefaultChatColor);
+                parseSource, CnCNetIrcChatText.DefaultChatColor);
+
+            WafDecision roomDecision = EvaluateChatWaf(
+                isAction ? WafIngressKind.ChannelAction : WafIngressKind.ChannelChat,
+                WafSurface.GameRoomChat,
+                channel,
+                sender,
+                roomText,
+                message);
+            if (roomDecision.Severity == WafSeverity.Drop)
+                return;
+
+            string roomDisplay = FormatChatLine(
+                sender,
+                isAction ? $"====> {roomText}" : roomText,
+                DateTime.Now);
+            if (roomDecision.Severity >= WafSeverity.Warn)
+                roomDisplay = "[风险] " + roomDisplay;
+
             _gameRoom.AppendRemoteChat(
                 sender,
-                FormatChatLine(sender, roomText, DateTime.Now),
+                roomDisplay,
                 isSystem: false,
                 roomColor);
             StateChanged?.Invoke();
@@ -1591,44 +1985,99 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         (string text, Color color) = CnCNetIrcChatText.Parse(
-            message, CnCNetIrcChatText.DefaultChatColor);
+            parseSource, CnCNetIrcChatText.DefaultChatColor);
+
+        WafDecision decision = EvaluateChatWaf(
+            isAction ? WafIngressKind.ChannelAction : WafIngressKind.ChannelChat,
+            WafSurface.LobbyChat,
+            channel,
+            sender,
+            text,
+            message);
+        if (decision.Severity == WafSeverity.Drop)
+            return;
+
+        string display = FormatChatLine(sender, isAction ? $"====> {text}" : text, DateTime.Now);
+        if (decision.Severity >= WafSeverity.Warn)
+            display = "[风险] " + display;
+
         LobbyState.AddChatLine(new CnCNetChatLine
         {
             Scope = CnCNetChatScope.LobbyChannel,
             Sender = sender,
-            DisplayText = FormatChatLine(sender, text, DateTime.Now),
+            DisplayText = display,
             TextColor = color,
+            RiskLevel = decision.Severity,
+            RiskSummary = decision.Summary,
         });
         StateChanged?.Invoke();
     }
 
     private static string FormatChatLine(string sender, string message, DateTime time)
-        => $"[{time:HH:mm}] {sender}: {message}";
+        => string.IsNullOrEmpty(sender)
+            ? $"[{time:HH:mm}] {message}"
+            : $"[{time:HH:mm}] {sender}: {message}";
 
     private void OnGameBroadcast(string channel, string sender, string ctcp)
     {
         string normalizedBroadcast = NormalizeIrcChannel(channel);
 
+        // First peer GAME on a joined listing channel locks R13 or R10 for the stay.
+        // Skip our own echo so hosting unlocked-R13 does not pin an R10 channel wrongly.
+        bool fromLocal = sender.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+        _broadcastDialect.ObserveInbound(normalizedBroadcast, ctcp, fromLocalSender: fromLocal);
+
         CnCNetGameEntry? sourceGame = _gameCollection?.FindByBroadcastChannel(normalizedBroadcast);
         if (sourceGame == null)
         {
-            Logger.Log($"CnCNet: ignoring GAME from unknown broadcast channel {normalizedBroadcast}.");
+            // C4: keep the strict known-channel contract (matches XNA GameBroadcastChannel_CTCPReceived:
+            // `cncnetGame == null` → return). Improving the diagnostics here so admins can spot
+            // either a misconfigured GameCollectionConfig.ini or a non-standard broadcast channel
+            // without having to enable verbose logging.
+            string known = _gameCollection == null
+                ? "<no game collection loaded>"
+                : string.Join(", ", _gameCollection.Games
+                    .Where(g => g.HasGameBroadcast)
+                    .Select(g => NormalizeIrcChannel(g.GameBroadcastChannel!)));
+            Logger.Log(
+                $"CnCNet: ignoring GAME from unknown broadcast channel {normalizedBroadcast} "
+                + $"(sender={sender}). Known broadcast channels: [{known}]. "
+                + "Verify GameCollectionConfig.ini / CnCNetGameBroadcastChannel in ClientDefinitions.ini.");
             return;
         }
+
+        // Tunnel list starts empty and is filled asynchronously. Passing an empty list into the
+        // parser makes every GAME reject with "no available tunnels" — which permanently empties
+        // the lobby if the master-list HTTP is slow or unreachable. DX shows a warning in that
+        // case; we skip validation until at least one tunnel is loaded, then
+        // RevalidateHostedGamesAgainstTunnels prunes entries whose tunnel never appears.
+        IReadOnlyList<CnCNetTunnel>? tunnelsForParse = Tunnels.Count > 0 ? Tunnels : null;
 
         CnCNetHostedGameSummary? game = CnCNetGameMessageParser.TryParse(
             sender,
             ctcp,
-            Tunnels,
+            tunnelsForParse,
             out string? rejectReason,
-            sourceGame.InternalName);
+            sourceGameId: sourceGame.InternalName);
         if (game == null)
         {
             if (ctcp.StartsWith("GAME ", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(rejectReason))
+            {
                 Logger.Log($"CnCNet: GAME from {sender} ignored: {rejectReason}");
+                // Surface once-per-reason so an empty lobby is explainable (DX shows chat prompts).
+                NotifyGameBroadcastRejectOnce(rejectReason!);
+                EvaluateRejectedGameBroadcast(channel, sender, ctcp);
+            }
 
             return;
         }
+
+        WafDecision waf = EvaluateGameBroadcastWaf(channel, sender, ctcp, game);
+        if (waf.Severity == WafSeverity.Drop)
+            return;
+
+        game.RiskLevel = waf.Severity;
+        game.RiskSummary = waf.Summary;
 
         if (!_gamesByBroadcast.TryGetValue(normalizedBroadcast, out Dictionary<string, CnCNetHostedGameSummary>? bucket))
         {
@@ -1646,7 +2095,7 @@ public sealed class CnCNetSession : IDisposable
         {
             bucket[game.ChannelName] = game;
             _games[game.ChannelName] = game;
-            if (IsCurrentGameBroadcast(normalizedBroadcast))
+            if (IsCurrentGameBroadcast(normalizedBroadcast) && game.RiskLevel != WafSeverity.Hide)
             {
                 LogActivity(
                     $"Game listed: {game.RoomName} by {sender} ({game.PlayerCount}/{game.MaxPlayers})",
@@ -1655,6 +2104,42 @@ public sealed class CnCNetSession : IDisposable
         }
 
         RefreshHostedGames();
+    }
+
+    /// <summary>
+    /// DX CnCNetLobby shows a one-shot chat prompt when GAME CTCPs arrive but cannot be listed
+    /// (no tunnels / invalid field count / …). Mirror that so an empty lobby is diagnosable.
+    /// </summary>
+    private void NotifyGameBroadcastRejectOnce(string rejectReason)
+    {
+        // Collapse noisy per-sender reasons into stable buckets.
+        string bucket = rejectReason.StartsWith("unsupported protocol", StringComparison.OrdinalIgnoreCase)
+            ? "unsupported protocol"
+            : rejectReason.StartsWith("tunnel ", StringComparison.OrdinalIgnoreCase) && rejectReason.Contains("unavailable", StringComparison.Ordinal)
+                ? "tunnel unavailable"
+                : rejectReason.StartsWith("invalid field count", StringComparison.OrdinalIgnoreCase)
+                    ? "invalid field count"
+                    : rejectReason;
+
+        if (!_gameBroadcastRejectHintsShown.Add(bucket))
+            return;
+
+        string hint = bucket switch
+        {
+            "unsupported protocol" =>
+                "Received game broadcasts with an unsupported protocol revision. "
+                + $"This client requires {ProgramConstants.CNCNET_PROTOCOL_REVISION}.",
+            "no available tunnels" =>
+                "Received game broadcasts but no NAT tunnels are loaded yet. Waiting for the tunnel list…",
+            "tunnel unavailable" =>
+                "Received game broadcasts whose tunnel servers are not on the current master list.",
+            "invalid field count" =>
+                "Received game broadcasts with an unexpected field layout "
+                + "(expected stock DX 13 fields / R13, or legacy 11 fields / R10).",
+            _ => $"Received game broadcasts that could not be listed ({bucket}).",
+        };
+
+        LogActivity(hint);
     }
 
     private void RemoveHostedGame(Dictionary<string, CnCNetHostedGameSummary> bucket, CnCNetHostedGameSummary game)
@@ -1697,12 +2182,29 @@ public sealed class CnCNetSession : IDisposable
             }
         }
 
+        // Keep WAF tunnel/template/rate caches aligned with hosted-game lifetime
+        // (2× so shared-tunnel / template detection still sees a short overlap).
+        try
+        {
+            IngressWaf?.PruneEphemeralState(TimeSpan.FromSeconds(HostedGameLifetimeSeconds * 2));
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"CnCNet WAF prune failed: {ex.Message}");
+        }
+
         if (changed)
             RefreshHostedGames();
     }
 
     private List<CnCNetHostedGameSummary> GetHostedGamesForCurrentChannel()
     {
+        // C5/C6 contract (per user rule): the game list shows ONLY the rooms of
+        // the currently-selected channel's broadcast frequency. Switching the
+        // ddCurrentChannel dropdown → SwitchToGame → reassigns _currentGame →
+        // this method returns the new channel's bucket. _gamesByBroadcast is
+        // kept per-channel (not flattened) so users can switch back and forth
+        // without losing cached entries (within HostedGameLifetimeSeconds = 35s).
         if (_currentGame?.HasGameBroadcast != true)
             return [];
 
@@ -1711,9 +2213,147 @@ public sealed class CnCNetSession : IDisposable
             return [];
 
         return bucket.Values
+            .Where(g => g.RiskLevel != WafSeverity.Hide)
             .Where(g => !UserINISettings.Instance.HideIncompatibleGames.Value || !g.Incompatible)
             .OrderBy(g => g.RoomName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private WafDecision EvaluateGameBroadcastWaf(
+        string channel,
+        string sender,
+        string ctcp,
+        CnCNetHostedGameSummary game)
+    {
+        ICnCNetIngressWaf? waf = IngressWaf;
+        if (waf == null || !waf.IsEnabled)
+            return WafDecision.Allow;
+
+        ResolveActor(sender, out string ident, out string host);
+        return waf.Evaluate(new WafIngressEvent
+        {
+            Kind = WafIngressKind.GameBroadcast,
+            Surface = WafSurface.Protocol,
+            Channel = channel,
+            SenderNick = sender,
+            SenderIdent = ident,
+            SenderHost = host,
+            RawBody = ctcp,
+            DisplayText = game.RoomName,
+            CtcpCommand = "GAME",
+            CtcpPayload = ctcp,
+            Game = new WafGameBroadcastFields
+            {
+                Revision = game.Revision,
+                FieldCount = game.FieldCount,
+                RoomName = game.RoomName,
+                MapName = game.MapName,
+                GameMode = game.GameMode,
+                TunnelHost = game.TunnelAddress,
+                TunnelPort = game.TunnelPort,
+                ChannelName = game.ChannelName,
+                Players = game.Players,
+            },
+        });
+    }
+
+    private void EvaluateRejectedGameBroadcast(string channel, string sender, string ctcp)
+    {
+        ICnCNetIngressWaf? waf = IngressWaf;
+        if (waf == null || !waf.IsEnabled)
+            return;
+
+        if (!WafGameBroadcastPeek.TryPeek(ctcp, out WafGameBroadcastFields fields))
+            return;
+
+        ResolveActor(sender, out string ident, out string host);
+        // Alert-only: parser already rejected listing; still score host-bot fingerprints.
+        waf.Evaluate(new WafIngressEvent
+        {
+            Kind = WafIngressKind.GameBroadcast,
+            Surface = WafSurface.Protocol,
+            Channel = channel,
+            SenderNick = sender,
+            SenderIdent = ident,
+            SenderHost = host,
+            RawBody = ctcp,
+            DisplayText = fields.RoomName,
+            CtcpCommand = "GAME",
+            CtcpPayload = ctcp,
+            Game = fields,
+        });
+    }
+
+    private WafDecision EvaluateChatWaf(
+        WafIngressKind kind,
+        WafSurface surface,
+        string channel,
+        string sender,
+        string displayText,
+        string rawBody,
+        string? senderIdent = null,
+        string? senderHost = null)
+    {
+        ICnCNetIngressWaf? waf = IngressWaf;
+        if (waf == null || !waf.IsEnabled)
+            return WafDecision.Allow;
+
+        if (string.IsNullOrWhiteSpace(senderIdent) || string.IsNullOrWhiteSpace(senderHost))
+        {
+            ResolveActor(sender, out string cachedIdent, out string cachedHost);
+            if (string.IsNullOrWhiteSpace(senderIdent))
+                senderIdent = cachedIdent;
+            if (string.IsNullOrWhiteSpace(senderHost))
+                senderHost = cachedHost;
+        }
+
+        return waf.Evaluate(new WafIngressEvent
+        {
+            Kind = kind,
+            Surface = surface,
+            Channel = channel,
+            SenderNick = sender,
+            SenderIdent = senderIdent ?? string.Empty,
+            SenderHost = senderHost ?? string.Empty,
+            DisplayText = displayText,
+            RawBody = rawBody,
+        });
+    }
+
+    private WafDecision EvaluateCtcpWaf(
+        WafIngressKind kind,
+        WafSurface surface,
+        string channel,
+        string sender,
+        string ctcpCommand,
+        string ctcpPayload,
+        string displayText)
+    {
+        ICnCNetIngressWaf? waf = IngressWaf;
+        if (waf == null || !waf.IsEnabled)
+            return WafDecision.Allow;
+
+        ResolveActor(sender, out string ident, out string host);
+        return waf.Evaluate(new WafIngressEvent
+        {
+            Kind = kind,
+            Surface = surface,
+            Channel = channel,
+            SenderNick = sender,
+            SenderIdent = ident,
+            SenderHost = host,
+            DisplayText = displayText,
+            RawBody = ctcpCommand + " " + ctcpPayload,
+            CtcpCommand = ctcpCommand,
+            CtcpPayload = ctcpPayload,
+        });
+    }
+
+    private void ResolveActor(string sender, out string ident, out string host)
+    {
+        ident = string.Empty;
+        host = string.Empty;
+        _connection?.TryGetActor(sender, out ident, out host);
     }
 
     private void RefreshLobbyPlayers()

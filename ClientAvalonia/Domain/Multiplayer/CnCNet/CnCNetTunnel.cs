@@ -149,15 +149,22 @@ public class CnCNetTunnel
 
     public void UpdatePing()
     {
-        using var ping = new Ping();
-
+        // Hostnames are the common case on the master list; IPAddress.Parse throws on them.
+        // Ping.Send accepts either form, so we only parse to an IPAddress when the address
+        // is dotted-quad, and otherwise hand the literal hostname to Ping. Any exception from
+        // the network stack (DNS failure, ICMP permission, etc.) is swallowed so a malformed
+        // or unreachable tunnel never crashes the maintenance loop.
         try
         {
-            PingReply reply = ping.Send(IPAddress.Parse(Address), PingTimeoutMilliseconds);
+            using var ping = new Ping();
+            PingReply reply = IPAddress.TryParse(Address, out IPAddress? ip)
+                ? ping.Send(ip, PingTimeoutMilliseconds)
+                : ping.Send(Address, PingTimeoutMilliseconds);
+
             if (reply.Status == IPStatus.Success)
                 PingInMs = Convert.ToInt32(reply.RoundtripTime);
         }
-        catch (PingException ex)
+        catch (Exception ex)
         {
             Logger.Log($"CnCNetTunnel.UpdatePing failed for {Name} ({Address}:{Port}): {ex.Message}");
         }

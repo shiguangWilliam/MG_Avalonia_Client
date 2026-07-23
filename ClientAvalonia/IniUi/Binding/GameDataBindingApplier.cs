@@ -1,11 +1,13 @@
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 using ClientCore;
-using ClientAvalonia.CnCNet;
 using ClientCore.Settings;
 using Rampastring.Tools;
 
@@ -62,24 +64,33 @@ public static class GameDataBindingApplier
             lbMapList.SetSelectedIndexSilent(selectedIndex);
         }
 
-        ResolveStartInteractionFlags(session.PlayerState, out bool canAssign, out bool canSelectLocal);
+        ResolveStartInteractionFlags(
+            session.PlayerState.Mode,
+            session.PlayerState.AllowHostPlayerOptions,
+            out bool canAssign,
+            out bool canSelectLocal);
         UpdateMapSelectionDisplay(
             root,
             maps,
             selectedIndex,
             resources,
-            session.PlayerState,
+            session.PlayerState.Slots,
             canAssign,
             canSelectLocal);
     }
 
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>，
+    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// </summary>
     public static void ResolveStartInteractionFlags(
-        LobbyPlayerState playerState,
+        LobbyPlayerMode mode,
+        bool allowHostPlayerOptions,
         out bool canAssign,
         out bool canSelectLocal)
     {
         // Skirmish: local player is always the host. Multiplayer: host Assign / joiner Select.
-        if (playerState.Mode == LobbyPlayerMode.Skirmish || playerState.AllowHostPlayerOptions)
+        if (mode == LobbyPlayerMode.Skirmish || allowHostPlayerOptions)
         {
             canAssign = true;
             canSelectLocal = false;
@@ -90,12 +101,22 @@ public static class GameDataBindingApplier
         canSelectLocal = true;
     }
 
+    public static void ResolveStartInteractionFlags(
+        LobbyPlayerState playerState,
+        out bool canAssign,
+        out bool canSelectLocal)
+        => ResolveStartInteractionFlags(playerState.Mode, playerState.AllowHostPlayerOptions, out canAssign, out canSelectLocal);
+
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
+    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// </summary>
     public static void UpdateMapSelectionDisplay(
         UiNodeViewModel root,
         IReadOnlyList<MapEntry> maps,
         int selectedIndex,
         ResourceResolver resources,
-        LobbyPlayerState? playerState = null,
+        IReadOnlyList<IPlayerSlot>? slots = null,
         bool canAssignStarts = false,
         bool canSelectLocalStart = false)
     {
@@ -115,17 +136,36 @@ public static class GameDataBindingApplier
             MapPreviewOverlayApplier.Apply(
                 previewBox,
                 map,
-                playerState,
+                slots,
                 canAssignStarts,
                 canSelectLocalStart);
         }
     }
 
-    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
+    public static void UpdateMapSelectionDisplay(
+        UiNodeViewModel root,
+        IReadOnlyList<MapEntry> maps,
+        int selectedIndex,
+        ResourceResolver resources,
+        LobbyPlayerState? playerState = null,
+        bool canAssignStarts = false,
+        bool canSelectLocalStart = false)
+        => UpdateMapSelectionDisplay(
+            root,
+            maps,
+            selectedIndex,
+            resources,
+            playerState?.Slots,
+            canAssignStarts,
+            canSelectLocalStart);
+
+    /// <summary>
+    /// Phase 4 P4-2：Session-aware 入口——刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
+    /// </summary>
     public static void RefreshMapStartMarkers(
         UiNodeViewModel root,
         MapEntry? map,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot> slots,
         bool canAssignStarts,
         bool canSelectLocalStart)
     {
@@ -136,10 +176,19 @@ public static class GameDataBindingApplier
         MapPreviewOverlayApplier.Apply(
             previewBox,
             map,
-            playerState,
+            slots,
             canAssignStarts,
             canSelectLocalStart);
     }
+
+    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
+    public static void RefreshMapStartMarkers(
+        UiNodeViewModel root,
+        MapEntry? map,
+        LobbyPlayerState playerState,
+        bool canAssignStarts,
+        bool canSelectLocalStart)
+        => RefreshMapStartMarkers(root, map, playerState.Slots, canAssignStarts, canSelectLocalStart);
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
     {
@@ -217,9 +266,10 @@ public static class GameDataBindingApplier
                 ddChannel.Node.Props["ChannelLobbyWired"] = true;
                 ddChannel.SelectionChanged += () =>
                 {
+                    ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
                     int idx = ddChannel.SelectedIndex;
-                    if (idx >= 0 && idx != CnCNetSessionService.Instance.SelectedChannelIndex)
-                        CnCNetSessionService.Instance.SwitchToChannel(idx);
+                    if (idx >= 0 && idx != cncnet.SelectedChannelIndex)
+                        cncnet.SwitchToChannel(idx);
                 };
             }
         }
@@ -266,7 +316,7 @@ public static class GameDataBindingApplier
                 {
                     if (all[i].Name == name)
                     {
-                        CnCNetSessionService.Instance.SetChatColorIndex(i);
+                        EnvironmentServices.Resolve<ICnCNetSession>().SetChatColorIndex(i);
                         UiNodeViewModel? tbChat = FindVm(root, "tbChatInput");
                         if (tbChat != null)
                             ApplyChatInputColor(tbChat);
@@ -301,8 +351,15 @@ public static class GameDataBindingApplier
 
         if (state.ChatLines.Count > 0)
         {
-            ApplyColoredChatLines(lbChat, state.ChatLines);
-            return;
+            // PMs use Scope=PrivateMessage and must not pollute the lobby channel listbox.
+            var lobbyLines = state.ChatLines
+                .Where(l => l.Scope == CnCNetChatScope.LobbyChannel)
+                .ToList();
+            if (lobbyLines.Count > 0)
+            {
+                ApplyColoredChatLines(lbChat, lobbyLines);
+                return;
+            }
         }
 
         var fallback = state.ConnectionLog.Count > 0
@@ -318,13 +375,13 @@ public static class GameDataBindingApplier
         if (tbChat == null)
             return;
 
-        tbChat.IsEnabled = CnCNetSessionService.Instance.Connection?.IsConnected == true;
+        tbChat.IsEnabled = EnvironmentServices.Resolve<ICnCNetSession>().Connection?.IsConnected == true;
         ApplyChatInputColor(tbChat);
     }
 
     private static void ApplyChatInputColor(UiNodeViewModel tbChat)
     {
-        int colorIndex = CnCNetSessionService.Instance.LobbyState.SelectedChatColorIndex;
+        int colorIndex = EnvironmentServices.Resolve<ICnCNetSession>().LobbyState.SelectedChatColorIndex;
         if (colorIndex < 0)
             colorIndex = CnCNetChatColorCatalog.ResolveSelectedIndex(UserINISettings.Instance.ChatColor);
 
@@ -369,7 +426,7 @@ public static class GameDataBindingApplier
         {
             // Chat input is enabled when we are joined to the room AND connected to IRC.
             bool enabled = gameRoom is { IsLocalJoined: true }
-                           && CnCNetSessionService.Instance.Connection?.IsConnected == true;
+                           && EnvironmentServices.Resolve<ICnCNetSession>().Connection?.IsConnected == true;
             tbChat.IsEnabled = enabled;
             ApplyChatInputColor(tbChat);
         }
@@ -390,7 +447,19 @@ public static class GameDataBindingApplier
     {
         FindVm(root, "btnNewGame")?.SetDisplayText("Create Game");
         FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game");
-        FindVm(root, "btnLogout")?.SetDisplayText("Logout");
+
+        UiNodeViewModel? btnMainMenu = FindVm(root, "btnMainMenu");
+        UiNodeViewModel? btnLogout = FindVm(root, "btnLogout");
+        if (btnMainMenu != null && btnMainMenu.IsVisible)
+        {
+            btnMainMenu.SetDisplayText("Main Menu");
+            if (btnLogout != null)
+                btnLogout.IsVisible = false;
+        }
+        else
+        {
+            btnLogout?.SetDisplayText("Logout");
+        }
     }
 
     public static void ApplyCampaignOverlay(
@@ -409,6 +478,8 @@ public static class GameDataBindingApplier
         UiNodeViewModel? lbCampaignList = FindVm(root, "lbCampaignList");
         if (lbCampaignList != null)
         {
+            var disabledBrush = new SolidColorBrush(Color.FromRgb(120, 112, 104));
+            var enabledBrush = new SolidColorBrush(Color.FromRgb(242, 230, 216));
             var listItems = missions.Select(m => new CatalogListItemViewModel
             {
                 Text = m.DisplayName,
@@ -417,20 +488,110 @@ public static class GameDataBindingApplier
                     : GameAssetResolver.LoadSideIcon(resources, m.SideName, lbCampaignList),
                 IsHeader = m.IsHeader,
                 IsEnabled = m.Enabled,
+                ForegroundBrush = m.IsHeader
+                    ? null
+                    : (m.Enabled ? enabledBrush : disabledBrush),
+                ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
             }).ToList();
 
             lbCampaignList.SetCatalogListItems(listItems);
             int firstSelectable = FindFirstSelectableMissionIndex(missions);
             session.LastSelectableCampaignIndex = firstSelectable;
             lbCampaignList.SelectedIndex = firstSelectable >= 0 ? firstSelectable : 0;
-            WireCampaignSelection(lbCampaignList, FindVm(root, "tbMissionDescription"), session, resources);
+            WireCampaignSelection(
+                lbCampaignList,
+                FindVm(root, "tbMissionDescription"),
+                FindVm(root, "btnLaunch"),
+                session,
+                resources);
         }
 
         ApplyCampaignSideTabState(root, sideFilter);
         ApplyCampaignDifficulty(root, resources);
         EnsureCampaignControlSizes(root);
+        ApplyCampaignActionButtonLabels(root);
         GameAssetResolver.ApplyCampaignSideIcons(root, resources);
         GameAssetResolver.ApplyCampaignActionButtonTextures(root, resources);
+    }
+
+    private static void ApplyCampaignActionButtonLabels(UiNodeViewModel root)
+    {
+        // Primary chrome is orange; default IdleTexture button fg (#FFA648) vanishes on it.
+        Color launchFg = Color.FromRgb(32, 22, 12);
+        Color cancelFg = Color.FromRgb(242, 230, 216);
+
+        UiNodeViewModel? launch = FindVm(root, "btnLaunch");
+        if (launch != null)
+        {
+            launch.SetDisplayText(PickLocalizedLabel(launch.Text, "开始", "Launch"));
+            launch.SetForeground(launchFg);
+            launch.Node.Props["FontSize"] = 14;
+            launch.RefreshLayout();
+        }
+
+        UiNodeViewModel? cancel = FindVm(root, "btnCancel");
+        if (cancel != null)
+        {
+            cancel.SetDisplayText(PickLocalizedLabel(cancel.Text, "返回", "Cancel"));
+            cancel.SetForeground(cancelFg);
+            cancel.Node.Props["FontSize"] = 14;
+            cancel.RefreshLayout();
+        }
+
+        ApplySideTabLabel(root, "GDI", "同盟国联军", "Allied");
+        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Soviet");
+        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Ackville");
+    }
+
+    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zh, string en)
+    {
+        UiNodeViewModel? tab = FindVm(root, id);
+        if (tab == null)
+            return;
+
+        tab.SetDisplayText(PickLocalizedLabel(tab.Text, zh, en));
+        tab.RefreshLayout();
+    }
+
+    /// <summary>MG INI often stores <c>中文;English</c> bilingual labels.</summary>
+    private static string PickLocalizedLabel(string? raw, string chineseFallback, string englishFallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return chineseFallback;
+
+        int sep = raw.IndexOf(';');
+        if (sep < 0)
+            return raw.Trim();
+
+        string left = raw[..sep].Trim();
+        string right = raw[(sep + 1)..].Trim();
+        bool preferChinese = ContainsCjk(left) || !ContainsLatinWord(left);
+        if (preferChinese)
+            return string.IsNullOrEmpty(left) ? (string.IsNullOrEmpty(right) ? chineseFallback : right) : left;
+
+        return string.IsNullOrEmpty(right) ? (string.IsNullOrEmpty(left) ? englishFallback : left) : right;
+    }
+
+    private static bool ContainsCjk(string text)
+    {
+        foreach (char c in text)
+        {
+            if (c >= 0x4E00 && c <= 0x9FFF)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsLatinWord(string text)
+    {
+        foreach (char c in text)
+        {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -469,10 +630,11 @@ public static class GameDataBindingApplier
             if (button == null)
                 continue;
 
+            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
+            // clips the label completely when Avalonia Height is set explicitly.
             if (button.Width <= 1)
                 button.Node.Props["Width"] = 147d;
-            if (button.Height <= 1)
-                button.Node.Props["Height"] = 23d;
+            button.Node.Props["Height"] = 36d;
             button.RefreshLayout();
         }
     }
@@ -480,6 +642,7 @@ public static class GameDataBindingApplier
     public static void WireCampaignSelection(
         UiNodeViewModel listVm,
         UiNodeViewModel? descriptionVm,
+        UiNodeViewModel? launchButton,
         LobbySessionState session,
         ResourceResolver resources)
     {
@@ -490,7 +653,7 @@ public static class GameDataBindingApplier
         {
             int index = listVm.SelectedIndex;
             MissionEntry? mission = session.GetSelectedMission(index);
-            if (mission != null && (mission.IsHeader || !mission.Enabled))
+            if (mission != null && mission.IsHeader)
             {
                 int fallback = session.LastSelectableCampaignIndex;
                 if (fallback >= 0 && fallback != index)
@@ -500,11 +663,20 @@ public static class GameDataBindingApplier
                 }
             }
 
-            if (mission != null && mission.Enabled && !mission.IsHeader)
+            // Allow selecting disabled missions so players can read the briefing + locked hint.
+            if (mission != null && !mission.IsHeader)
                 session.LastSelectableCampaignIndex = index;
 
-            descriptionVm.SetDisplayText(mission?.Description ?? string.Empty);
+            string? lockedHint = mission != null && !mission.IsHeader && !mission.Enabled
+                ? "该战役尚未开放或未启用，无法开始。"
+                : null;
+
+            MissionBriefingParsed briefing = MissionBriefingParser.Parse(mission?.Description);
+            descriptionVm.SetMissionBriefing(briefing, lockedHint);
             descriptionVm.SetPreviewImage(GameAssetResolver.LoadMissionPreview(resources, mission, descriptionVm));
+
+            if (launchButton != null)
+                launchButton.IsEnabled = mission != null && mission.Enabled && !mission.IsHeader;
         }
 
         listVm.SelectionChanged -= UpdateDescription;
@@ -534,7 +706,9 @@ public static class GameDataBindingApplier
 
         int saved = Math.Clamp(UserINISettings.Instance.Difficulty, 0, 2);
         trackbar.SelectedIndex = saved;
-        GameAssetResolver.ApplyDifficultyTrackbarTextures(trackbar, resources);
+        // Do not overlay DX trackbar thumb textures — Avalonia Slider already draws a thumb,
+        // and a second static image reads as stray "dots" next to the briefing scrollbar.
+        trackbar.SetThumbImage(null);
     }
 
     private static int FindFirstSelectableMissionIndex(IReadOnlyList<MissionEntry> missions)

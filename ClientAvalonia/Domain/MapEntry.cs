@@ -1,6 +1,8 @@
+using ClientAvalonia.Domain.Resources;
+
 namespace ClientAvalonia.Domain;
 
-public sealed class MapEntry
+public sealed class MapEntry : IMapResource
 {
     public required string BaseFilePath { get; init; }
 
@@ -53,4 +55,21 @@ public sealed class MapEntry
 
     /// <summary>TDRA map cell height.</summary>
     public int MapHeight { get; init; }
+
+    /// <summary>Optional file size for incremental updates; default 0 until loaders fill it.</summary>
+    public long SizeBytes { get; init; }
+
+    /// <summary>Optional resource version; default 0.0.0.0.</summary>
+    public VersionInfo Version { get; init; } = new(0, 0, 0, 0);
+
+    string IResource.LogicalId => string.IsNullOrEmpty(Sha1) ? BaseFilePath : Sha1;
+
+    string IResource.FilePath => string.IsNullOrEmpty(CompleteFilePath) ? BaseFilePath : CompleteFilePath;
+
+    ResourceOrigin IResource.Origin
+        => IsCustom ? ResourceOrigin.Custom
+            : IsOfficial ? ResourceOrigin.Official
+            : ResourceOrigin.Custom;
+
+    bool IResource.IsReadOnly => IsOfficial && !IsCustom;
 }

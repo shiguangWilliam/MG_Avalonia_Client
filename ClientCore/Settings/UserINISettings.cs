@@ -21,6 +21,7 @@ namespace ClientCore
         public const string AUDIO = "Audio";
         public const string COMPATIBILITY = "Compatibility";
         public const string GAME_FILTERS = "GameFilters";
+        public const string CNC_NET_WAF = "CnCNetWaf";
         private const string FAVORITE_MAPS = "FavoriteMaps";
 
         private const bool DEFAULT_SHOW_FRIENDS_ONLY_GAMES = false;
@@ -171,6 +172,15 @@ namespace ClientCore
             HideIncompatibleGames = new BoolSetting(iniFile, GAME_FILTERS, "HideIncompatibleGames", DEFAULT_HIDE_INCOMPATIBLE_GAMES);
             MaxPlayerCount = new IntRangeSetting(iniFile, GAME_FILTERS, "MaxPlayerCount", DEFAULT_MAX_PLAYER_COUNT, 2, 8);
 
+            WafEnabled = new BoolSetting(iniFile, CNC_NET_WAF, "Enabled", true);
+            WafCheckProtocol = new BoolSetting(iniFile, CNC_NET_WAF, "CheckProtocol", true);
+            WafCheckListingText = new BoolSetting(iniFile, CNC_NET_WAF, "CheckListingText", true);
+            WafCheckChannelChat = new BoolSetting(iniFile, CNC_NET_WAF, "CheckChannelChat", true);
+            WafCheckPrivateChat = new BoolSetting(iniFile, CNC_NET_WAF, "CheckPrivateChat", true);
+            WafSensitivity = new IntSetting(iniFile, CNC_NET_WAF, "Sensitivity", 1);
+            WafAutoHideHighRisk = new BoolSetting(iniFile, CNC_NET_WAF, "AutoHideHighRisk", false);
+            WafAllowHeuristicDrop = new BoolSetting(iniFile, CNC_NET_WAF, "AllowHeuristicDrop", false);
+
             LoadFavoriteMaps(iniFile);
         }
 
@@ -281,6 +291,27 @@ namespace ClientCore
         public BoolSetting HideIncompatibleGames { get; private set; }
 
         public IntRangeSetting MaxPlayerCount { get; private set; }
+
+        /****************/
+        /* CnCNet WAF   */
+        /****************/
+
+        public BoolSetting WafEnabled { get; private set; }
+
+        public BoolSetting WafCheckProtocol { get; private set; }
+
+        public BoolSetting WafCheckListingText { get; private set; }
+
+        public BoolSetting WafCheckChannelChat { get; private set; }
+
+        public BoolSetting WafCheckPrivateChat { get; private set; }
+
+        /// <summary>0=Low, 1=Medium, 2=High.</summary>
+        public IntSetting WafSensitivity { get; private set; }
+
+        public BoolSetting WafAutoHideHighRisk { get; private set; }
+
+        public BoolSetting WafAllowHeuristicDrop { get; private set; }
 
         /********/
         /* MISC */

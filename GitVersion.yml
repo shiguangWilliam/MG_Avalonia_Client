@@ -30,7 +30,7 @@ tag-prefix: 'v'
 
 branches:
   master:
-    regex: ^master$
+    regex: ^master$|^main$
     
     mode: ContinuousDelivery
     increment: Patch

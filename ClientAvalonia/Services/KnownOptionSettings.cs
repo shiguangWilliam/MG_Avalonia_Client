@@ -36,5 +36,13 @@ public static class KnownOptionSettings
             ["chkBorderlessClient"] = ("Video", "BorderlessWindowedClient"),
             ["ddDetailLevel"] = ("Options", "DetailLevel"),
             ["tbPlayerName"] = ("MultiPlayer", "Handle"),
+            ["chkWafEnabled"] = ("CnCNetWaf", "Enabled"),
+            ["chkWafCheckProtocol"] = ("CnCNetWaf", "CheckProtocol"),
+            ["chkWafCheckListingText"] = ("CnCNetWaf", "CheckListingText"),
+            ["chkWafCheckChannelChat"] = ("CnCNetWaf", "CheckChannelChat"),
+            ["chkWafCheckPrivateChat"] = ("CnCNetWaf", "CheckPrivateChat"),
+            ["chkWafAutoHideHighRisk"] = ("CnCNetWaf", "AutoHideHighRisk"),
+            ["chkWafAllowHeuristicDrop"] = ("CnCNetWaf", "AllowHeuristicDrop"),
+            ["ddWafSensitivity"] = ("CnCNetWaf", "Sensitivity"),
         };
 }

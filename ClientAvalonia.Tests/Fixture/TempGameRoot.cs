@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using ClientAvalonia.Services;
 using ClientCore;
 
 namespace ClientAvalonia.Tests.Fixture;
@@ -57,6 +60,37 @@ internal sealed class TempGameRoot : IDisposable
     {
         ProgramConstants.SetHostedGameRoot(GameRoot);
         Environment.CurrentDirectory = GameRoot;
+
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Reset();
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Register<
+            ClientAvalonia.GlobalState.Environment.IGameEnvironment>(
+            () => new ClientAvalonia.GlobalState.Environment.MockGameEnvironment
+            {
+                LocalGameValue = "mg",
+                GamePathValue = GameRoot,
+                PlayerNameValue = "TestPlayer",
+            });
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Register<
+            ClientAvalonia.Domain.Resources.IMultiplayerColorCatalog>(
+            () => new FakeColorCatalog());
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Register<
+            ClientAvalonia.Domain.Resources.IResourceManifest>(
+            () => new ClientAvalonia.Domain.Resources.NoOpResourceManifest());
+    }
+
+    private sealed class FakeColorCatalog : ClientAvalonia.Domain.Resources.IMultiplayerColorCatalog
+    {
+        public IReadOnlyList<MultiplayerColorCatalog.MultiplayerColorEntry> Load()
+            => Enumerable.Range(0, 8)
+                .Select(i => new MultiplayerColorCatalog.MultiplayerColorEntry
+                {
+                    Name = $"Color{i}",
+                    GameColorIndex = i,
+                    R = (byte)(i * 20),
+                    G = (byte)(i * 10),
+                    B = (byte)(255 - i * 20),
+                })
+                .ToList();
     }
 
     public void Dispose()

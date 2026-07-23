@@ -37,6 +37,7 @@ internal static class OptionsPanelStackLayout
         "chkDisablePrivateMessagePopup",
         "lblAllowPrivateMessagesFrom",
         "ddAllowPrivateMessagesFrom",
+        "lblAllowPrivateMessagesFromHint",
     ];
 
     private static readonly string[] CnCNetRightColumn =
@@ -59,6 +60,29 @@ internal static class OptionsPanelStackLayout
         "chkBuildingPlacement",
     ];
 
+    private static readonly string[] SecurityOrder =
+    [
+        "lblWafIntro",
+        "chkWafEnabled",
+        "chkWafCheckProtocol",
+        "chkWafCheckListingText",
+        "chkWafCheckChannelChat",
+        "chkWafCheckPrivateChat",
+        "lblWafSensitivity", "ddWafSensitivity",
+        "chkWafAutoHideHighRisk",
+        "chkWafAllowHeuristicDrop",
+        "btnWafStrategies",
+        "lblWafBlocklistCount",
+        "lbWafBlocklist",
+        "lblWafBlockKey",
+        "tbWafBlockKey",
+        "lblWafBlockNote",
+        "tbWafBlockNote",
+        "btnWafBlockAdd",
+        "btnWafBlockRemove",
+        "btnWafBlockClear",
+    ];
+
     private static readonly string[] AudioOrder =
     [
         "lblScoreVolume", "trbScoreVolume", "lblScoreVolumeValue",
@@ -76,6 +100,7 @@ internal static class OptionsPanelStackLayout
         StackFormPanel(tree, tree.FindNode("DisplayOptionsPanel"), DisplayOrder);
         StackTwoColumnPanel(tree.FindNode("CnCNetOptionsPanel"), CnCNetLeftColumn, CnCNetRightColumn);
         StackFormPanel(tree, tree.FindNode("GameOptionsPanel"), GameOrder);
+        StackFormPanel(tree, tree.FindNode("SecurityOptionsPanel"), SecurityOrder);
         StackAudioPanel(tree.FindNode("AudioOptionsPanel"), AudioOrder);
         StackUpdaterPanel(tree.FindNode("UpdaterOptionsPanel"));
         StackComponentsPanel(tree.FindNode("ComponentsPanel"));
@@ -292,8 +317,15 @@ internal static class OptionsPanelStackLayout
         foreach (string id in order)
         {
             UiNode? node = panel.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
-            if (node == null || !IsVisible(node))
+            if (node == null || !IsVisible(node) || handled.Contains(node.Id))
                 continue;
+
+            if (node.Id.Equals("btnWafBlockAdd", StringComparison.OrdinalIgnoreCase))
+            {
+                y = PlaceWafBlockButtonRow(panel, y, handled);
+                maxBottom = Math.Max(maxBottom, y);
+                continue;
+            }
 
             if (node.Id.StartsWith("lbl", StringComparison.OrdinalIgnoreCase))
             {
@@ -340,9 +372,14 @@ internal static class OptionsPanelStackLayout
             {
                 UiNode? dropdown = panel.Children.FirstOrDefault(c =>
                     c.Id.Equals("ddAllowPrivateMessagesFrom", StringComparison.OrdinalIgnoreCase));
-                leftY = PlacePrivateMessagesRow(node, dropdown, leftY);
+                UiNode? hint = panel.Children.FirstOrDefault(c =>
+                    c.Id.Equals("lblAllowPrivateMessagesFromHint", StringComparison.OrdinalIgnoreCase));
+                leftY = PlacePrivateMessagesRow(node, dropdown, hint, leftY);
                 continue;
             }
+
+            if (id.Equals("lblAllowPrivateMessagesFromHint", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             leftY = PlaceBlock(node, MarginLeft, leftY);
         }
@@ -376,7 +413,7 @@ internal static class OptionsPanelStackLayout
     /// Keep PM label + dropdown entirely in the left column (stacked), never between columns.
     /// Same-row layout at x≈176 overlaps the right column ("Current channel" bug).
     /// </summary>
-    private static int PlacePrivateMessagesRow(UiNode label, UiNode? dropdown, int y)
+    private static int PlacePrivateMessagesRow(UiNode label, UiNode? dropdown, UiNode? hint, int y)
     {
         const int leftColumnWidth = RightColumnLeft - MarginLeft - 16; // ~256px, clear of right column
 
@@ -393,6 +430,15 @@ internal static class OptionsPanelStackLayout
             dropdown.Props["Width"] = (double)Math.Min(240, leftColumnWidth);
             dropdown.Props["Height"] = 24.0;
             y += 24 + RowGap;
+        }
+
+        if (hint != null && IsVisible(hint))
+        {
+            hint.Props["CanvasLeft"] = (double)MarginLeft;
+            hint.Props["CanvasTop"] = (double)y;
+            hint.Props["Width"] = (double)leftColumnWidth;
+            hint.Props["Height"] = 48.0;
+            y += 48 + RowGap;
         }
 
         return y;
@@ -444,6 +490,31 @@ internal static class OptionsPanelStackLayout
         node.Parent = panel;
         if (!panel.Children.Contains(node))
             panel.Children.Add(node);
+    }
+
+    private static int PlaceWafBlockButtonRow(UiNode panel, int y, HashSet<string> handled)
+    {
+        string[] ids = ["btnWafBlockAdd", "btnWafBlockRemove", "btnWafBlockClear"];
+        const int buttonWidth = 160;
+        const int gap = 12;
+        int x = MarginLeft;
+        int height = 24;
+
+        foreach (string id in ids)
+        {
+            UiNode? node = panel.Children.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (node == null || !IsVisible(node))
+                continue;
+
+            node.Props["CanvasLeft"] = (double)x;
+            node.Props["CanvasTop"] = (double)y;
+            node.Props["Width"] = (double)buttonWidth;
+            height = Math.Max(height, node.GetIntProp("Height"));
+            handled.Add(node.Id);
+            x += buttonWidth + gap;
+        }
+
+        return y + height + RowGap;
     }
 
     private static int PlaceBlock(UiNode node, int x, int y)

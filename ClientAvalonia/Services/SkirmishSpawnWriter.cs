@@ -1,5 +1,6 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Session;
 using ClientCore;
 using Rampastring.Tools;
 
@@ -8,6 +9,36 @@ namespace ClientAvalonia.Services;
 /// <summary>Writes spawn.ini and spawnmap.ini for skirmish (aligned with GameLobbyBase.WriteSpawnIni / WriteMap).</summary>
 public static class SkirmishSpawnWriter
 {
+    /// <summary>
+    /// Phase 3 P3-2：Session-aware 主入口——吃 <see cref="IReadOnlyList{IPlayerSlot}"/> + sideCount，
+    /// 不再依赖 <see cref="LobbyPlayerState"/>。
+    /// </summary>
+    /// <param name="map">选中地图。</param>
+    /// <param name="gameMode">选中游戏模式。</param>
+    /// <param name="slots">槽位列表（通常是 <see cref="IGameSession.PlayerSlots"/>）。</param>
+    /// <param name="sideCount">可选阵营数（控制 random side 上界；<=0 时按 occupied slot.SideIndex 透传）。</param>
+    /// <param name="lobbyRoot">可选 lobby UI 树（写 spawnmap 需要）。</param>
+    /// <param name="randomSeed">可复现随机种子；0 表示自动生成。</param>
+    public static void Write(
+        MapEntry map,
+        GameModeEntry gameMode,
+        IReadOnlyList<IPlayerSlot> slots,
+        int sideCount,
+        UiNodeViewModel? lobbyRoot = null,
+        int randomSeed = 0)
+    {
+        if (randomSeed == 0)
+            randomSeed = Random.Shared.Next();
+
+        WriteSpawnIni(map, gameMode, slots, sideCount, lobbyRoot, randomSeed);
+        WriteSpawnMap(map, gameMode, lobbyRoot);
+    }
+
+    /// <summary>
+    /// Legacy 入口（Phase 3 P3-2：标记为已过时）。
+    /// 仍接受 <see cref="LobbyPlayerState"/>，内部委托到 Session-aware 重载。
+    /// </summary>
+    [Obsolete("Phase 3 P3-2: 改用 Write(MapEntry, GameModeEntry, IReadOnlyList<IPlayerSlot>, int, ...)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
     public static void Write(
         MapEntry map,
         GameModeEntry gameMode,
@@ -15,17 +46,16 @@ public static class SkirmishSpawnWriter
         UiNodeViewModel? lobbyRoot = null,
         int randomSeed = 0)
     {
-        if (randomSeed == 0)
-            randomSeed = Random.Shared.Next();
-
-        WriteSpawnIni(map, gameMode, players, lobbyRoot, randomSeed);
-        WriteSpawnMap(map, gameMode, lobbyRoot);
+        int sideCount = players?.SideNames.Count ?? 0;
+        IReadOnlyList<IPlayerSlot> slots = players?.Slots ?? Array.Empty<LobbyPlayerSlot>();
+        Write(map, gameMode, slots, sideCount, lobbyRoot, randomSeed);
     }
 
     private static void WriteSpawnIni(
         MapEntry map,
         GameModeEntry gameMode,
-        LobbyPlayerState? players,
+        IReadOnlyList<IPlayerSlot> slots,
+        int sideCount,
         UiNodeViewModel? lobbyRoot,
         int randomSeed)
     {
@@ -34,8 +64,8 @@ public static class SkirmishSpawnWriter
 
         Logger.Log("Writing spawn.ini");
 
-        var humans = GetOccupiedSlots(players, ai: false);
-        var ais = GetOccupiedSlots(players, ai: true);
+        var humans = slots.Where(s => s.IsOccupied && !s.IsAi).Select(Clone).ToList();
+        var ais = slots.Where(s => s.IsOccupied && s.IsAi).Select(Clone).ToList();
         if (humans.Count == 0)
         {
             humans.Add(new LobbyPlayerSlot
@@ -62,7 +92,7 @@ public static class SkirmishSpawnWriter
         allOccupied.AddRange(humans);
         allOccupied.AddRange(ais);
         IReadOnlyList<LobbyPlayerHouseResolver.ResolvedHouse> houses =
-            LobbyPlayerHouseResolver.Resolve(allOccupied, randomSeed);
+            LobbyPlayerHouseResolver.Resolve((IReadOnlyList<IPlayerSlot>)allOccupied, randomSeed);
 
         int localHumanIndex = humans.FindIndex(h => h.IsHumanLocal || h.Name == ProgramConstants.PLAYERNAME);
         if (localHumanIndex < 0)
@@ -111,7 +141,7 @@ public static class SkirmishSpawnWriter
         {
             LobbyPlayerHouseResolver.ResolvedHouse house = houses[humans.Count + aiId];
             string keyName = "Multi" + (aiId + 2);
-            spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerState.HouseHandicapFromAiLevel(ais[aiId].AiLevel));
+            spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(ais[aiId].AiLevel));
             spawnIni.SetIntValue("HouseCountries", keyName, house.InternalSideIndex);
             spawnIni.SetIntValue("HouseColors", keyName, house.GameColorIndex);
         }
@@ -125,12 +155,23 @@ public static class SkirmishSpawnWriter
         spawnIni.WriteIniFile();
     }
 
-    private static List<LobbyPlayerSlot> GetOccupiedSlots(LobbyPlayerState? players, bool ai)
+    /// <summary>把任意 <see cref="IPlayerSlot"/> 克隆为 <see cref="LobbyPlayerSlot"/>（spawn.ini 写入需要具体类型持有可变字段）。</summary>
+    private static LobbyPlayerSlot Clone(IPlayerSlot slot)
     {
-        if (players == null)
-            return [];
+        if (slot is LobbyPlayerSlot concrete)
+            return concrete.Clone();
 
-        return players.Slots.Where(s => s.IsOccupied && s.IsAi == ai).ToList();
+        return new LobbyPlayerSlot
+        {
+            Name = slot.Name,
+            SideIndex = slot.SideIndex,
+            ColorIndex = slot.ColorIndex,
+            TeamIndex = slot.TeamIndex,
+            StartIndex = slot.StartIndex,
+            AiLevel = slot.AiLevel,
+            IsAi = slot.IsAi,
+            IsHumanLocal = slot.IsHumanLocal,
+        };
     }
 
     public static void WriteSpawnMap(MapEntry map, GameModeEntry gameMode, UiNodeViewModel? lobbyRoot)

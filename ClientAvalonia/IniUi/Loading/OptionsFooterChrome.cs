@@ -38,6 +38,7 @@ internal static class OptionsFooterChrome
             save.Node.Props["Text"] = ResolveSaveText();
             save.SetDisplayText(ResolveSaveText());
             save.IsVisible = true;
+            save.Node.Props["Height"] = 32.0;
             save.RefreshLayout();
         }
 
@@ -47,9 +48,9 @@ internal static class OptionsFooterChrome
             cancel.SetDisplayText(ResolveCancelText());
             cancel.IsVisible = true;
             cancel.Node.Props["Width"] = 92.0;
-            cancel.Node.Props["Height"] = 23.0;
+            cancel.Node.Props["Height"] = 32.0;
             cancel.Node.Props["CanvasLeft"] = (double)(OptionsOverlayConstants.Width - 104);
-            cancel.Node.Props["CanvasTop"] = (double)(OptionsOverlayConstants.Height - 35);
+            cancel.Node.Props["CanvasTop"] = (double)(OptionsOverlayConstants.Height - 40);
             cancel.RefreshLayout();
         }
     }
@@ -64,7 +65,7 @@ internal static class OptionsFooterChrome
         if (node.GetIntProp("Width") <= 0)
             node.Props["Width"] = 92.0;
         if (node.GetIntProp("Height") <= 0)
-            node.Props["Height"] = 23.0;
+            node.Props["Height"] = 32.0;
     }
 
     private static string NonEmpty(string candidate, string fallback)

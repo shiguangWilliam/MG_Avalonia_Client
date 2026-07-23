@@ -229,6 +229,17 @@ function Copy-AvaloniaRuntimeOnly {
     }
     Copy-Item -LiteralPath $exe -Destination $DestinationRoot -Force
     Write-Host "Deployed single-file exe (removed legacy loose DLLs in target)."
+
+    # Deploy default WAF rules without clobbering operator overrides (Client/WafRules.json).
+    $wafSrc = Join-Path $SourceRoot 'Client\WafRules.default.json'
+    if (!(Test-Path -LiteralPath $wafSrc)) {
+      $wafSrc = Join-Path $PSScriptRoot '..\ClientAvalonia\CnCNet\Waf\rules.default.json'
+    }
+    if (Test-Path -LiteralPath $wafSrc) {
+      $wafDestDir = Join-Path $DestinationRoot 'Client'
+      New-Item -ItemType Directory -Force -Path $wafDestDir | Out-Null
+      Copy-Item -LiteralPath $wafSrc -Destination (Join-Path $wafDestDir 'WafRules.default.json') -Force
+    }
     return
   }
 
@@ -387,6 +398,14 @@ Invoke-DotNet @publishArgs
 Remove-LooseSingleFileArtifacts -PackRoot $Script:CompiledRoot
 
 Copy-AvaloniaClientResources -DestinationRoot $Script:CompiledRoot
+
+# Ship editable WAF rule pack next to the client (operators may override with WafRules.json).
+$WafRulesSrc = Join-Path $RepoRoot 'ClientAvalonia\CnCNet\Waf\rules.default.json'
+$WafClientDir = Join-Path $Script:CompiledRoot 'Client'
+if (Test-Path -LiteralPath $WafRulesSrc) {
+  New-Item -ItemType Directory -Force -Path $WafClientDir | Out-Null
+  Copy-Item -LiteralPath $WafRulesSrc -Destination (Join-Path $WafClientDir 'WafRules.default.json') -Force
+}
 
 # -----------------------------------------------------------------
 # Mirror to workspace pack directory (ClientAvalonia/publish)

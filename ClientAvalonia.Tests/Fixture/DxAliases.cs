@@ -11,9 +11,8 @@ namespace ClientAvalonia.Tests.Fixture;
 /// </summary>
 internal static class DxAliases
 {
-    // DX CnCNetLobby.cs:1519-1563 — GAME CTCP field layout.
+    // DX CnCNetLobby.cs:1519-1563 — GAME CTCP field layout (strict 13 fields).
     public const int GameFieldCount = 13;
-    public const int LegacyGameFieldCount = 11;
 
     // Indexes into the 13-field GAME payload (DX CnCNetLobby.cs:1519-1563).
     public const int IdxRevision = 0;
@@ -39,10 +38,11 @@ internal static class DxAliases
     public const bool DefaultLadder = false;
     public const int FlagsFieldLength = 5;
 
-    // DX CnCNetLobby.cs:1541 — reject when revision mismatches.
-    // ProgramConstants.CNCNET_PROTOCOL_REVISION default is "R13" in ClientCore.
+    // DX ProgramConstants.CNCNET_PROTOCOL_REVISION — compile-time const "R13" for all games.
     public const string CurrentProtocolRevision = "R13";
-    public const string LegacyProtocolRevision = "R10";
+
+    // Historical mistaken MG override — must never be the client protocol again.
+    public const string RejectedLegacyProtocolRevision = "R10";
 
     // DX CnCNetLobby.cs:1052 — host password = SHA1(channelName)[..10] (DX upstream).
     // MG differs (MG-PASSWORD-SHA1-CHANNEL-ROOM) — see CnCNetLobbyOperationsPasswordTests.

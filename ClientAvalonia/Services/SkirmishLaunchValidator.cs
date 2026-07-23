@@ -1,14 +1,23 @@
 using ClientAvalonia.Domain;
+using ClientAvalonia.Session;
 
 namespace ClientAvalonia.Services;
 
 /// <summary>Pre-launch checks aligned with DXMainClient SkirmishLobby.CheckGameValidity.</summary>
 public static class SkirmishLaunchValidator
 {
-    public static string? Validate(MapEntry map, GameModeEntry gameMode, LobbyPlayerState players)
+    /// <summary>
+    /// Phase 2 P2-4：Session-aware 重载——吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，不再依赖
+    /// <see cref="LobbyPlayerState"/>。供未来 <see cref="IGameSession.PlayerSlots"/> 直接传入。
+    /// </summary>
+    public static string? Validate(
+        MapEntry map,
+        GameModeEntry gameMode,
+        IReadOnlyList<IPlayerSlot> slots,
+        int sideCount)
     {
-        int randomSideIndex = Math.Max(0, players.SideNames.Count - 1);
-        int totalPlayers = players.Slots.Count(s => s.IsOccupied && s.SideIndex < randomSideIndex);
+        int randomSideIndex = Math.Max(0, sideCount - 1);
+        int totalPlayers = slots.Count(s => s.IsOccupied && s.SideIndex < randomSideIndex);
 
         if (gameMode.MultiplayerOnly)
         {
@@ -36,7 +45,7 @@ public static class SkirmishLaunchValidator
 
         if (map.EnforceMaxPlayers)
         {
-            var occupiedStarts = players.Slots
+            var occupiedStarts = slots
                 .Where(s => s.IsOccupied && s.StartIndex > 0)
                 .Select(s => s.StartIndex)
                 .ToList();
@@ -48,5 +57,11 @@ public static class SkirmishLaunchValidator
         }
 
         return null;
+    }
+
+    /// <summary>Legacy overload (delegates to <see cref="Validate(MapEntry, GameModeEntry, IReadOnlyList{IPlayerSlot}, int)"/>).</summary>
+    public static string? Validate(MapEntry map, GameModeEntry gameMode, LobbyPlayerState players)
+    {
+        return Validate(map, gameMode, players.Slots, players.SideNames.Count);
     }
 }

@@ -1,5 +1,6 @@
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
+using ClientAvalonia.Session;
 
 namespace ClientAvalonia.Services;
 
@@ -19,7 +20,22 @@ public sealed class SkirmishLaunchSession(SkirmishLaunchRequest request) : IGame
     public string LaunchModeLabel => "Skirmish";
 
     public void PrepareSpawnFiles()
-        => SkirmishSpawnWriter.Write(request.Map, request.GameMode, request.Players, request.LobbyRoot);
+    {
+        // Phase 3 P3-2：优先走 Session-aware 入口（Slots + SideCount）。
+        IReadOnlyList<IPlayerSlot>? slots = request.Slots;
+        if (slots == null)
+        {
+#pragma warning disable CS0618 // 兼容期：调用方未升级时退回 Players。
+            LobbyPlayerState? legacy = request.Players;
+            int sideCount = legacy?.SideNames.Count ?? 0;
+            slots = legacy?.Slots ?? Array.Empty<LobbyPlayerSlot>();
+            SkirmishSpawnWriter.Write(request.Map, request.GameMode, slots, sideCount, request.LobbyRoot);
+            return;
+#pragma warning restore CS0618
+        }
+
+        SkirmishSpawnWriter.Write(request.Map, request.GameMode, slots, request.SideCount, request.LobbyRoot);
+    }
 }
 
 public sealed class CampaignLaunchSession(CampaignLaunchRequest request) : IGameLaunchSession
@@ -54,13 +70,23 @@ public sealed class MultiplayerLaunchSession : IGameLaunchSession
 
     public void PrepareSpawnFiles()
     {
+        // Phase 3 P3-2：优先走 Session-aware 入口（Slots）；否则退回 Players（legacy）。
+        IReadOnlyList<IPlayerSlot>? slots = _skirmish.Slots;
+        bool useLegacyPlayers = slots == null;
+        if (useLegacyPlayers)
+        {
+#pragma warning disable CS0618
+            slots = _skirmish.Players?.Slots ?? Array.Empty<LobbyPlayerSlot>();
+#pragma warning restore CS0618
+        }
+
         if (_cncNet != null)
         {
             CnCNetMultiplayerSpawnWriter.Write(
                 _skirmish.Map,
                 _skirmish.GameMode,
                 _cncNet,
-                _skirmish.Players,
+                slots,
                 _skirmish.LobbyRoot,
                 _roomPlayers,
                 _gameOptions);
@@ -68,6 +94,6 @@ public sealed class MultiplayerLaunchSession : IGameLaunchSession
         }
 
         // LAN / generic multiplayer until dedicated LAN spawn additions exist.
-        SkirmishSpawnWriter.Write(_skirmish.Map, _skirmish.GameMode, _skirmish.Players, _skirmish.LobbyRoot);
+        SkirmishSpawnWriter.Write(_skirmish.Map, _skirmish.GameMode, slots, _skirmish.SideCount, _skirmish.LobbyRoot);
     }
 }

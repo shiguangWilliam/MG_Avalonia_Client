@@ -21,4 +21,8 @@ public sealed class CatalogListItemViewModel
     public bool IsSelectable => IsEnabled && !IsHeader;
 
     public bool HasIcon => Icon != null;
+
+    public string? ToolTip { get; init; }
+
+    public double Opacity => IsHeader || IsEnabled ? 1.0 : 0.55;
 }

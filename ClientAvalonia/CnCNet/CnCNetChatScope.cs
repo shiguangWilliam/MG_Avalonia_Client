@@ -18,4 +18,7 @@ public enum CnCNetChatScope
     /// Corresponds to <c>CnCNetActiveGameRoom.ChannelName</c>.
     /// </summary>
     GameRoom = 1,
+
+    /// <summary>Direct private message (PRIVMSG to local nick).</summary>
+    PrivateMessage = 2,
 }

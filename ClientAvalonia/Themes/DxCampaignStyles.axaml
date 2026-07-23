@@ -76,48 +76,54 @@
                IsEnabled="{Binding IsEnabled}"
                Background="Transparent"
                BorderThickness="0"
-               Padding="4,6">
+               Padding="6,8">
         <ListBox.ItemTemplate>
           <DataTemplate DataType="vm:CatalogListItemViewModel">
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal"
+                        Spacing="10"
+                        Opacity="{Binding Opacity}"
+                        Margin="0,2">
               <Image Source="{Binding Icon}"
-                     Width="22"
-                     Height="22"
+                     Width="20"
+                     Height="20"
                      Stretch="Uniform"
                      VerticalAlignment="Center"
+                     Opacity="{Binding Opacity}"
                      IsVisible="{Binding HasIcon}" />
               <TextBlock Text="{Binding Text}"
                          FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
                          FontSize="13"
-                         Foreground="{StaticResource DxTextPrimaryBrush}"
+                         Foreground="{Binding ForegroundBrush}"
                          TextWrapping="Wrap"
                          LineHeight="20"
                          VerticalAlignment="Center"
-                         Padding="0,6"
+                         Padding="0,5"
+                         ToolTip.Tip="{Binding ToolTip}"
                          IsVisible="{Binding !IsHeader}" />
               <TextBlock Text="{Binding Text}"
                          FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
-                         FontSize="12.5"
+                         FontSize="11.5"
                          FontWeight="Bold"
                          Foreground="{StaticResource DxCampaignHeaderBrush}"
                          TextAlignment="Center"
                          HorizontalAlignment="Stretch"
                          TextWrapping="Wrap"
-                         LineHeight="18"
+                         LineHeight="16"
                          VerticalAlignment="Center"
-                         Padding="0,8"
-                         LetterSpacing="0.6"
+                         Padding="0,12,0,6"
+                         LetterSpacing="0.8"
+                         Opacity="0.9"
                          IsVisible="{Binding IsHeader}" />
             </StackPanel>
           </DataTemplate>
         </ListBox.ItemTemplate>
         <ListBox.Styles>
           <Style Selector="ListBoxItem">
-            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="Padding" Value="6,1" />
             <Setter Property="Margin" Value="2,1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="IsEnabled" Value="True" />
+            <Setter Property="MinHeight" Value="28" />
           </Style>
           <Style Selector="ListBoxItem:pointerover">
             <Setter Property="Background" Value="{StaticResource DxCampaignListHoverBrush}" />
@@ -125,9 +131,23 @@
           <Style Selector="ListBoxItem:selected">
             <Setter Property="Background" Value="{StaticResource DxCampaignListSelectedBrush}" />
           </Style>
-          <Style Selector="ListBoxItem:selected TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource DxAccentSoftBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource DxCampaignListSelectedBrush}" />
+          </Style>
+          <Style Selector="ScrollBar">
+            <Setter Property="Width" Value="8" />
+            <Setter Property="Opacity" Value="0.85" />
+          </Style>
+          <Style Selector="ScrollBar:horizontal">
+            <Setter Property="Height" Value="8" />
+          </Style>
+          <Style Selector="ScrollBar /template/ Thumb">
+            <Setter Property="Background" Value="#AA8C5A32" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="MinHeight" Value="28" />
+          </Style>
+          <Style Selector="ScrollBar /template/ Thumb:pointerover">
+            <Setter Property="Background" Value="#CCFF8C32" />
           </Style>
         </ListBox.Styles>
       </ListBox>
@@ -163,9 +183,9 @@
                 BorderBrush="#12FFFFFF"
                 BorderThickness="0,1,0,0"
                 IsHitTestVisible="False" />
-        <Grid Margin="14,12" RowDefinitions="Auto,*">
+        <Grid Margin="14,12,8,12" RowDefinitions="Auto,*">
           <Border Grid.Row="0"
-                  Margin="0,0,0,10"
+                  Margin="0,0,6,10"
                   Height="120"
                   CornerRadius="6"
                   BorderBrush="{StaticResource DxCampaignBorderBrush}"
@@ -179,15 +199,132 @@
                    IsHitTestVisible="False" />
           </Border>
           <ScrollViewer Grid.Row="1"
+                        Margin="0,0,2,0"
                         VerticalScrollBarVisibility="Auto"
                         HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Styles>
+              <Style Selector="ScrollBar">
+                <Setter Property="Width" Value="9" />
+                <Setter Property="AllowAutoHide" Value="False" />
+              </Style>
+              <Style Selector="ScrollBar /template/ RepeatButton">
+                <Setter Property="IsVisible" Value="False" />
+              </Style>
+              <Style Selector="ScrollBar /template/ Thumb">
+                <Setter Property="Background" Value="#BB8C5A32" />
+                <Setter Property="CornerRadius" Value="4.5" />
+                <Setter Property="BorderBrush" Value="#66FFD4A8" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="MinHeight" Value="32" />
+              </Style>
+              <Style Selector="ScrollBar /template/ Thumb:pointerover">
+                <Setter Property="Background" Value="#DDFF8C32" />
+              </Style>
+              <Style Selector="ScrollBar /template/ Border#Track">
+                <Setter Property="Background" Value="#22000000" />
+              </Style>
+            </ScrollViewer.Styles>
+            <Panel>
+            <!-- Structured briefing -->
+            <StackPanel Spacing="12"
+                        IsVisible="{Binding UseStructuredBriefing}">
+              <TextBlock Text="{Binding BriefingTitle}"
+                         FontFamily="{Binding LabelFontFamily}"
+                         FontSize="15"
+                         FontWeight="Bold"
+                         Foreground="{StaticResource DxCampaignHeaderBrush}"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding HasBriefingTitle}" />
+              <Border Background="#221810"
+                      BorderBrush="#66553A22"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      Padding="10,8"
+                      IsVisible="{Binding HasBriefingLocation}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="地点"
+                             FontFamily="{Binding LabelFontFamily}"
+                             FontSize="11.5"
+                             FontWeight="Bold"
+                             Foreground="{StaticResource DxAccentSoftBrush}"
+                             VerticalAlignment="Center" />
+                  <Border Width="1" Height="12" Background="#55FF8C32" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding BriefingLocation}"
+                             FontFamily="{Binding LabelFontFamily}"
+                             FontSize="13"
+                             Foreground="{StaticResource DxTextPrimaryBrush}"
+                             TextWrapping="Wrap"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <TextBlock Text="{Binding BriefingBody}"
+                         FontFamily="{Binding LabelFontFamily}"
+                         FontSize="13.5"
+                         Foreground="{StaticResource DxTextPrimaryBrush}"
+                         TextWrapping="Wrap"
+                         LineHeight="22"
+                         Opacity="0.92"
+                         IsVisible="{Binding HasBriefingBody}" />
+              <StackPanel Spacing="8" IsVisible="{Binding HasBriefingObjectives}">
+                <TextBlock Text="任务目标"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="12.5"
+                           FontWeight="Bold"
+                           LetterSpacing="0.8"
+                           Foreground="{StaticResource DxCampaignHeaderBrush}" />
+                <ItemsControl ItemsSource="{Binding BriefingObjectives}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Background="#18140F"
+                              BorderBrush="#44382818"
+                              BorderThickness="1"
+                              CornerRadius="5"
+                              Padding="10,7"
+                              Margin="0,0,0,6">
+                        <DockPanel LastChildFill="True">
+                          <Border DockPanel.Dock="Left"
+                                  Width="6"
+                                  Height="6"
+                                  Margin="0,5,10,0"
+                                  CornerRadius="3"
+                                  Background="{StaticResource DxAccentBrush}"
+                                  VerticalAlignment="Top" />
+                          <TextBlock Text="{Binding}"
+                                     FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                                     FontSize="13"
+                                     Foreground="{StaticResource DxTextPrimaryBrush}"
+                                     TextWrapping="Wrap"
+                                     LineHeight="20" />
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <Border Background="#33A04020"
+                      BorderBrush="#88FF8C32"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      Padding="10,8"
+                      IsVisible="{Binding HasBriefingStatusHint}">
+                <TextBlock Text="{Binding BriefingStatusHint}"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="12.5"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource DxAccentSoftBrush}"
+                           TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+            <!-- Plain fallback -->
             <TextBlock Text="{Binding Text}"
                        FontFamily="{Binding LabelFontFamily}"
                        FontSize="13.5"
                        Foreground="{StaticResource DxTextPrimaryBrush}"
                        TextWrapping="Wrap"
                        LineHeight="22"
-                       Opacity="0.92" />
+                       Opacity="0.92"
+                       IsVisible="{Binding UseStructuredBriefing, Converter={x:Static BoolConverters.Not}}" />
+            </Panel>
           </ScrollViewer>
         </Grid>
       </Panel>
@@ -275,43 +412,107 @@
                IsVisible="{Binding IsVisible}" />
   </DataTemplate>
 
-  <!-- Difficulty slider -->
+  <!-- Difficulty slider: custom orange track + thumb (no Fluent blue ticks) -->
   <DataTemplate x:Key="DxCampaignDifficultySlider" DataType="vm:UiNodeViewModel">
     <Border Width="{Binding Width}"
-            MinHeight="36"
-            Padding="12,10"
+            MinHeight="44"
+            Padding="16,14"
             CornerRadius="8"
             BorderBrush="{StaticResource DxCampaignBorderBrush}"
             BorderThickness="1"
             Background="{StaticResource DxCampaignSurfaceElevatedBrush}"
             IsVisible="{Binding IsVisible}"
             IsEnabled="{Binding IsEnabled}">
-      <Panel>
-        <Image Source="{Binding BackgroundImage}"
-               Stretch="{Binding BackgroundImageStretch}"
-               Opacity="0.08"
-               IsVisible="{Binding BackgroundImage, Converter={x:Static ObjectConverters.IsNotNull}}"
-               IsHitTestVisible="False" />
-        <Border Background="{Binding TiledBackgroundBrush}"
-                Opacity="0.08"
-                IsVisible="{Binding UseTiledBackground}"
-                IsHitTestVisible="False" />
-        <Slider Minimum="0"
-                Maximum="2"
-                Value="{Binding SelectedIndex, Mode=TwoWay}"
-                TickFrequency="1"
-                IsSnapToTickEnabled="True"
-                Margin="4,0" />
-        <Image Source="{Binding ThumbImage}"
-               Width="22"
-               Height="22"
-               Stretch="Uniform"
-               HorizontalAlignment="Left"
-               VerticalAlignment="Center"
-               Margin="12,0,0,0"
-               IsHitTestVisible="False"
-               IsVisible="{Binding HasThumbImage}" />
-      </Panel>
+      <Slider Minimum="0"
+              Maximum="2"
+              Value="{Binding SelectedIndex, Mode=TwoWay}"
+              IsSnapToTickEnabled="True"
+              TickFrequency="1"
+              MinHeight="28"
+              Background="#2A2018"
+              Foreground="#FF8C32">
+        <Slider.Styles>
+          <Style Selector="Slider:horizontal">
+            <Setter Property="Template">
+              <ControlTemplate>
+                <Grid Margin="4,0" MinHeight="24">
+                  <!-- Full track -->
+                  <Border Height="6"
+                          CornerRadius="3"
+                          VerticalAlignment="Center"
+                          Margin="9,0"
+                          Background="#2A2018"
+                          BorderBrush="#55382818"
+                          BorderThickness="1" />
+                  <Track Name="PART_Track"
+                         Orientation="Horizontal"
+                         Minimum="{TemplateBinding Minimum}"
+                         Maximum="{TemplateBinding Maximum}"
+                         Value="{TemplateBinding Value, Mode=TwoWay}">
+                    <Track.DecreaseButton>
+                      <RepeatButton Name="PART_DecreaseButton"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Focusable="False"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    IsTabStop="False">
+                        <RepeatButton.Template>
+                          <ControlTemplate>
+                            <Border Background="Transparent"
+                                    VerticalAlignment="Center"
+                                    Height="6"
+                                    CornerRadius="3,0,0,3">
+                              <Border Background="{StaticResource DxCampaignAccentGradient}"
+                                      CornerRadius="3,0,0,3"
+                                      Height="6" />
+                            </Border>
+                          </ControlTemplate>
+                        </RepeatButton.Template>
+                      </RepeatButton>
+                    </Track.DecreaseButton>
+                    <Track.IncreaseButton>
+                      <RepeatButton Name="PART_IncreaseButton"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Focusable="False"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    IsTabStop="False">
+                        <RepeatButton.Template>
+                          <ControlTemplate>
+                            <Border Background="Transparent" Height="6" VerticalAlignment="Center" />
+                          </ControlTemplate>
+                        </RepeatButton.Template>
+                      </RepeatButton>
+                    </Track.IncreaseButton>
+                    <Track.Thumb>
+                      <Thumb Width="22" Height="22" Cursor="Hand">
+                        <Thumb.Template>
+                          <ControlTemplate>
+                            <Grid Width="22" Height="22">
+                              <Ellipse Width="22"
+                                       Height="22"
+                                       Fill="#FF8C32"
+                                       Stroke="#FFD4A8"
+                                       StrokeThickness="2" />
+                              <Ellipse Width="7"
+                                       Height="7"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Fill="#FFF2E6D8" />
+                            </Grid>
+                          </ControlTemplate>
+                        </Thumb.Template>
+                      </Thumb>
+                    </Track.Thumb>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter>
+          </Style>
+        </Slider.Styles>
+      </Slider>
     </Border>
   </DataTemplate>
 
@@ -338,7 +539,7 @@
                       BorderBrush="#FFD4A8"
                       BorderThickness="1"
                       CornerRadius="6"
-                      Padding="20,8"
+                      Padding="12,6"
                       BoxShadow="0 2 8 0 #40000000">
                 <ContentPresenter HorizontalAlignment="Center"
                                   VerticalAlignment="Center" />
@@ -357,6 +558,7 @@
       <Panel>
         <Image Source="{Binding IdleImage}"
                Stretch="Fill"
+               Opacity="0.35"
                IsVisible="{Binding HasTextureImage}"
                IsHitTestVisible="False" />
         <Border Background="{StaticResource DxCampaignPrimaryButtonGradient}"
@@ -369,7 +571,7 @@
                    FontFamily="{Binding LabelFontFamily}"
                    FontSize="{Binding FontSize}"
                    FontWeight="Bold"
-                   Foreground="{Binding ForegroundBrush}"
+                   Foreground="#FF20160C"
                    TextAlignment="Center"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center" />
@@ -400,7 +602,7 @@
                       BorderBrush="{StaticResource DxCampaignBorderBrush}"
                       BorderThickness="1"
                       CornerRadius="6"
-                      Padding="20,8">
+                      Padding="12,6">
                 <ContentPresenter HorizontalAlignment="Center"
                                   VerticalAlignment="Center" />
               </Border>
@@ -415,6 +617,7 @@
       <Panel>
         <Image Source="{Binding IdleImage}"
                Stretch="Fill"
+               Opacity="0.25"
                IsVisible="{Binding HasTextureImage}"
                IsHitTestVisible="False" />
         <Border Background="#18000000"
@@ -427,7 +630,7 @@
                    FontFamily="{Binding LabelFontFamily}"
                    FontSize="{Binding FontSize}"
                    FontWeight="SemiBold"
-                   Foreground="{Binding ForegroundBrush}"
+                   Foreground="{StaticResource DxTextPrimaryBrush}"
                    TextAlignment="Center"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center" />

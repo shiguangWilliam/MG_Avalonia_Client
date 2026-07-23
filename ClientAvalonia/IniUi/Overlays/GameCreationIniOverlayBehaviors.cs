@@ -1,4 +1,5 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
@@ -20,13 +21,14 @@ public static class GameCreationIniOverlayBehaviors
 
     private static void TryCreate(IUiNavigationHost host, UiNodeViewModel root)
     {
-        if (CnCNetSessionService.Instance.IsGameRoomJoinPending)
+        ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+        if (cncnet.IsGameRoomJoinPending)
         {
-            host.ShowStatus("Joining game room ?please wait...");
+            host.ShowStatus("Joining game room — please wait...");
             return;
         }
 
-        if (CnCNetSessionService.Instance.ActiveGameRoom != null)
+        if (cncnet.ActiveGameRoom != null)
         {
             host.ShowStatus("Already in a game room.");
             host.CloseGameCreationOverlay();
@@ -47,14 +49,14 @@ public static class GameCreationIniOverlayBehaviors
         int maxPlayers = ReadComboInt(root, "ddMaxPlayers", 8);
         int skillLevel = ReadComboIndex(root, "ddSkillLevel");
 
-        if (CnCNetSessionService.Instance.Tunnels.Count == 0)
+        if (cncnet.Tunnels.Count == 0)
         {
             host.ShowStatus("No NAT tunnels available.");
             return;
         }
 
-        CnCNetTunnel tunnel = CnCNetSessionService.Instance.Tunnels.FirstOrDefault(t => t.Official)
-            ?? CnCNetSessionService.Instance.Tunnels[0];
+        CnCNetTunnel tunnel = cncnet.Tunnels.FirstOrDefault(t => t.Official)
+            ?? cncnet.Tunnels[0];
 
         var request = new CnCNetGameCreationRequest
         {
@@ -68,7 +70,7 @@ public static class GameCreationIniOverlayBehaviors
 
         host.CloseGameCreationOverlay();
 
-        if (!CnCNetSessionService.Instance.TryCreateGame(request, out string message))
+        if (!cncnet.TryCreateGame(request, out string message))
         {
             host.ShowStatus(message);
             return;

@@ -1,3 +1,7 @@
+// ClientEnvironment: game-root discovery, theme resolution, and asset/INI search paths.
+// The search path order in GetAssetSearchPaths / ResolveNamedIni is aligned with DX's
+// ProgramConstants.GetResourcePath(). Read ClientAvalonia/IniUi/README.md §ResourceResolver
+// before changing path order — map previews and side icons rely on GameRoot being a root.
 using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.Services;
@@ -228,9 +232,16 @@ public sealed class ClientEnvironment
 
         yield return ThemeResourceDirectory;
         yield return ResourcesDirectory;
-        yield return GameRoot;
+        // XNA base resource directory (ProgramConstants.GetBaseResourcePath() == Resources/Base).
+        yield return Path.Combine(ResourcesDirectory, "Base");
+        // Backward compat: published DTA resource bundles (pre-2.12 standard) ship under Resources/DTA/.
         yield return Path.Combine(ResourcesDirectory, "DTA");
         yield return Path.Combine(ResourcesDirectory, "DTA", "Default Theme");
+        // GameRoot must remain in the search roots: map previews, side icons and other game-relative
+        // assets are addressed as paths like "Maps/Fan-made/xxx.png" or "Previews/foo.png" — i.e.
+        // relative to the game root, NOT to Resources/. Removing this root silently breaks
+        // GameAssetResolver.ResolveMapPreviewRelativePath on every mod (MG/LNOD/QEC alike).
+        yield return GameRoot;
     }
 
     /// <summary>Window INI resolution: theme MainMenu.ini → Resources/MainMenu.ini → DTA fallback.</summary>
@@ -241,28 +252,44 @@ public sealed class ClientEnvironment
     public string? ResolveGenericWindowIni()
         => ResolveNamedIni("GenericWindow.ini");
 
-    /// <summary>Dedicated window INI, else [windowName] inside GenericWindow.ini.</summary>
+    /// <summary>Dedicated window INI when it contains a usable section; else [section] in GenericWindow.ini.</summary>
     public (string IniPath, string Section)? TryResolveOverlaySection(string windowName, string genericSectionName)
     {
         string? dedicated = ResolveWindowIni(windowName);
         if (dedicated != null)
-            return (dedicated, windowName);
+        {
+            try
+            {
+                IniDocument doc = IniDocument.Load(dedicated);
+                string section = ResolveIniSectionForWindow(doc, windowName);
+                if (doc.GetSection(section) != null)
+                    return (dedicated, section);
+            }
+            catch
+            {
+                // Fall through to GenericWindow.ini (same as DX when a dedicated file is unusable).
+            }
+        }
 
         string? generic = ResolveGenericWindowIni();
-        if (generic == null)
+        if (generic == null || !File.Exists(generic))
             return null;
 
-        if (!File.Exists(generic))
-            return null;
-
-        IniDocument doc = IniDocument.Load(generic);
-        if (doc.GetSection(genericSectionName) == null)
+        IniDocument genericDoc = IniDocument.Load(generic);
+        if (genericDoc.GetSection(genericSectionName) == null)
             return null;
 
         return (generic, genericSectionName);
     }
 
-    /// <summary>Resolves INI path and section for LayoutEngine (CnCNetGameLobby.ini uses [MultiplayerGameLobby]).</summary>
+    /// <summary>
+    /// Control-driven INI resolution (aligned with ClientGUI/INItializableWindow + XNAWindow):
+    /// returns the window INI path together with the <em>INI section</em> to load as the root.
+    /// Navigation may use logical names like <c>CnCNetGameLobby</c>, but MG's INI chain puts the
+    /// real window attributes on <c>[MultiplayerGameLobby]</c> (via BasedOn). Loading with the
+    /// logical name falls back to <c>[GenericWindow]</c> and treats <c>[MultiplayerGameLobby]</c>
+    /// as a foreign lobby (skipped), leaving a black viewport with a few orphan toolbar scraps.
+    /// </summary>
     public (string IniPath, string SectionName)? ResolveWindowLoadTarget(string windowName)
     {
         string? iniPath = ResolveWindowIni(windowName);
@@ -272,38 +299,84 @@ public sealed class ClientEnvironment
                 ?? ResolveWindowIni("SkirmishLobby");
         }
 
+        // Last-resort fallback: if neither a dedicated window INI nor a lobby INI exists,
+        // try GenericWindow.ini (XNAWindow.SetAttributesFromIni() generic fallback).
+        iniPath ??= ResolveGenericWindowIni();
         if (iniPath == null)
             return null;
 
-        string? section = ResolveSectionName(iniPath, windowName)
-            ?? ResolveSectionName(iniPath, "MultiplayerGameLobby")
-            ?? ResolveSectionName(iniPath, "SkirmishLobby");
-
-        return section == null ? null : (iniPath, section);
+        string sectionName = ResolveWindowIniSection(iniPath, windowName);
+        return (iniPath, sectionName);
     }
+
+    /// <summary>
+    /// Map logical window names onto the INI section that actually carries Size / $CC /
+    /// $BaseSection (DX IniNameOverride vs Name). Prefer an exact section match; else aliases.
+    /// </summary>
+    private static string ResolveWindowIniSection(string iniPath, string windowName)
+    {
+        try
+        {
+            IniDocument doc = IniDocument.Load(iniPath);
+            return ResolveIniSectionForWindow(doc, windowName);
+        }
+        catch
+        {
+            // Fall through to the navigation name; LoadWindow still has GenericWindow fallback.
+        }
+
+        return windowName;
+    }
+
+    private static string ResolveIniSectionForWindow(IniDocument doc, string windowName)
+    {
+        if (doc.GetSection(windowName) != null)
+            return windowName;
+
+        foreach ((string logical, string section) in WindowSectionAliases)
+        {
+            if (windowName.Equals(logical, StringComparison.OrdinalIgnoreCase)
+                && doc.GetSection(section) != null)
+            {
+                return section;
+            }
+        }
+
+        return windowName;
+    }
+
+    /// <summary>
+    /// DX-shaped IniNameOverride → Name aliases. Keep navigation / behaviors on the logical name;
+    /// only the load target section is remapped.
+    /// </summary>
+    private static readonly (string LogicalName, string SectionName)[] WindowSectionAliases =
+    [
+        ("CnCNetGameLobby", "MultiplayerGameLobby"),
+        ("LANGameLobby", "MultiplayerGameLobby"),
+        ("CnCNetGameLoadingLobby", "GameLoadingLobby"),
+        ("LANGameLoadingLobby", "GameLoadingLobby"),
+    ];
 
     private static bool IsGameLobbyWindowName(string windowName)
         => windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase);
-
-    private static string? ResolveSectionName(string iniPath, string sectionName)
-    {
-        if (!File.Exists(iniPath))
-            return null;
-
-        IniDocument doc = IniDocument.Load(iniPath);
-        return doc.GetSection(sectionName) != null ? sectionName : null;
-    }
+           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("CnCNetGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals("GameLoadingLobby", StringComparison.OrdinalIgnoreCase);
 
     private string? ResolveNamedIni(string fileName)
     {
         string resourcesDirectory = Path.Combine(GameRoot, "Resources");
         string themeResourceDirectory = Path.Combine(resourcesDirectory, ThemeFolderPath.TrimEnd('/', '\\'));
+        // Resolution order mirrors ClientGUI/INItializableWindow.GetConfigPath() +
+        // XNAWindow.SetAttributesFromIni(), with an extra DTA/ tier for legacy mod bundles
+        // that still ship their fallback INIs under Resources/DTA/ (pre-2.12 convention).
         string[] candidates =
         [
             Path.Combine(themeResourceDirectory, fileName),
             Path.Combine(resourcesDirectory, fileName),
+            Path.Combine(resourcesDirectory, "Base", fileName),
             Path.Combine(resourcesDirectory, "DTA", fileName),
         ];
 
@@ -321,10 +394,13 @@ public sealed class ClientEnvironment
         string resourcesDirectory = Path.Combine(gameRoot, "Resources");
         string themeResourceDirectory = Path.Combine(resourcesDirectory, themeFolderPath.TrimEnd('/', '\\'));
         string fileName = $"{windowName}.ini";
+        // Resolution order mirrors ClientGUI/INItializableWindow.GetConfigPath() +
+        // XNAWindow.SetAttributesFromIni(), with an extra DTA/ tier for legacy mod bundles.
         string[] candidates =
         [
             Path.Combine(themeResourceDirectory, fileName),
             Path.Combine(resourcesDirectory, fileName),
+            Path.Combine(resourcesDirectory, "Base", fileName),
             Path.Combine(resourcesDirectory, "DTA", fileName),
         ];
 

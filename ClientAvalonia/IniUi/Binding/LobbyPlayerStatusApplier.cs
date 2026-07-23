@@ -6,6 +6,7 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Session;
 
 namespace ClientAvalonia.IniUi.Binding;
 
@@ -15,16 +16,21 @@ public static class LobbyPlayerStatusApplier
     private const int IndicatorSize = 14;
     private const int PingIndicatorSize = 12;
 
+    /// <summary>
+    /// Phase 3 P3-3：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>（session.PlayerSlots）
+    /// + 显式 UI 输入态（mode / locked / isHostView），不再依赖 <see cref="LobbyPlayerState"/>。
+    /// </summary>
     public static void Apply(
         UiNodeViewModel root,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot> slots,
+        LobbyPlayerMode mode,
         ResourceResolver resources,
         BehaviorRegistry behaviors,
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers,
         bool locked,
         bool isHostView)
     {
-        if (playerState.Mode != LobbyPlayerMode.Multiplayer || roomPlayers == null)
+        if (mode != LobbyPlayerMode.Multiplayer || roomPlayers == null)
             return;
 
         UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
@@ -42,31 +48,54 @@ public static class LobbyPlayerStatusApplier
 
             UiNodeViewModel indicator = EnsureIndicator(
                 panel, slot, ddName, statusX, statusY, resources, behaviors, isPing: false);
-            ApplyIndicator(indicator, slot, playerState, roomPlayers, resources, locked, isHostView);
+            ApplyIndicator(indicator, slot, slots, mode, roomPlayers, resources, locked, isHostView);
 
             UiNodeViewModel pingIndicator = EnsureIndicator(
                 panel, slot, ddName, statusX, statusY, resources, behaviors, isPing: true);
-            ApplyPingIndicator(pingIndicator, slot, playerState, roomPlayers, resources);
+            ApplyPingIndicator(pingIndicator, slot, slots, roomPlayers, resources);
         }
+    }
+
+    /// <summary>Legacy 入口（Phase 3 P3-3：标记为已过时）。委托到 Session-aware 重载。</summary>
+    [Obsolete("Phase 3 P3-3: 改用 Apply(..., IReadOnlyList<IPlayerSlot>, LobbyPlayerMode, ...)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
+    public static void Apply(
+        UiNodeViewModel root,
+        LobbyPlayerState playerState,
+        ResourceResolver resources,
+        BehaviorRegistry behaviors,
+        IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers,
+        bool locked,
+        bool isHostView)
+    {
+        Apply(
+            root,
+            playerState.Slots,
+            playerState.Mode,
+            resources,
+            behaviors,
+            roomPlayers,
+            locked,
+            isHostView);
     }
 
     private static void ApplyIndicator(
         UiNodeViewModel indicator,
         int slot,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot> slots,
+        LobbyPlayerMode mode,
         IReadOnlyList<CnCNetGameRoomPlayer> roomPlayers,
         ResourceResolver resources,
         bool locked,
         bool isHostView)
     {
-        LobbyPlayerRowKind rowKind = LobbyPlayerSlotUiRules.GetUiRowKind(slot, playerState);
+        LobbyPlayerRowKind rowKind = LobbyPlayerSlotUiRules.GetUiRowKind(slot, slots, mode, allowHostPlayerOptions: isHostView);
         if (rowKind is LobbyPlayerRowKind.Closed or LobbyPlayerRowKind.Open)
         {
             SetTexture(indicator, resources, "statusEmpty.png");
             return;
         }
 
-        LobbyPlayerSlot slotState = playerState.Slots[slot];
+        IPlayerSlot slotState = slots[slot];
         if (!slotState.IsOccupied)
         {
             SetTexture(indicator, resources, "statusEmpty.png");
@@ -100,11 +129,11 @@ public static class LobbyPlayerStatusApplier
     private static void ApplyPingIndicator(
         UiNodeViewModel indicator,
         int slot,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot> slots,
         IReadOnlyList<CnCNetGameRoomPlayer> roomPlayers,
         ResourceResolver resources)
     {
-        LobbyPlayerSlot slotState = playerState.Slots[slot];
+        IPlayerSlot slotState = slots[slot];
         if (!slotState.IsOccupied || slotState.IsAi)
         {
             indicator.IsVisible = false;

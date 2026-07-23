@@ -1,6 +1,7 @@
 using ClientAvalonia.Online.EventArguments;
 using ClientCore;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -20,6 +21,12 @@ public sealed class CnCNetIrcConnection : IDisposable
     private const int KeepAliveInitialMs = 30_000;
     private const int KeepAliveIdlePeriodMs = 120_000;
     private const int KeepAliveActivePeriodMs = 30_000;
+    // B1: IRC RFC 2812 ??message size limit is 512 bytes including CRLF. Allow a
+    // generous 8 KiB ceiling so multi-line SASL/multi-protocol frames still parse,
+    // but tear down the connection if a malicious / buggy peer streams > 8 KiB of
+    // data without a single '\n' (which would otherwise grow the StringBuilder
+    // unbounded and cause OOM).
+    private const int MaxReadBufferLength = 8192;
 
     private readonly object _sendLock = new();
     private readonly List<QueuedOutboundMessage> _sendQueue = [];
@@ -32,6 +39,8 @@ public sealed class CnCNetIrcConnection : IDisposable
     private readonly Dictionary<string, int> _channelUserCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _localJoinedChannels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _localJoinedChannelWireNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (string Ident, string Host)> _actorByNick =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -174,6 +183,27 @@ public sealed class CnCNetIrcConnection : IDisposable
     /// <summary>User-facing connection progress (not raw RMP/SRM traffic).</summary>
     public event Action<string>? ActivityLogged;
 
+    /// <summary>Look up last-seen IRC ident/host for a nick (from PRIVMSG/NOTICE/JOIN prefixes).</summary>
+    public bool TryGetActor(string nick, out string ident, out string host)
+    {
+        ident = string.Empty;
+        host = string.Empty;
+        if (string.IsNullOrWhiteSpace(nick))
+            return false;
+        if (!_actorByNick.TryGetValue(nick.Trim(), out (string Ident, string Host) actor))
+            return false;
+        ident = actor.Ident;
+        host = actor.Host;
+        return true;
+    }
+
+    private void RememberActorFromPrefix(string prefix)
+    {
+        if (!IrcUserPrefix.TryParse(prefix, out string nick, out string ident, out string host))
+            return;
+        _actorByNick[nick] = (ident, host);
+    }
+
     public void ConnectAsync()
     {
         if (IsConnected || IsConnecting)
@@ -207,28 +237,75 @@ public sealed class CnCNetIrcConnection : IDisposable
         EmitActivity(string.IsNullOrWhiteSpace(key) ? $"??JOIN {normalized}" : $"??JOIN {normalized} (key)");
     }
 
-    /// <summary>Immediate JOIN (welcome / create game). Bypasses SendSleep queue delay.</summary>
-    public void JoinChannelInstant(string channel, string? key = null)
+    /// <summary>
+    /// DX <c>Channel.Join</c> for Persistent lobby channels: queue JOIN with a random
+    /// 1–10000 ms delay so welcome / channel-switch bursts do not trip GameSurge flood
+    /// protection (which can silently drop JOINs — empty lobby, no JOIN echo).
+    /// </summary>
+    public bool JoinChannelPersistent(string channel, string? key = null)
     {
         if (string.IsNullOrWhiteSpace(channel))
-            return;
+        {
+            EmitActivity("??JOIN skipped: empty channel name.");
+            return false;
+        }
+
+        if (!IsConnected)
+        {
+            EmitActivity($"??JOIN {channel} dropped (not connected).");
+            return false;
+        }
 
         string normalized = channel.StartsWith('#') ? channel : "#" + channel;
         normalized = normalized.ToLowerInvariant();
         string command = string.IsNullOrWhiteSpace(key)
             ? $"JOIN {normalized}"
             : $"JOIN {normalized} {key}";
-        SendInstant(command);
+        int delayMs = Random.Shared.Next(1, 10_000);
+        EnqueueSend(command, priority: 9, dedupeKey: "JOIN:" + normalized, delayMs: delayMs);
+        EmitActivity(string.IsNullOrWhiteSpace(key)
+            ? $"??JOIN {normalized} (persistent, delay {delayMs}ms)"
+            : $"??JOIN {normalized} (key, persistent, delay {delayMs}ms)");
+        return true;
     }
 
-    /// <summary>Immediate send for JOIN during create/join (XNA QueuedMessageType.INSTANT_MESSAGE).</summary>
-    public void SendInstant(string message)
+    /// <summary>
+    /// Immediate JOIN (create / join game room). Bypasses SendSleep queue delay.
+    /// Returns <c>false</c> (and logs) if the connection is down so callers can
+    /// surface the failure instead of silently losing the JOIN.
+    /// </summary>
+    public bool JoinChannelInstant(string channel, string? key = null)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+        {
+            EmitActivity("??JOIN skipped: empty channel name.");
+            return false;
+        }
+
+        string normalized = channel.StartsWith('#') ? channel : "#" + channel;
+        normalized = normalized.ToLowerInvariant();
+        string command = string.IsNullOrWhiteSpace(key)
+            ? $"JOIN {normalized}"
+            : $"JOIN {normalized} {key}";
+        // SendInstant already emits ??JOIN / dropped — do not double-log here.
+        return SendInstant(command);
+    }
+
+    /// <summary>
+    /// Immediate send for JOIN during create/join (XNA QueuedMessageType.INSTANT_MESSAGE).
+    /// Returns <c>false</c> if the send was dropped (not connected / empty message).
+    /// </summary>
+    public bool SendInstant(string message)
     {
         if (string.IsNullOrWhiteSpace(message))
-            return;
+            return false;
 
-        SendImmediate(message);
-        EmitActivity($"??{message}");
+        bool sent = SendImmediate(message);
+        if (sent)
+            EmitActivity($"??{message}");
+        else
+            EmitActivity($"??{message} dropped (not connected).");
+        return sent;
     }
 
     /// <summary>Send only when local JOIN for the channel has been confirmed (avoids IRC 442).</summary>
@@ -337,6 +414,19 @@ public sealed class CnCNetIrcConnection : IDisposable
         string normalized = channel.StartsWith('#') ? channel.ToLowerInvariant() : "#" + channel.ToLowerInvariant();
         string colorPrefix = $"{(char)3}{ircColorId:D2}";
         SendImmediate($"PRIVMSG {normalized} :{colorPrefix}{message}");
+    }
+
+    /// <summary>DX-compatible private message (no IRC color prefix).</summary>
+    public void SendPrivateMessage(string nick, string message)
+    {
+        if (string.IsNullOrWhiteSpace(nick) || string.IsNullOrWhiteSpace(message))
+            return;
+
+        string target = nick.Trim();
+        if (target.StartsWith('#'))
+            return;
+
+        SendImmediate(FormatPrivateMessageWire(target, message));
     }
 
     public void Dispose()
@@ -473,6 +563,17 @@ public sealed class CnCNetIrcConnection : IDisposable
                 string chunk = _encoding.GetString(buffer, 0, bytesRead);
                 _readBuffer.Append(chunk);
 
+                // B1: cap the read buffer to defend against peers that stream
+                // unbounded data without a '\n'. Tear down instead of OOM-ing.
+                if (_readBuffer.Length > MaxReadBufferLength)
+                {
+                    Logger.Log(
+                        $"CnCNetIrcConnection: read buffer exceeded {MaxReadBufferLength} chars "
+                        + "without a newline — tearing down (possible protocol abuse or buggy peer).");
+                    EmitActivity("Connection closed: malformed stream (no newline within 8 KiB).");
+                    break;
+                }
+
                 while (TryDequeueLine(out string? line))
                 {
                     if (string.IsNullOrWhiteSpace(line))
@@ -485,7 +586,11 @@ public sealed class CnCNetIrcConnection : IDisposable
                     }
                     catch (Exception ex)
                     {
+                        // Single-line resilience: a malformed/abusive line must never tear down
+                        // the connection. Surface the failure via ActivityLogged so the UI can
+                        // report degradation, and keep draining the buffer.
                         Logger.Log($"CnCNetIrcConnection handler error: {ex.Message}");
+                        EmitActivity($"Ignored malformed IRC line ({ex.GetType().Name}).");
                     }
                 }
             }
@@ -529,16 +634,23 @@ public sealed class CnCNetIrcConnection : IDisposable
             QueuedOutboundMessage? outbound = null;
             lock (_sendLock)
             {
-                if (_sendQueue.Count > 0)
+                // DX Connection.RunSendQueue: skip delayed messages until SendAt; keep them queued.
+                DateTime now = DateTime.UtcNow;
+                for (int i = 0; i < _sendQueue.Count; i++)
                 {
-                    outbound = _sendQueue[0];
-                    _sendQueue.RemoveAt(0);
+                    QueuedOutboundMessage candidate = _sendQueue[i];
+                    if (candidate.SendAtUtc is { } sendAt && sendAt > now)
+                        continue;
+
+                    outbound = candidate;
+                    _sendQueue.RemoveAt(i);
+                    break;
                 }
             }
 
             if (outbound == null)
             {
-                Thread.Sleep(25);
+                Thread.Sleep(10);
                 continue;
             }
 
@@ -574,8 +686,9 @@ public sealed class CnCNetIrcConnection : IDisposable
         return false;
     }
 
-    private void EnqueueSend(string message, int priority = 0, string? dedupeKey = null)
+    private void EnqueueSend(string message, int priority = 0, string? dedupeKey = null, int delayMs = 0)
     {
+        DateTime? sendAtUtc = delayMs > 0 ? DateTime.UtcNow.AddMilliseconds(delayMs) : null;
         lock (_sendLock)
         {
             if (dedupeKey != null)
@@ -583,12 +696,15 @@ public sealed class CnCNetIrcConnection : IDisposable
                 int existing = _sendQueue.FindIndex(m => dedupeKey.Equals(m.DedupeKey, StringComparison.Ordinal));
                 if (existing >= 0)
                 {
-                    _sendQueue[existing] = new QueuedOutboundMessage(message, priority, dedupeKey);
+                    // Keep the earlier SendAt for JOIN dedupe so a second welcome path cannot
+                    // reset the anti-flood delay and re-burst the same channel.
+                    DateTime? keptSendAt = _sendQueue[existing].SendAtUtc ?? sendAtUtc;
+                    _sendQueue[existing] = new QueuedOutboundMessage(message, priority, dedupeKey, keptSendAt);
                     return;
                 }
             }
 
-            var entry = new QueuedOutboundMessage(message, priority, dedupeKey);
+            var entry = new QueuedOutboundMessage(message, priority, dedupeKey, sendAtUtc);
             int insertAt = _sendQueue.FindIndex(m => m.Priority < priority);
             if (insertAt < 0)
                 _sendQueue.Add(entry);
@@ -597,15 +713,21 @@ public sealed class CnCNetIrcConnection : IDisposable
         }
     }
 
-    private void SendImmediate(string message)
+    private bool SendImmediate(string message)
     {
         if (_stream == null || !IsConnected)
-            return;
+        {
+            Logger.Log($"CnCNetIrcConnection: SendImmediate dropped (not connected): {message}");
+            return false;
+        }
 
         lock (_sendLock)
         {
             if (_stream == null || !IsConnected)
-                return;
+            {
+                Logger.Log($"CnCNetIrcConnection: SendImmediate dropped (not connected inside lock): {message}");
+                return false;
+            }
 
             try
             {
@@ -613,10 +735,12 @@ public sealed class CnCNetIrcConnection : IDisposable
                 byte[] buffer = _encoding.GetBytes(message + "\r\n");
                 _stream.Write(buffer, 0, buffer.Length);
                 _stream.Flush();
+                return true;
             }
             catch (Exception ex)
             {
                 Logger.Log($"CnCNetIrcConnection send failed: {ex.Message}");
+                return false;
             }
         }
     }
@@ -658,7 +782,12 @@ public sealed class CnCNetIrcConnection : IDisposable
 
     private static bool MessageTargetsChannel(string message, string normalizedChannel)
     {
-        foreach (string prefix in new[] { "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART " })
+        // JOIN/NAMES/PART/PRIVMSG/… — channel-switch must flush pending JOINs or 474 bans
+        // will keep re-firing from the delayed persistent queue.
+        foreach (string prefix in new[]
+                 {
+                     "JOIN ", "NAMES ", "NOTICE ", "PRIVMSG ", "MODE ", "TOPIC ", "PART ",
+                 })
         {
             if (!message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -844,23 +973,46 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (parameters.Count < 2 || parameters[1].Length == 0)
             return;
 
-        // DX Connection.cs: CTCP may arrive via PRIVMSG with leading SOH (same as NOTICE).
-        if (parameters[1][0] == '\u0001' && !parameters[1].Contains("ACTION", StringComparison.Ordinal))
-        {
-            HandleCtcp(prefix, parameters[0], parameters[1]);
-            return;
-        }
-
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string sender, out string ident, out string host))
             return;
 
-        string sender = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string target = parameters[0];
         string message = parameters[1];
 
-        if (message.StartsWith('\u0001'.ToString() + "ACTION", StringComparison.Ordinal) && message.Length > 2)
-            message = message[1..^1];
+        // CTCP with leading SOH: ACTION stays on the chat path; everything else (GAME, …)
+        // is routed like NOTICE. Do NOT use Contains("ACTION") — DX Connection.cs does, but
+        // map/room names like "FACTION" would steal GAME CTCPs and empty the lobby.
+        if (message[0] == '\u0001')
+        {
+            if (CnCNetIrcChatText.TryNormalizeActionCtcp(message, out string actionBody))
+            {
+                // DX DoChatMessageReceived: sender cleared, body becomes "====> nick <action>".
+                string display = string.IsNullOrEmpty(actionBody)
+                    ? $"====> {sender}"
+                    : $"====> {sender} {actionBody}";
+
+                if (IsChannelTarget(target))
+                {
+                    ChatMessageReceived?.Invoke(target, string.Empty, display);
+                    return;
+                }
+
+                // Private ACTION: pass the raw SOH payload so Session formats once.
+                // Pre-formatting here caused "[time] nick: ====> nick body" double wrap.
+                if (IsLocalUser(target))
+                {
+                    PrivateMessageReceived?.Invoke(
+                        this,
+                        new CnCNetPrivateMessageEventArgs(sender, message, ident, host));
+                }
+
+                return;
+            }
+
+            HandleCtcp(prefix, target, message);
+            return;
+        }
 
         if (IsChannelTarget(target))
         {
@@ -869,16 +1021,29 @@ public sealed class CnCNetIrcConnection : IDisposable
         }
 
         if (IsLocalUser(target))
-            PrivateMessageReceived?.Invoke(this, new CnCNetPrivateMessageEventArgs(sender, message));
+        {
+            PrivateMessageReceived?.Invoke(
+                this,
+                new CnCNetPrivateMessageEventArgs(sender, message, ident, host));
+        }
     }
+
+    /// <summary>Test hook: feed a raw IRC line through the same parser as the socket loop.</summary>
+    internal void ProcessIncomingLineForTests(string line) => HandleLine(line);
+
+    /// <summary>Test hook: set the nick used by <see cref="IsLocalUser"/>.</summary>
+    internal void SetCurrentNickForTests(string nick) => SetCurrentNick(nick);
+
+    /// <summary>DX-compatible PRIVMSG nick wire form (no color prefix).</summary>
+    internal static string FormatPrivateMessageWire(string nick, string message)
+        => $"PRIVMSG {nick.Trim()} :{message}";
 
     private void HandleCtcp(string prefix, string target, string ctcpPayload)
     {
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string sender, out _, out _))
             return;
 
-        string sender = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string ctcp = ctcpPayload.Trim('\u0001');
 
         if (IsChannelTarget(target))
@@ -904,11 +1069,10 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (parameters.Count == 0)
             return;
 
-        int exclam = prefix.IndexOf('!');
-        if (exclam <= 0)
+        if (!IrcUserPrefix.TryParse(prefix, out string user, out _, out _))
             return;
 
-        string user = prefix[..exclam];
+        RememberActorFromPrefix(prefix);
         string channel = NormalizeChannelParameter(parameters[0]);
         if (IsLocalUser(user))
         {
@@ -1157,10 +1321,18 @@ public sealed class CnCNetIrcConnection : IDisposable
             return;
 
         command = commandAndParameters[0];
-        for (int i = 1; i < commandAndParameters.Length; i++)
+        // B3: cap the parameter count to defend against malicious / malformed peers
+        // that send hundreds of space-separated tokens. IRC commands in practice
+        // use well under 16 parameters; 32 is a generous ceiling that still lets
+        // multi-parameter numerics (353 NAMES list, etc.) parse correctly while
+        // rejecting abuse. The trailing parameter (if any) is appended below and
+        // counts towards the cap.
+        const int MaxParameters = 32;
+        int paramCount = Math.Min(commandAndParameters.Length - 1, MaxParameters);
+        for (int i = 1; i <= paramCount; i++)
             parameters.Add(commandAndParameters[i]);
 
-        if (!string.IsNullOrEmpty(trailing))
+        if (!string.IsNullOrEmpty(trailing) && parameters.Count < MaxParameters)
             parameters.Add(trailing);
     }
 
@@ -1184,5 +1356,9 @@ public sealed class CnCNetIrcConnection : IDisposable
         return command is "PO" or "GO" or "GAME" ? "CTCP:" + command : null;
     }
 
-    private readonly record struct QueuedOutboundMessage(string Message, int Priority, string? DedupeKey);
+    private readonly record struct QueuedOutboundMessage(
+        string Message,
+        int Priority,
+        string? DedupeKey,
+        DateTime? SendAtUtc = null);
 }

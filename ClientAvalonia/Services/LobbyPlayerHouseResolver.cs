@@ -1,4 +1,5 @@
 using ClientAvalonia.Domain;
+using ClientAvalonia.Session;
 using ClientCore;
 
 namespace ClientAvalonia.Services;
@@ -15,8 +16,12 @@ public static class LobbyPlayerHouseResolver
         public bool IsSpectator { get; init; }
     }
 
+    /// <summary>
+    /// Phase 3 P3-1：Session-aware 主入口——吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
+    /// 不再依赖 <see cref="LobbyPlayerSlot"/> 具体类型。
+    /// </summary>
     public static IReadOnlyList<ResolvedHouse> Resolve(
-        IReadOnlyList<LobbyPlayerSlot> occupiedSlots,
+        IReadOnlyList<IPlayerSlot> occupiedSlots,
         int randomSeed)
     {
         if (occupiedSlots.Count == 0)
@@ -34,7 +39,7 @@ public static class LobbyPlayerHouseResolver
         var disallowedSides = new bool[sideCount];
 
         var resolved = new List<ResolvedHouse>(occupiedSlots.Count);
-        foreach (LobbyPlayerSlot slot in occupiedSlots)
+        foreach (IPlayerSlot slot in occupiedSlots)
         {
             int sideId = slot.SideIndex;
             bool isSpectator = sideId == spectatorSideId;
@@ -51,6 +56,15 @@ public static class LobbyPlayerHouseResolver
 
         return resolved;
     }
+
+    /// <summary>
+    /// Legacy overload (delegates to <see cref="Resolve(IReadOnlyList{IPlayerSlot}, int)"/>).
+    /// </summary>
+    [Obsolete("Phase 3 P3-1: 改用 Resolve(IReadOnlyList<IPlayerSlot>, int)。Phase 5 调用方已迁移。")]
+    public static IReadOnlyList<ResolvedHouse> Resolve(
+        IReadOnlyList<LobbyPlayerSlot> occupiedSlots,
+        int randomSeed)
+        => Resolve((IReadOnlyList<IPlayerSlot>)occupiedSlots, randomSeed);
 
     private static int ResolveSideIndex(
         int sideId,
@@ -132,4 +146,10 @@ public static class LobbyPlayerHouseResolver
 
         return sideIndex;
     }
+
+    /// <summary>
+    /// Maps AI level (0/1/2) to spawn.ini HouseHandicaps value (DX GameLobbyBase).
+    /// Phase 3 P3-2：从 LobbyPlayerState 迁出到此处（与 house index 解析同一工具类）。
+    /// </summary>
+    public static int HouseHandicapFromAiLevel(int aiLevel) => Math.Abs(aiLevel - 2);
 }

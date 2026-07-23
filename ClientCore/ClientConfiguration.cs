@@ -66,7 +66,6 @@ namespace ClientCore
 
             RefreshTranslationGameFiles();
 
-            ProgramConstants.ApplyCnCNetProtocolRevision(CnCNetProtocolRevision);
             Logger.Log($"CnCNet protocol revision: {ProgramConstants.CNCNET_PROTOCOL_REVISION}");
         }
 
@@ -232,9 +231,13 @@ namespace ClientCore
         /// <summary>Optional CnCNet game broadcast channel when LocalGame is not in GameCollectionConfig.ini.</summary>
         public string CnCNetGameBroadcastChannel => clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetGameBroadcastChannel", string.Empty);
 
-        /// <summary>CnCNet GAME CTCP revision (R10 legacy / R13 current). MG mod uses R10.</summary>
+        /// <summary>
+        /// Optional force for local GAME CTCP emit revision (<c>R10</c> / <c>R13</c>).
+        /// Empty → adaptive: default R13, fall back to R10 when the listing channel is observed
+        /// speaking the older 11-field dialect.
+        /// </summary>
         public string CnCNetProtocolRevision =>
-            clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetProtocolRevision", "R13");
+            clientDefinitionsIni.GetStringValue(SETTINGS, "CnCNetProtocolRevision", string.Empty);
 
         public bool SidebarHack => clientDefinitionsIni.GetBooleanValue(SETTINGS, "SidebarHack", false);
 

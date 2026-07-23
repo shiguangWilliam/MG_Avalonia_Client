@@ -42,18 +42,13 @@ namespace ClientCore
 
         public const string QRES_EXECUTABLE = "qres.dat";
 
-        private static string _cncnetProtocolRevision = "R13";
+        /// <summary>
+        /// Stock DX default GAME CTCP revision (Mental Omega / upstream CnCNet). Compiles as
+        /// <c>const</c> like DX. Local emit defaults to this; per-channel fallback to the older
+        /// R10/11-field dialect is driven by observing inbound GAME CTCP, not by LocalGame identity.
+        /// </summary>
+        public const string CNCNET_PROTOCOL_REVISION = "R13";
 
-        public static string CNCNET_PROTOCOL_REVISION => _cncnetProtocolRevision;
-
-        public static void ApplyCnCNetProtocolRevision(string revision)
-        {
-            if (!string.IsNullOrWhiteSpace(revision))
-                _cncnetProtocolRevision = revision.Trim();
-        }
-
-        public static bool UsesLegacyCnCNetGameBroadcast =>
-            _cncnetProtocolRevision.Equals("R10", StringComparison.OrdinalIgnoreCase);
         public const string LAN_PROTOCOL_REVISION = "RL8";
         public const int LAN_PORT = 1234;
         public const int LAN_INGAME_PORT = 1234;
