@@ -2,6 +2,7 @@ using ClientAvalonia.Domain;
 using ClientCore;
 using ClientCore.Enums;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -82,7 +83,7 @@ public static class SpawnAllianceWriter
                     spawnIni.SetIntValue(
                         "Multi" + houseId + "_Alliances",
                         "HouseAlly" + GetHouseAllyIndexString(allyIndex, selfFound),
-                        ClientConfiguration.Instance.ClientGameType == ClientType.RA
+                        AppState.Configuration.Legacy.ClientGameType == ClientType.RA
                             ? allyHouseId + 11
                             : allyHouseId - 1);
                 }

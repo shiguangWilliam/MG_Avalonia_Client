@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="using:ClientAvalonia.Views"
+        xmlns:ctrl="using:ClientAvalonia.Controls"
         x:Class="ClientAvalonia.Views.MainWindow"
         Title="ClientAvalonia"
         CanResize="False">
@@ -15,6 +16,12 @@
     <Border Background="#111" HorizontalAlignment="Center" VerticalAlignment="Center">
       <Grid HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch">
+        <ctrl:GenesisBackdropView x:Name="PART_GenesisBackdrop"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  IsVisible="False"
+                                  IsHitTestVisible="False"
+                                  ZIndex="-1" />
         <ContentControl x:Name="PART_RootView">
           <ContentControl.ContentTemplate>
             <views:DxNodeTemplateSelector />
@@ -32,6 +39,16 @@
                                     VerticalAlignment="Stretch"
                                     IsVisible="False"
                                     ZIndex="200" />
+
+        <!-- Tactical theme lazy-load splash -->
+        <Grid x:Name="PART_ThemeLoadingHost"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              IsVisible="False"
+              IsHitTestVisible="True"
+              ZIndex="150">
+          <ctrl:DxThemeLoadingOverlay x:Name="PART_ThemeLoading" />
+        </Grid>
 
         <!-- Floating INI panels (Options, Campaign, Create Game, …) -->
         <Grid x:Name="PART_FloatingOverlay"

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Themes;
 
 namespace ClientAvalonia.Views;
 
@@ -29,6 +30,23 @@ public class DxNodeTemplateSelector : IDataTemplate
     /// <summary>Maps campaign control ids to dedicated chrome templates (INI unchanged).</summary>
     private static string ResolveTemplateKey(UiNodeViewModel vm)
     {
+        if (DxThemeManager.IsTactical)
+        {
+            return vm.Id.ToLowerInvariant() switch
+            {
+                "campaignselector" => "DxCampaignTacticalRoot",
+                "lbcampaignlist" => "DxCampaignTacticalListBox",
+                "tbmissiondescription" => "DxCampaignTacticalBriefing",
+                "lblselectcampaign" or "lblmissiondescriptionheader" or "lbldifficultylevel" => "DxCampaignTacticalSectionHeader",
+                "gdi" or "nod" or "thirdside" or "fourthside" => "DxCampaignTacticalSideTab",
+                "lbleasy" or "lblnormal" or "lblhard" => "DxCampaignTacticalDifficultyLabel",
+                "trbdifficultyselector" => "DxCampaignTacticalDifficulty",
+                "btnlaunch" => "DxCampaignTacticalPrimaryButton",
+                "btncancel" => "DxCampaignTacticalSecondaryButton",
+                _ => vm.TemplateKey,
+            };
+        }
+
         return vm.Id.ToLowerInvariant() switch
         {
             "campaignselector" => "DxCampaignRoot",

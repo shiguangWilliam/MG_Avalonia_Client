@@ -43,6 +43,20 @@ public static class LobbyBehaviors
                 return;
             }
 
+            if (windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
+                || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase))
+            {
+                TryLaunchLan(host);
+                return;
+            }
+
+            if (windowName.Equals("CnCNetGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
+                || windowName.Equals("GameLoadingLobby", StringComparison.OrdinalIgnoreCase))
+            {
+                TryLaunchCnCNet(host);
+                return;
+            }
+
             host.ShowStatus("Multiplayer in-game launch is not implemented for this lobby.");
         });
     }
@@ -70,6 +84,20 @@ public static class LobbyBehaviors
         }
 
         host.ShowStatus(message);
+    }
+
+    private static void TryLaunchLan(IUiNavigationHost host)
+    {
+        if (host.TryLaunchLanGame(out string message))
+        {
+            if (!string.IsNullOrWhiteSpace(message))
+                host.ShowStatus(message);
+            return;
+        }
+
+        host.ShowStatus(message);
+        if (host is Avalonia.Controls.Window window)
+            ClientDialogService.ShowError(window, "Cannot launch LAN game", message);
     }
 
     private static void RefreshCnCNetListing(IUiNavigationHost host, string windowName)

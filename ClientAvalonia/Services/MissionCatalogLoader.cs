@@ -3,6 +3,7 @@ using ClientAvalonia.Domain;
 using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -17,7 +18,7 @@ public static class MissionCatalogLoader
         if (TryLoadFrom("INI/Battle.ini", out List<MissionEntry> missions))
             return missions;
 
-        string battleFs = ClientConfiguration.Instance.BattleFSFileName;
+        string battleFs = AppState.Configuration.Legacy.BattleFSFileName;
         if (!string.IsNullOrWhiteSpace(battleFs) && TryLoadFrom(FormattableString.Invariant($"INI/{battleFs}"), out missions))
             return missions;
 
@@ -28,7 +29,7 @@ public static class MissionCatalogLoader
     private static bool TryLoadFrom(string relativePath, out List<MissionEntry> missions)
     {
         missions = [];
-        FileInfo battleFile = SafePath.GetFile(ProgramConstants.GamePath, relativePath);
+        FileInfo battleFile = SafePath.GetFile(AppState.Environment.GamePath, relativePath);
         if (!battleFile.Exists)
         {
             Logger.Log($"MissionCatalogLoader: {relativePath} not found.");
@@ -59,7 +60,7 @@ public static class MissionCatalogLoader
             string sideName = battleIni.GetStringValue(sectionName, "SideName", string.Empty);
             bool buildOffAlly = battleIni.GetBooleanValue(sectionName, "BuildOffAlly", false);
             bool requiredAddon = battleIni.GetBooleanValue(sectionName, "RequiredAddon",
-                ClientConfiguration.Instance.ClientGameType is ClientCore.Enums.ClientType.YR
+                AppState.Configuration.Legacy.ClientGameType is ClientCore.Enums.ClientType.YR
                     or ClientCore.Enums.ClientType.Ares);
             bool playerNormal = battleIni.GetBooleanValue(sectionName, "PlayerAlwaysOnNormalDifficulty", false);
 

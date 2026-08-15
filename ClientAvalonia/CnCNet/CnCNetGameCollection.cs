@@ -3,6 +3,7 @@ using Rampastring.Tools;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -50,10 +51,10 @@ public sealed class CnCNetGameCollection
 
         Games = games;
 
-        if (GetGameIndexFromInternalName(ClientConfiguration.Instance.LocalGame) < 0)
+        if (GetGameIndexFromInternalName(AppState.Configuration.Legacy.LocalGame) < 0)
         {
             Logger.Log(
-                $"CnCNetGameCollection: LocalGame={ClientConfiguration.Instance.LocalGame} not found. " +
+                $"CnCNetGameCollection: LocalGame={AppState.Configuration.Legacy.LocalGame} not found. " +
                 "Add [CustomGames] in GameCollectionConfig.ini, set CnCNetChatChannel / CnCNetGameBroadcastChannel " +
                 "in ClientDefinitions.ini, or use a LocalGame id that can form #cncnet-{{id}} / #cncnet-{{id}}-games.");
         }
@@ -65,7 +66,7 @@ public sealed class CnCNetGameCollection
     /// </summary>
     private static void TryAddImplicitLocalGame(List<CnCNetGameEntry> games)
     {
-        string localGame = ClientConfiguration.Instance.LocalGame;
+        string localGame = AppState.Configuration.Legacy.LocalGame;
         if (string.IsNullOrWhiteSpace(localGame))
             return;
 
@@ -77,8 +78,8 @@ public sealed class CnCNetGameCollection
 
         if (!CnCNetLocalGameChannelResolver.TryResolve(
                 localGame,
-                ClientConfiguration.Instance.CnCNetChatChannel,
-                ClientConfiguration.Instance.CnCNetGameBroadcastChannel,
+                AppState.Configuration.Legacy.CnCNetChatChannel,
+                AppState.Configuration.Legacy.CnCNetGameBroadcastChannel,
                 out string chat,
                 out string broadcast,
                 out CnCNetLocalGameChannelResolver.Source source))
@@ -87,7 +88,7 @@ public sealed class CnCNetGameCollection
         }
 
         string id = CnCNetLocalGameChannelResolver.NormalizeInternalName(localGame);
-        string uiName = ClientConfiguration.Instance.LongGameName;
+        string uiName = AppState.Configuration.Legacy.LongGameName;
         if (string.IsNullOrWhiteSpace(uiName))
             uiName = id.ToUpperInvariant();
 
@@ -117,7 +118,7 @@ public sealed class CnCNetGameCollection
 
     public CnCNetGameEntry? GetLocalGame()
     {
-        int index = GetGameIndexFromInternalName(ClientConfiguration.Instance.LocalGame);
+        int index = GetGameIndexFromInternalName(AppState.Configuration.Legacy.LocalGame);
         return index >= 0 ? Games[index] : null;
     }
 
@@ -236,11 +237,11 @@ public sealed class CnCNetGameCollection
 
     private static string? ResolveConfigPath()
     {
-        string basePath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "GameCollectionConfig.ini");
+        string basePath = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, "GameCollectionConfig.ini");
         if (File.Exists(basePath))
             return basePath;
 
-        string themePath = SafePath.CombineFilePath(ProgramConstants.GetResourcePath(), "GameCollectionConfig.ini");
+        string themePath = SafePath.CombineFilePath(AppState.Environment.ResourcesPath, "GameCollectionConfig.ini");
         return File.Exists(themePath) ? themePath : null;
     }
 

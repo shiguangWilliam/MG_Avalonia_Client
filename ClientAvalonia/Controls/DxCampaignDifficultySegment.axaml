@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClientAvalonia.Controls.DxCampaignDifficultySegment">
+  <Grid ColumnDefinitions="*,*,*">
+    <Button x:Name="SegmentCasual" Grid.Column="0" Classes="segment" Content="CASUAL" />
+    <Button x:Name="SegmentStandard" Grid.Column="1" Classes="segment" Content="STANDARD" />
+    <Button x:Name="SegmentMental" Grid.Column="2" Classes="segment" Content="MENTAL" />
+  </Grid>
+  <UserControl.Styles>
+    <Style Selector="Button.segment">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DxLineMutedBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,1,1" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource DxTextMutedBrush}" />
+      <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI, sans-serif" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.segment:pointerover /template/ ContentPresenter">
+      <Setter Property="TextBlock.Foreground" Value="{DynamicResource DxTextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.segment.selected">
+      <Setter Property="BorderBrush" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+    </Style>
+    <Style Selector="Button.segment:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>

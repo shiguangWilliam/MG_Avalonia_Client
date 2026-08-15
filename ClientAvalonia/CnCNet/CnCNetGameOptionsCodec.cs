@@ -1,3 +1,5 @@
+using ClientAvalonia.Configuration;
+using ClientAvalonia.GlobalState.Environment;
 using ClientCore;
 using Rampastring.Tools;
 using System;
@@ -122,9 +124,10 @@ public static class CnCNetGameOptionsCodec
         bool mapOfficial = Conversions.BooleanFromString(parts[partIndex], true);
         string mapSha1 = parts[partIndex + 1];
         string gameModeName = parts[partIndex + 2];
-        int frameSendRate = Conversions.IntFromString(parts[partIndex + 3], ClientConfiguration.Instance.DefaultFrameSendRate);
-        int maxAhead = Conversions.IntFromString(parts[partIndex + 4], ClientConfiguration.Instance.DefaultMaxAhead);
-        int protocolVersion = Conversions.IntFromString(parts[partIndex + 5], ClientConfiguration.Instance.DefaultProtocolVersion);
+        IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+        int frameSendRate = Conversions.IntFromString(parts[partIndex + 3], config.DefaultFrameSendRate);
+        int maxAhead = Conversions.IntFromString(parts[partIndex + 4], config.DefaultMaxAhead);
+        int protocolVersion = Conversions.IntFromString(parts[partIndex + 5], config.DefaultProtocolVersion);
 
         int randomSeed = int.TryParse(parts[partIndex + 6], out int parsedSeed)
             ? parsedSeed

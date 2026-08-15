@@ -1,8 +1,11 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientCore;
 using Rampastring.Tools;
 using System.IO;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -43,8 +46,9 @@ public static class GameLaunchDiagnostics
         {
             DirectDrawWrapperManager manager = GameRendererBootstrap.Manager;
             DirectDrawWrapper renderer = manager.SelectedRenderer;
-            string ddrawPath = SafePath.CombineFilePath(ProgramConstants.GamePath, "ddraw.dll");
-            string configPath = SafePath.CombineFilePath(ProgramConstants.GamePath, renderer.ConfigFileName);
+            string gamePath = ResolveGamePath();
+            string ddrawPath = SafePath.CombineFilePath(gamePath, "ddraw.dll");
+            string configPath = SafePath.CombineFilePath(gamePath, renderer.ConfigFileName);
 
             Logger.Log(
                 $"GameLaunchDiagnostics [{phase}]: renderer={renderer.InternalName} ({renderer.UIName}), " +
@@ -57,7 +61,8 @@ public static class GameLaunchDiagnostics
                 return;
             }
 
-            string resourceDll = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), renderer.DdrawDllResourcePath);
+            string baseResourcesPath = ResolveBaseResourcesPath();
+            string resourceDll = SafePath.CombineFilePath(baseResourcesPath, renderer.DdrawDllResourcePath);
             Logger.Log($"GameLaunchDiagnostics [{phase}]: resource DLL={resourceDll}, exists={File.Exists(resourceDll)}.");
 
             if (!File.Exists(ddrawPath))
@@ -88,7 +93,7 @@ public static class GameLaunchDiagnostics
             {
                 var ini = new IniFile(configPath);
                 bool globalWindowed = ini.GetBooleanValue(renderer.WindowedModeSection, renderer.WindowedModeKey, false);
-                string gameExe = ClientConfiguration.Instance.GetGameExecutableName();
+                string gameExe = ResolveGameExecutableName();
                 string spawnSection = Path.GetFileNameWithoutExtension(gameExe) + "-spawn";
                 bool spawnWindowed = ini.GetBooleanValue(spawnSection, "windowed", globalWindowed);
                 int spawnW = ini.GetIntValue(spawnSection, "width", 0);
@@ -114,7 +119,13 @@ public static class GameLaunchDiagnostics
     {
         try
         {
-            CnCNetSessionService svc = CnCNetSessionService.Instance;
+            CnCNetSessionService? svc = ResolveCnCNetSessionService();
+            if (svc == null)
+            {
+                Logger.Log($"GameLaunchDiagnostics [{phase}]: ICnCNetSession not registered (skipping).");
+                return;
+            }
+
             CnCNetIrcConnection? conn = svc.Connection;
             bool connected = conn is { IsConnected: true };
             bool connecting = conn is { IsConnecting: true };
@@ -129,6 +140,54 @@ public static class GameLaunchDiagnostics
         {
             Logger.Log($"GameLaunchDiagnostics [{phase}]: CnCNet log failed: {ex.Message}");
         }
+    }
+
+    private static string ResolveGamePath()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<IGameEnvironment>().GamePath;
+        }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameEnvironment — diagnostics-only path; preserve fallback.
+            return AppState.Environment.GamePath;
+        }
+    }
+
+    private static string ResolveBaseResourcesPath()
+    {
+        try
+        {
+            var env = EnvironmentServices.Resolve<IGameEnvironment>();
+            return env.BaseResourcesPath;
+        }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameEnvironment — diagnostics-only path; preserve fallback.
+            return AppState.Environment.BaseResourcesPath;
+        }
+    }
+
+    private static string ResolveGameExecutableName()
+    {
+        try
+        {
+            return EnvironmentServices.Resolve<IGameConfiguration>().GetGameExecutableName();
+        }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameConfiguration — diagnostics-only path; preserve fallback.
+            return AppState.Configuration.Legacy.GetGameExecutableName();
+        }
+    }
+
+    private static CnCNetSessionService? ResolveCnCNetSessionService()
+    {
+        ICnCNetSession? session = EnvironmentServices.TryResolve<ICnCNetSession>();
+        if (session is CnCNetSessionServiceAdapter adapter)
+            return adapter.Service;
+        return null;
     }
 
     private static string? TryGetLinkTarget(string path)

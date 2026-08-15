@@ -1,12 +1,13 @@
 using ClientCore;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
 /// <summary>View-model for channel lobby UI; mirrors <see cref="CnCNetLobbyState"/> from ClientAvalonia.CnCNet.</summary>
 public sealed class MultiplayerLobbyState
 {
-    public string LocalPlayerName { get; private set; } = ProgramConstants.PLAYERNAME;
+    public string LocalPlayerName { get; private set; } = AppState.Environment.PlayerName;
 
     public string ConnectionStatus { get; private set; } = "Offline";
 
@@ -64,7 +65,7 @@ public sealed class MultiplayerLobbyState
     public void RefreshFromCore(string? localName = null)
     {
         LocalPlayerName = string.IsNullOrWhiteSpace(localName)
-            ? ProgramConstants.PLAYERNAME
+            ? AppState.Environment.PlayerName
             : localName!;
     }
 }

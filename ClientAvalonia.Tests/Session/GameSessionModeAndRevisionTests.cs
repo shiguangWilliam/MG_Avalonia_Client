@@ -128,16 +128,6 @@ public sealed class LobbySessionStateUiInputTests
     }
 
     [Fact]
-    public void PlayerUpdatingInProgress_Defaults_False_And_Settable()
-    {
-        var sut = new LobbySessionState();
-        sut.PlayerUpdatingInProgress.Should().BeFalse();
-
-        sut.PlayerUpdatingInProgress = true;
-        sut.PlayerUpdatingInProgress.Should().BeTrue();
-    }
-
-    [Fact]
     public void UIMode_Can_Be_Set_To_Multiplayer()
     {
         var sut = new LobbySessionState { UIMode = LobbyPlayerMode.Multiplayer };

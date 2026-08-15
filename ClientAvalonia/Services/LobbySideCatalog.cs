@@ -1,6 +1,7 @@
 using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -65,7 +66,7 @@ public static class LobbySideCatalog
 
     private static LobbySideCatalogSnapshot BuildSnapshot(bool includeSpectator)
     {
-        string[] sides = ClientConfiguration.Instance.Sides
+        string[] sides = AppState.Configuration.Legacy.Sides
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         var randomSelectors = LoadRandomSelectors(sides.Length);
@@ -130,7 +131,7 @@ public static class LobbySideCatalog
     /// <summary>GameOptions.ini [RandomSelectors] (XNA GetRandomSelectors).</summary>
     private static List<(string Name, int[] SideIds)> LoadRandomSelectors(int sideCount)
     {
-        string path = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        string path = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, ClientConfiguration.GAME_OPTIONS);
         if (!File.Exists(path))
             return [];
 

@@ -3,6 +3,7 @@ using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientUpdater;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 

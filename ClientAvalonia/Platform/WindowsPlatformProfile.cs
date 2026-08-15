@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media;
 using ClientAvalonia.Core;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Platform;
 
@@ -17,7 +18,7 @@ public static class WindowsPlatformProfile
         if (!ClientCoreBootstrap.IsInitialized)
             return;
 
-        OsVersion = ClientConfiguration.Instance.GetOperatingSystemVersion();
+        OsVersion = AppState.Configuration.Legacy.GetOperatingSystemVersion();
 
         UiFontFamily = OsVersion switch
         {

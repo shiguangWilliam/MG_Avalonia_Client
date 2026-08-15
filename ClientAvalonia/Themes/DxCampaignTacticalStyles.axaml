@@ -1,0 +1,445 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="using:ClientAvalonia.Rendering"
+                    xmlns:views="using:ClientAvalonia.Views"
+                    xmlns:ctrl="using:ClientAvalonia.Controls">
+
+  <!-- ==========================================================================
+       Tactical campaign skin (three-column tactical console). Selected by
+       DxNodeTemplateSelector when VisualStyle=Tactical. System (Fluent) button
+       chrome with accent border replaces PNG textures. Legacy control IDs and
+       controller/behavior contracts are untouched.
+       ========================================================================== -->
+
+  <!-- Root: black shell + thin top line + tactical globe backdrop in the middle. -->
+  <DataTemplate x:Key="DxCampaignTacticalRoot" DataType="vm:UiNodeViewModel">
+    <Panel Width="{Binding Width}"
+           Height="{Binding Height}"
+           IsVisible="{Binding IsVisible}"
+           ClipToBounds="True">
+      <Border Background="{DynamicResource DxSurface0Brush}" IsHitTestVisible="False" />
+      <Border Height="1"
+              VerticalAlignment="Top"
+              Margin="12,10,12,0"
+              Background="{DynamicResource DxLineMutedBrush}"
+              IsHitTestVisible="False" />
+      <ctrl:DxCampaignGlobeHost OverlayRoot="{Binding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="0,40,0,60" />
+      <views:DxNodeCanvasView DataContext="{Binding}" />
+    </Panel>
+  </DataTemplate>
+
+  <!-- Section titles: uppercase + letterspacing + accent tick -->
+  <DataTemplate x:Key="DxCampaignTacticalSectionHeader" DataType="vm:UiNodeViewModel">
+    <StackPanel MinHeight="{Binding Height}"
+                Spacing="4"
+                IsVisible="{Binding IsVisible}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Border Width="14"
+                Height="2"
+                VerticalAlignment="Center"
+                Background="{DynamicResource DxAccentPrimaryBrush}" />
+        <TextBlock Text="{Binding Text}"
+                   Foreground="{DynamicResource DxTextPrimaryBrush}"
+                   FontFamily="{Binding LabelFontFamily}"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   LetterSpacing="2"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+    </StackPanel>
+  </DataTemplate>
+
+  <!-- Mission list: thin-line panel -->
+  <DataTemplate x:Key="DxCampaignTacticalListBox" DataType="vm:UiNodeViewModel">
+    <Border Width="{Binding Width}"
+            Height="{Binding Height}"
+            CornerRadius="0"
+            BorderBrush="{DynamicResource DxLineBrush}"
+            BorderThickness="1"
+            Background="{DynamicResource DxSurface1Brush}"
+            IsVisible="{Binding IsVisible}"
+            ClipToBounds="True">
+      <ListBox ItemsSource="{Binding CatalogListItems}"
+               SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+               IsEnabled="{Binding IsEnabled}"
+               Background="Transparent"
+               BorderThickness="0"
+               Padding="4,6">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:CatalogListItemViewModel">
+            <Panel>
+              <StackPanel Orientation="Horizontal"
+                          Spacing="10"
+                          Opacity="{Binding Opacity}"
+                          Margin="2,1"
+                          IsVisible="{Binding !IsHeader}">
+                <Image Source="{Binding Icon}"
+                       Width="18"
+                       Height="18"
+                       Stretch="Uniform"
+                       VerticalAlignment="Center"
+                       Opacity="{Binding Opacity}"
+                       IsVisible="{Binding HasIcon}" />
+                <TextBlock Text="{Binding Text}"
+                           FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                           FontSize="12.5"
+                           Foreground="{Binding ForegroundBrush}"
+                           TextWrapping="Wrap"
+                           LineHeight="18"
+                           VerticalAlignment="Center"
+                           Padding="0,4"
+                           ToolTip.Tip="{Binding ToolTip}" />
+              </StackPanel>
+              <TextBlock Text="{Binding Text}"
+                         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                         FontSize="11.5"
+                         FontWeight="Bold"
+                         Foreground="{DynamicResource DxTextMutedBrush}"
+                         TextAlignment="Center"
+                         HorizontalAlignment="Stretch"
+                         TextWrapping="Wrap"
+                         LineHeight="16"
+                         VerticalAlignment="Center"
+                         Padding="0,12,0,6"
+                         LetterSpacing="1"
+                         Opacity="0.9"
+                         IsVisible="{Binding IsHeader}" />
+            </Panel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+        <ListBox.Styles>
+          <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="MinHeight" Value="30" />
+          </Style>
+          <Style Selector="ListBoxItem:pointerover">
+            <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+          </Style>
+          <Style Selector="ListBoxItem:selected">
+            <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+          </Style>
+          <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+          </Style>
+          <Style Selector="ScrollBar">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Opacity" Value="0.8" />
+          </Style>
+          <Style Selector="ScrollBar:horizontal">
+            <Setter Property="Height" Value="6" />
+          </Style>
+          <Style Selector="ScrollBar /template/ Thumb">
+            <Setter Property="Background" Value="{DynamicResource DxLineMutedBrush}" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="MinHeight" Value="28" />
+          </Style>
+          <Style Selector="ScrollBar /template/ Thumb:pointerover">
+            <Setter Property="Background" Value="{DynamicResource DxAccentPrimaryBrush}" />
+          </Style>
+        </ListBox.Styles>
+      </ListBox>
+    </Border>
+  </DataTemplate>
+
+  <!-- Briefing: intelligence panel; small preview frame retained -->
+  <DataTemplate x:Key="DxCampaignTacticalBriefing" DataType="vm:UiNodeViewModel">
+    <Border Width="{Binding Width}"
+            Height="{Binding Height}"
+            CornerRadius="0"
+            BorderBrush="{DynamicResource DxLineBrush}"
+            BorderThickness="1"
+            Background="{DynamicResource DxSurface1Brush}"
+            IsVisible="{Binding IsVisible}"
+            ClipToBounds="True">
+      <Grid Margin="12,10" RowDefinitions="Auto,Auto,*">
+        <Border Grid.Row="0"
+                Margin="0,0,0,10"
+                Height="104"
+                CornerRadius="0"
+                BorderBrush="{DynamicResource DxLineMutedBrush}"
+                BorderThickness="1"
+                Background="#33000000"
+                ClipToBounds="True"
+                IsVisible="{Binding HasPreviewImage}">
+          <Image Source="{Binding PreviewImage}"
+                 Stretch="Uniform"
+                 StretchDirection="Both"
+                 IsHitTestVisible="False" />
+        </Border>
+        <ScrollViewer Grid.Row="2"
+                      Margin="0,0,2,0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+          <ScrollViewer.Styles>
+            <Style Selector="ScrollBar">
+              <Setter Property="Width" Value="6" />
+              <Setter Property="AllowAutoHide" Value="False" />
+            </Style>
+            <Style Selector="ScrollBar /template/ RepeatButton">
+              <Setter Property="IsVisible" Value="False" />
+            </Style>
+            <Style Selector="ScrollBar /template/ Thumb">
+              <Setter Property="Background" Value="{DynamicResource DxLineMutedBrush}" />
+              <Setter Property="CornerRadius" Value="0" />
+              <Setter Property="MinHeight" Value="32" />
+            </Style>
+            <Style Selector="ScrollBar /template/ Thumb:pointerover">
+              <Setter Property="Background" Value="{DynamicResource DxAccentPrimaryBrush}" />
+            </Style>
+          </ScrollViewer.Styles>
+          <Panel>
+            <StackPanel Spacing="10" IsVisible="{Binding UseStructuredBriefing}">
+              <TextBlock Text="{Binding BriefingTitle}"
+                         FontFamily="{Binding LabelFontFamily}"
+                         FontSize="15"
+                         FontWeight="Bold"
+                         Foreground="{DynamicResource DxAccentInverseBrush}"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding HasBriefingTitle}" />
+              <StackPanel Orientation="Horizontal"
+                          Spacing="8"
+                          IsVisible="{Binding HasBriefingLocation}">
+                <TextBlock Text="地点"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="11"
+                           LetterSpacing="1"
+                           Foreground="{DynamicResource DxTextMutedBrush}"
+                           VerticalAlignment="Center" />
+                <Border Width="1"
+                        Height="12"
+                        Background="{DynamicResource DxLineMutedBrush}"
+                        VerticalAlignment="Center" />
+                <TextBlock Text="{Binding BriefingLocation}"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="12.5"
+                           Foreground="{DynamicResource DxTextPrimaryBrush}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+              <TextBlock Text="{Binding BriefingBody}"
+                         FontFamily="{Binding LabelFontFamily}"
+                         FontSize="13"
+                         Foreground="{DynamicResource DxTextPrimaryBrush}"
+                         TextWrapping="Wrap"
+                         LineHeight="21"
+                         Opacity="0.92"
+                         IsVisible="{Binding HasBriefingBody}" />
+              <StackPanel Spacing="6" IsVisible="{Binding HasBriefingObjectives}">
+                <TextBlock Text="任务目标 / OBJECTIVES"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="11.5"
+                           FontWeight="SemiBold"
+                           LetterSpacing="1.5"
+                           Foreground="{DynamicResource DxTextMutedBrush}" />
+                <ItemsControl ItemsSource="{Binding BriefingObjectives}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                        <Border DockPanel.Dock="Left"
+                                Width="5"
+                                Height="5"
+                                Margin="0,6,10,0"
+                                Background="{DynamicResource DxAccentPrimaryBrush}"
+                                VerticalAlignment="Top" />
+                        <TextBlock Text="{Binding}"
+                                   FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                                   FontSize="12.5"
+                                   Foreground="{DynamicResource DxTextPrimaryBrush}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="19" />
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <Border Background="#22FFFFFF"
+                      BorderBrush="{DynamicResource DxAccentPrimaryBrush}"
+                      BorderThickness="0,0,0,1"
+                      Padding="0,6"
+                      IsVisible="{Binding HasBriefingStatusHint}">
+                <TextBlock Text="{Binding BriefingStatusHint}"
+                           FontFamily="{Binding LabelFontFamily}"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource DxAccentPrimaryBrush}"
+                           TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+            <TextBlock Text="{Binding Text}"
+                       FontFamily="{Binding LabelFontFamily}"
+                       FontSize="13"
+                       Foreground="{DynamicResource DxTextPrimaryBrush}"
+                       TextWrapping="Wrap"
+                       LineHeight="21"
+                       Opacity="0.92"
+                       IsVisible="{Binding UseStructuredBriefing, Converter={x:Static BoolConverters.Not}}" />
+          </Panel>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+  </DataTemplate>
+
+  <!-- Faction tabs: square outline chips -->
+  <DataTemplate x:Key="DxCampaignTacticalSideTab" DataType="vm:UiNodeViewModel">
+    <Button Width="{Binding Width}"
+            Height="{Binding Height}"
+            MinWidth="88"
+            MinHeight="34"
+            Padding="14,8"
+            Command="{Binding ClickCommand}"
+            IsEnabled="{Binding IsEnabled}"
+            IsVisible="{Binding IsVisible}"
+            ToolTip.Tip="{Binding ToolTip}"
+            HorizontalContentAlignment="Center"
+            VerticalContentAlignment="Center"
+            Background="Transparent"
+            BorderThickness="0"
+            Cursor="Hand">
+      <Button.Styles>
+        <Style Selector="Button">
+          <Setter Property="Template">
+            <ControlTemplate>
+              <Border x:Name="Root"
+                      Background="Transparent"
+                      BorderBrush="{DynamicResource DxLineMutedBrush}"
+                      BorderThickness="1"
+                      Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+              </Border>
+            </ControlTemplate>
+          </Setter>
+        </Style>
+        <Style Selector="Button:pointerover /template/ Border#Root">
+          <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource DxAccentPrimaryBrush}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ Border#Root">
+          <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+        </Style>
+      </Button.Styles>
+      <Panel>
+        <Border Background="{DynamicResource DxSurfaceSelectedBrush}"
+                BorderBrush="{DynamicResource DxAccentPrimaryBrush}"
+                BorderThickness="1"
+                IsVisible="{Binding IsTabSelected}"
+                IsHitTestVisible="False"
+                Opacity="0.6" />
+        <StackPanel Spacing="4" HorizontalAlignment="Center">
+          <Image Source="{Binding SideIcon}"
+                 Width="22"
+                 Height="22"
+                 Stretch="Uniform"
+                 HorizontalAlignment="Center"
+                 IsVisible="{Binding HasSideIcon}" />
+          <TextBlock Text="{Binding Text}"
+                     FontFamily="{Binding LabelFontFamily}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     Foreground="{DynamicResource DxTextPrimaryBrush}"
+                     TextAlignment="Center" />
+        </StackPanel>
+      </Panel>
+    </Button>
+  </DataTemplate>
+
+  <!-- Difficulty: three-segment control bound to the legacy SelectedIndex (0-2) -->
+  <DataTemplate x:Key="DxCampaignTacticalDifficulty" DataType="vm:UiNodeViewModel">
+    <Border Width="{Binding Width}"
+            MinHeight="44"
+            Padding="8,6"
+            CornerRadius="0"
+            BorderBrush="{DynamicResource DxLineBrush}"
+            BorderThickness="1"
+            Background="{DynamicResource DxSurface1Brush}"
+            IsVisible="{Binding IsVisible}"
+            IsEnabled="{Binding IsEnabled}">
+      <ctrl:DxCampaignDifficultySegment Value="{Binding SelectedIndex, Mode=TwoWay}" />
+    </Border>
+  </DataTemplate>
+
+  <!-- Legacy per-difficulty labels are folded into the segment control in Tactical -->
+  <DataTemplate x:Key="DxCampaignTacticalDifficultyLabel" DataType="vm:UiNodeViewModel">
+    <Panel Width="0" Height="0" IsVisible="False" />
+  </DataTemplate>
+
+  <!-- Launch (primary CTA): system button + accent border; textures ignored -->
+  <DataTemplate x:Key="DxCampaignTacticalPrimaryButton" DataType="vm:UiNodeViewModel">
+    <Button Width="{Binding Width}"
+            Height="{Binding Height}"
+            MinHeight="38"
+            Command="{Binding ClickCommand}"
+            IsEnabled="{Binding IsEnabled}"
+            IsVisible="{Binding IsVisible}"
+            ToolTip.Tip="{Binding ToolTip}"
+            HorizontalContentAlignment="Center"
+            VerticalContentAlignment="Center"
+            Cursor="Hand">
+      <Button.Styles>
+        <Style Selector="Button">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="BorderBrush" Value="{DynamicResource DxAccentPrimaryBrush}" />
+          <Setter Property="BorderThickness" Value="1" />
+          <Setter Property="CornerRadius" Value="0" />
+          <Setter Property="Padding" Value="16,8" />
+        </Style>
+        <Style Selector="Button:pointerover">
+          <Setter Property="Background" Value="{DynamicResource DxAccentGlowBrush}" />
+        </Style>
+        <Style Selector="Button:disabled">
+          <Setter Property="Opacity" Value="0.45" />
+        </Style>
+      </Button.Styles>
+      <TextBlock Text="{Binding ButtonLabel}"
+                 FontFamily="{Binding LabelFontFamily}"
+                 FontSize="{Binding FontSize}"
+                 FontWeight="Bold"
+                 Foreground="{DynamicResource DxAccentPrimaryBrush}"
+                 TextAlignment="Center"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center" />
+    </Button>
+  </DataTemplate>
+
+  <!-- Cancel (secondary): plain system button -->
+  <DataTemplate x:Key="DxCampaignTacticalSecondaryButton" DataType="vm:UiNodeViewModel">
+    <Button Width="{Binding Width}"
+            Height="{Binding Height}"
+            MinHeight="38"
+            Command="{Binding ClickCommand}"
+            IsEnabled="{Binding IsEnabled}"
+            IsVisible="{Binding IsVisible}"
+            ToolTip.Tip="{Binding ToolTip}"
+            HorizontalContentAlignment="Center"
+            VerticalContentAlignment="Center"
+            Cursor="Hand">
+      <Button.Styles>
+        <Style Selector="Button">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="BorderBrush" Value="{DynamicResource DxLineBrush}" />
+          <Setter Property="BorderThickness" Value="1" />
+          <Setter Property="CornerRadius" Value="0" />
+          <Setter Property="Padding" Value="16,8" />
+        </Style>
+        <Style Selector="Button:pointerover">
+          <Setter Property="Background" Value="{DynamicResource DxSurfaceSelectedBrush}" />
+        </Style>
+      </Button.Styles>
+      <TextBlock Text="{Binding ButtonLabel}"
+                 FontFamily="{Binding LabelFontFamily}"
+                 FontSize="{Binding FontSize}"
+                 FontWeight="SemiBold"
+                 Foreground="{DynamicResource DxTextPrimaryBrush}"
+                 TextAlignment="Center"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center" />
+    </Button>
+  </DataTemplate>
+
+</ResourceDictionary>

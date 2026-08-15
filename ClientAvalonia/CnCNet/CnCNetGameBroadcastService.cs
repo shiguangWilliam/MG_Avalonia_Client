@@ -1,18 +1,19 @@
 using ClientAvalonia.CnCNet.Protocol;
 using ClientCore;
+using ClientCore.Settings;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
 /// <summary>Hosts GAME CTCP broadcasts on the game listing channel (XNA CnCNetGameLobby.BroadcastGame).</summary>
 public sealed class CnCNetGameBroadcastService : IDisposable
 {
-    private const double BroadcastIntervalSeconds = 30;
-    private const double InitialDelaySeconds = 10;
-    private const double BroadcastAccelerationSeconds = 10;
+    private const double DefaultInitialDelaySeconds = 10;
+    private const double DefaultAccelerationSeconds = 10;
 
     private readonly object _sync = new();
     private Timer? _timer;
@@ -39,7 +40,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     {
         // XNA CnCNetGameLobby.OnJoined: MODE/TOPIC use channel.ChannelName (original casing).
         string channel = CnCNetIrcChannelNames.Preserve(room.ChannelName);
-        string localGame = ClientConfiguration.Instance.LocalGame.ToLowerInvariant();
+        string localGame = AppState.Configuration.Legacy.LocalGame.ToLowerInvariant();
         string topicRevision = ResolveEmitRevision(_channels?.GameBroadcastChannel);
         bool modeSent = connection.TrySendInstantOnChannel(
             channel,
@@ -71,13 +72,13 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             _closed = false;
             _lastImmediatePayload = string.Empty;
             if (_playerNames.Count == 0)
-                _playerNames = [ProgramConstants.PLAYERNAME];
+                _playerNames = [AppState.Environment.PlayerName];
 
             if (configureChannel)
                 ConfigureHostChannel(connection, room);
 
             TrySendGameMessageLocked(_closed, force: true);
-            RestartTimerLocked(TimeSpan.FromSeconds(InitialDelaySeconds));
+            RestartTimerLocked(TimeSpan.FromSeconds(ResolveInitialDelaySeconds()));
         }
     }
 
@@ -94,7 +95,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             _mapName = mapName;
             _gameModeName = gameModeName;
             _mapSha1 = mapSha1;
-            _playerNames = playerNames.Count > 0 ? playerNames : [ProgramConstants.PLAYERNAME];
+            _playerNames = playerNames.Count > 0 ? playerNames : [AppState.Environment.PlayerName];
             _locked = locked;
             _closed = closed;
 
@@ -104,7 +105,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
             if (!TrySendGameMessageLocked(_closed, force: false))
                 return;
 
-            RestartTimerLocked(TimeSpan.FromSeconds(BroadcastAccelerationSeconds));
+            RestartTimerLocked(TimeSpan.FromSeconds(ResolveAccelerationSeconds()));
         }
     }
 
@@ -174,7 +175,7 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     private string BuildGamePayload(bool closed)
     {
         CnCNetActiveGameRoom room = _room!;
-        string flags = CnCNetGameFlags.Build(_locked, room.Passworded, closed);
+        string flags = CnCNetGameFlags.Build(_locked, room.Passworded, closed, loadedGame: room.IsLoadedGame);
         string? listingChannel = _channels?.GameBroadcastChannel;
         bool legacy = _dialect?.PrefersLegacyEmit(listingChannel) == true;
         return CnCNetMultiplayerProtocol.BuildGameBroadcastPayload(
@@ -200,7 +201,8 @@ public sealed class CnCNetGameBroadcastService : IDisposable
     private void RestartTimerLocked(TimeSpan firstInterval)
     {
         StopTimerLocked();
-        _timer = new Timer(_ => BroadcastLocked(), null, firstInterval, TimeSpan.FromSeconds(BroadcastIntervalSeconds));
+        double periodSeconds = ResolveBroadcastIntervalSeconds();
+        _timer = new Timer(_ => BroadcastLocked(), null, firstInterval, TimeSpan.FromSeconds(periodSeconds));
     }
 
     private void StopTimerLocked()
@@ -209,4 +211,25 @@ public sealed class CnCNetGameBroadcastService : IDisposable
         _timer = null;
     }
 
+    /// <summary>Configured host refresh period (snapped to allowed discrete values).</summary>
+    internal static double ResolveBroadcastIntervalSeconds()
+    {
+        int raw = CnCNetGameBroadcastIntervals.DefaultSeconds;
+        try
+        {
+            raw = UserINISettings.Instance.GameBroadcastIntervalSeconds.Value;
+        }
+        catch
+        {
+            // Settings may be unavailable in isolated tests.
+        }
+
+        return CnCNetGameBroadcastIntervals.Snap(raw);
+    }
+
+    private static double ResolveInitialDelaySeconds()
+        => Math.Min(DefaultInitialDelaySeconds, ResolveBroadcastIntervalSeconds());
+
+    private static double ResolveAccelerationSeconds()
+        => Math.Min(DefaultAccelerationSeconds, ResolveBroadcastIntervalSeconds());
 }

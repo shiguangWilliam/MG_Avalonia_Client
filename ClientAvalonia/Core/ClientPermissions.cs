@@ -4,6 +4,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
@@ -16,7 +17,7 @@ internal static class ClientPermissions
         if (!OperatingSystem.IsWindows())
             return;
 
-        if (UserHasDirectoryAccessRights(ProgramConstants.GamePath, FileSystemRights.Modify))
+        if (UserHasDirectoryAccessRights(AppState.Environment.GamePath, FileSystemRights.Modify))
             return;
 
         Logger.Log(
@@ -36,8 +37,8 @@ internal static class ClientPermissions
         {
             string progfiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             string progfilesx86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            if (ProgramConstants.GamePath.Contains(progfiles, StringComparison.OrdinalIgnoreCase)
-                || ProgramConstants.GamePath.Contains(progfilesx86, StringComparison.OrdinalIgnoreCase))
+            if (AppState.Environment.GamePath.Contains(progfiles, StringComparison.OrdinalIgnoreCase)
+                || AppState.Environment.GamePath.Contains(progfilesx86, StringComparison.OrdinalIgnoreCase))
                 return false;
         }
 

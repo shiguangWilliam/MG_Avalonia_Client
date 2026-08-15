@@ -2,6 +2,7 @@ using ClientCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -11,7 +12,7 @@ public sealed class CnCNetLobbyState
     private const int MaxConnectionLogLines = 80;
     private readonly List<string> _connectionLog = [];
 
-    public string LocalPlayerName { get; private set; } = ProgramConstants.PLAYERNAME;
+    public string LocalPlayerName { get; private set; } = AppState.Environment.PlayerName;
 
     public string ConnectionStatus { get; private set; } = "Offline";
 
@@ -40,7 +41,7 @@ public sealed class CnCNetLobbyState
     public void RefreshFromCore(string? localName = null)
     {
         LocalPlayerName = string.IsNullOrWhiteSpace(localName)
-            ? ProgramConstants.PLAYERNAME
+            ? AppState.Environment.PlayerName
             : localName!;
     }
 

@@ -18,7 +18,7 @@ public static class LobbyPlayerStatusApplier
 
     /// <summary>
     /// Phase 3 P3-3：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>（session.PlayerSlots）
-    /// + 显式 UI 输入态（mode / locked / isHostView），不再依赖 <see cref="LobbyPlayerState"/>。
+    /// + 显式 UI 输入态（mode / locked / isHostView），不再依赖 <c>LobbyPlayerState</c>。
     /// </summary>
     public static void Apply(
         UiNodeViewModel root,
@@ -54,28 +54,6 @@ public static class LobbyPlayerStatusApplier
                 panel, slot, ddName, statusX, statusY, resources, behaviors, isPing: true);
             ApplyPingIndicator(pingIndicator, slot, slots, roomPlayers, resources);
         }
-    }
-
-    /// <summary>Legacy 入口（Phase 3 P3-3：标记为已过时）。委托到 Session-aware 重载。</summary>
-    [Obsolete("Phase 3 P3-3: 改用 Apply(..., IReadOnlyList<IPlayerSlot>, LobbyPlayerMode, ...)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public static void Apply(
-        UiNodeViewModel root,
-        LobbyPlayerState playerState,
-        ResourceResolver resources,
-        BehaviorRegistry behaviors,
-        IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers,
-        bool locked,
-        bool isHostView)
-    {
-        Apply(
-            root,
-            playerState.Slots,
-            playerState.Mode,
-            resources,
-            behaviors,
-            roomPlayers,
-            locked,
-            isHostView);
     }
 
     private static void ApplyIndicator(

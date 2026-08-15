@@ -1,6 +1,7 @@
 using System;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -19,7 +20,7 @@ public static class CnCNetIdentity
         try
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
-                "SOFTWARE\\" + ClientConfiguration.Instance.InstallationPathRegKey);
+                "SOFTWARE\\" + AppState.Configuration.Legacy.InstallationPathRegKey);
 
             if (key.GetValue("Ident") != null)
                 return;
@@ -39,7 +40,7 @@ public static class CnCNetIdentity
         EnsurePersisted();
 
         string raw = TryLoadPersistedIdent() ?? Environment.MachineName + Environment.UserName;
-        int maxLength = IdLength - (ClientConfiguration.Instance.LocalGame.Length + 1);
+        int maxLength = IdLength - (AppState.Configuration.Legacy.LocalGame.Length + 1);
         maxLength = Math.Max(1, maxLength);
         string hash = Utilities.CalculateSHA1ForString(raw);
         return hash[..Math.Min(hash.Length, maxLength)];
@@ -53,7 +54,7 @@ public static class CnCNetIdentity
         try
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-                "SOFTWARE\\" + ClientConfiguration.Instance.InstallationPathRegKey);
+                "SOFTWARE\\" + AppState.Configuration.Legacy.InstallationPathRegKey);
             return key?.GetValue("Ident")?.ToString();
         }
         catch

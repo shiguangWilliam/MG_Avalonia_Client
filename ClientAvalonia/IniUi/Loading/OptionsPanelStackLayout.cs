@@ -38,6 +38,8 @@ internal static class OptionsPanelStackLayout
         "lblAllowPrivateMessagesFrom",
         "ddAllowPrivateMessagesFrom",
         "lblAllowPrivateMessagesFromHint",
+        "lblGameBroadcastInterval",
+        "ddGameBroadcastInterval",
     ];
 
     private static readonly string[] CnCNetRightColumn =

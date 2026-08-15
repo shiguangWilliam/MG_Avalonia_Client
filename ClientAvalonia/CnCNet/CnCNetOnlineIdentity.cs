@@ -5,6 +5,7 @@ using System.Security.Principal;
 using ClientCore;
 using Microsoft.Win32;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 #if NET8_0_OR_GREATER
 using System.DirectoryServices;
@@ -65,7 +66,7 @@ public static class CnCNetOnlineIdentity
         {
             var random = new Random();
             using RegistryKey key = Registry.CurrentUser.CreateSubKey(
-                "SOFTWARE\\" + ClientConfiguration.Instance.InstallationPathRegKey);
+                "SOFTWARE\\" + AppState.Configuration.Legacy.InstallationPathRegKey);
 
             string str = random.Next(int.MaxValue - 1).ToString();
             try
@@ -104,7 +105,7 @@ public static class CnCNetOnlineIdentity
             try
             {
                 using RegistryKey key = Registry.CurrentUser.CreateSubKey(
-                    "SOFTWARE\\" + ClientConfiguration.Instance.InstallationPathRegKey);
+                    "SOFTWARE\\" + AppState.Configuration.Legacy.InstallationPathRegKey);
                 key.SetValue("Ident", ident);
             }
             catch (Exception ex)

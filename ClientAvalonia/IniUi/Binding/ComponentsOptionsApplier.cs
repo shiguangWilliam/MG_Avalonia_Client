@@ -3,6 +3,7 @@ using ClientCore;
 using ClientCore.Extensions;
 using ClientUpdater;
 using System.IO;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Binding;
 
@@ -20,7 +21,7 @@ public static class ComponentsOptionsApplier
             if (button == null)
                 continue;
 
-            bool exists = File.Exists(Path.Combine(ProgramConstants.GamePath, component.LocalPath));
+            bool exists = File.Exists(Path.Combine(AppState.Environment.GamePath, component.LocalPath));
             string text = "Not Available".L10N("Client:DTAConfig:NotAvailable");
             bool enabled = false;
 

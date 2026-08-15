@@ -7,6 +7,7 @@ using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -166,8 +167,8 @@ public sealed class GameLaunchService
 
     private static void LogSpawnArtifacts()
     {
-        FileInfo spawnIni = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNER_SETTINGS);
-        FileInfo spawnMap = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI);
+        FileInfo spawnIni = SafePath.GetFile(AppState.Environment.GamePath, ProgramConstants.SPAWNER_SETTINGS);
+        FileInfo spawnMap = SafePath.GetFile(AppState.Environment.GamePath, ProgramConstants.SPAWNMAP_INI);
 
         Logger.Log(spawnIni.Exists
             ? $"GameLaunchService: spawn.ini ready ({spawnIni.Length} bytes) at {spawnIni.FullName}"
@@ -199,10 +200,11 @@ public sealed class GameLaunchService
         Window? errorOwner = null,
         CnCNetStartGameInfo? cncNet = null,
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
-        CnCNetGameOptionsState? gameOptions = null)
+        CnCNetGameOptionsState? gameOptions = null,
+        LanStartGameInfo? lan = null)
         => TryLaunch(
             environment,
-            new MultiplayerLaunchSession(request, cncNet, roomPlayers, gameOptions),
+            new MultiplayerLaunchSession(request, cncNet, roomPlayers, gameOptions, lan),
             out message,
             errorOwner);
 
@@ -217,11 +219,12 @@ public sealed class GameLaunchService
         CnCNetGameOptionsState? gameOptions = null)
         => TryLaunchMultiplayer(environment, request, out message, errorOwner, startInfo, roomPlayers, gameOptions);
 
-    /// <summary>LAN host/join — same spawn+launch pipeline as CnCNet until LAN-specific spawn exists.</summary>
+    /// <summary>LAN host/join after LAUNCH TCP (DX <c>LANGameLobby</c> spawn additions).</summary>
     public bool TryLaunchLan(
         ClientEnvironment environment,
         SkirmishLaunchRequest request,
+        LanStartGameInfo startInfo,
         out string message,
         Window? errorOwner = null)
-        => TryLaunchMultiplayer(environment, request, out message, errorOwner);
+        => TryLaunchMultiplayer(environment, request, out message, errorOwner, lan: startInfo);
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using ClientAvalonia.Domain;
@@ -119,7 +119,7 @@ public sealed class ActionExecutorTests
         executor.ExecuteWithoutRefresh(new ChangeMapAction(map));
 
         if (ctx.Game is SkirmishSession skirmish)
-            skirmish.Player.OccupiedSlotCount.Should().Be(4);
+            skirmish.OccupiedSlotCount().Should().Be(4);
         ctx.Game.PlayerSlots[1].ColorIndex.Should().NotBe(5);
         ctx.Game.Map.Should().BeSameAs(map);
     }
@@ -159,15 +159,14 @@ public sealed class ActionExecutorTests
         EnvironmentServices.Register<IGameEnvironment>(
             () => new MockGameEnvironment { PlayerNameValue = "TestPlayer" });
 
-        var player = new LobbyPlayerState();
-        player.LoadCatalogs(includeSpectator: false);
+        LobbyCatalogService.Instance.Reload(includeSpectator: false);
 
         return new LobbyActionContext
         {
             Root = NewRoot(),
             Behaviors = new BehaviorRegistry(),
             WindowName = windowName,
-            Game = new SkirmishSession(player),
+            Game = new SkirmishSession(),
             Session = new LobbySessionState(),
             Resources = new GameResourceCatalogAdapter(GameResourceCatalog.Instance),
             ResourceResolver = new ResourceResolver(primaryRoot: "."),

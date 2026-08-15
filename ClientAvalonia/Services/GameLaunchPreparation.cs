@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -97,12 +98,12 @@ public static class GameLaunchPreparation
 
     private static void SyncTranslationGameFilesIfNeeded()
     {
-        ClientConfiguration.Instance.RefreshTranslationGameFiles();
+        AppState.Configuration.Legacy.RefreshTranslationGameFiles();
 
-        foreach (TranslationGameFile tgf in ClientConfiguration.Instance.TranslationGameFiles)
+        foreach (TranslationGameFile tgf in AppState.Configuration.Legacy.TranslationGameFiles)
         {
             string sourcePath = SafePath.CombineFilePath(UserINISettings.Instance.TranslationFolderPath, tgf.Source);
-            string targetPath = SafePath.CombineFilePath(ProgramConstants.GamePath, tgf.Target);
+            string targetPath = SafePath.CombineFilePath(AppState.Environment.GamePath, tgf.Target);
 
             if (File.Exists(sourcePath))
             {

@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Domain;
 
@@ -83,8 +84,8 @@ public class DirectDrawWrapper
 
     public void Apply()
     {
-        string ddrawDllSourcePath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), _ddrawDllPath);
-        string ddrawDllTargetPath = SafePath.CombineFilePath(ProgramConstants.GamePath, "ddraw.dll");
+        string ddrawDllSourcePath = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, _ddrawDllPath);
+        string ddrawDllTargetPath = SafePath.CombineFilePath(AppState.Environment.GamePath, "ddraw.dll");
 
         if (!string.IsNullOrEmpty(_ddrawDllPath))
         {
@@ -107,18 +108,18 @@ public class DirectDrawWrapper
 
         if (!string.IsNullOrEmpty(ConfigFileName)
             && !string.IsNullOrEmpty(_resConfigFileName)
-            && !SafePath.GetFile(ProgramConstants.GamePath, ConfigFileName).Exists)
+            && !SafePath.GetFile(AppState.Environment.GamePath, ConfigFileName).Exists)
         {
             File.Copy(
-                SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), _resConfigFileName),
-                SafePath.CombineFilePath(ProgramConstants.GamePath, Path.GetFileName(ConfigFileName)));
+                SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, _resConfigFileName),
+                SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName)));
         }
 
         foreach (string file in _filesToCopy)
         {
             File.Copy(
-                SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), file),
-                SafePath.CombineFilePath(ProgramConstants.GamePath, Path.GetFileName(file)),
+                SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, file),
+                SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(file)),
                 true);
         }
     }
@@ -126,10 +127,10 @@ public class DirectDrawWrapper
     public void Clean()
     {
         if (!string.IsNullOrEmpty(ConfigFileName))
-            SafePath.DeleteFileIfExists(ProgramConstants.GamePath, Path.GetFileName(ConfigFileName));
+            SafePath.DeleteFileIfExists(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName));
 
         foreach (string file in _filesToCopy)
-            SafePath.DeleteFileIfExists(ProgramConstants.GamePath, Path.GetFileName(file));
+            SafePath.DeleteFileIfExists(AppState.Environment.GamePath, Path.GetFileName(file));
     }
 
     public bool UsesCustomWindowedOption()

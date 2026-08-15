@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -111,6 +112,13 @@ public static class CnCNetLobbyOperations
             return true;
         }
 
+        if (game.IsLoadedGame)
+        {
+            // DX: SHA1(spawnSG GameID)[..10] — same key hosts use when creating loaded rooms.
+            joinPassword = Services.MultiplayerLoadGameSupport.ComputeLoadedGamePassword();
+            return true;
+        }
+
         // DX: derive from channelName; candidates also include MG channel+room for join fallback.
         defaultPasswordCandidates = GetDefaultChannelPasswordCandidates(game.ChannelName, game.RoomName);
         joinPassword = defaultPasswordCandidates[0];
@@ -159,7 +167,7 @@ public static class CnCNetLobbyOperations
         }
 
         string hostName = string.IsNullOrWhiteSpace(session.LocalNick)
-            ? ProgramConstants.PLAYERNAME
+            ? AppState.Environment.PlayerName
             : session.LocalNick;
 
         session.BeginDefaultPasswordJoinCandidates(
@@ -176,6 +184,7 @@ public static class CnCNetLobbyOperations
             MaxPlayers = request.MaxPlayers,
             SkillLevel = request.SkillLevel,
             Passworded = passworded,
+            IsLoadedGame = request.IsLoadedGame,
         });
 
         session.JoinGameChannel(channelName, password, out string? joinError, roomName);
@@ -198,13 +207,15 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        CnCNetTunnel tunnel = session.Tunnels.FirstOrDefault(t => t.Official) ?? session.Tunnels[0];
+        CnCNetTunnel tunnel = session.TunnelSorter.TryPeekBest()
+            ?? session.Tunnels.FirstOrDefault(t => t.Official)
+            ?? session.Tunnels[0];
         var request = new CnCNetGameCreationRequest
         {
-            RoomName = $"{ProgramConstants.PLAYERNAME}'s Game",
+            RoomName = $"{AppState.Environment.PlayerName}'s Game",
             MaxPlayers = 8,
             Tunnel = tunnel,
-            SkillLevel = ClientConfiguration.Instance.DefaultSkillLevelIndex,
+            SkillLevel = AppState.Configuration.Legacy.DefaultSkillLevelIndex,
         };
         return TryCreateGame(session, request, out message);
     }
@@ -217,7 +228,7 @@ public static class CnCNetLobbyOperations
             return false;
         }
 
-        string localGameId = ClientConfiguration.Instance.LocalGame;
+        string localGameId = AppState.Configuration.Legacy.LocalGame;
         if (!string.IsNullOrWhiteSpace(game.SourceGameId)
             && !game.SourceGameId.Equals(localGameId, StringComparison.OrdinalIgnoreCase))
         {
@@ -236,11 +247,16 @@ public static class CnCNetLobbyOperations
 
         if (game.IsLoadedGame)
         {
-            message = "Saved-game rooms are not supported yet.";
-            return false;
+            IReadOnlyList<string> savedPlayers = Services.MultiplayerLoadGameSupport.ReadSavedPlayerNames();
+            if (savedPlayers.Count > 0
+                && !savedPlayers.Any(n => n.Equals(AppState.Environment.PlayerName, StringComparison.OrdinalIgnoreCase)))
+            {
+                message = "You do not exist in the saved game!";
+                return false;
+            }
         }
 
-        if (game.Incompatible && ClientConfiguration.Instance.DisallowJoiningIncompatibleGames)
+        if (game.Incompatible && AppState.Configuration.Legacy.DisallowJoiningIncompatibleGames)
         {
             message = "Cannot join game. The host is on a different game version than you.";
             return false;
@@ -287,6 +303,7 @@ public static class CnCNetLobbyOperations
             MaxPlayers = game.MaxPlayers,
             SkillLevel = game.SkillLevel,
             Passworded = game.RequiresPassword,
+            IsLoadedGame = game.IsLoadedGame,
         });
 
         session.JoinGameChannel(game.ChannelName, joinPassword, out string? joinError, game.RoomName);

@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClientAvalonia.Controls.DxThemeLoadingOverlay">
+  <Panel Background="{DynamicResource DxSurface0Brush}">
+    <StackPanel HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="18">
+      <TextBlock Text="TACTICAL"
+                 HorizontalAlignment="Center"
+                 FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                 FontSize="22"
+                 FontWeight="Bold"
+                 LetterSpacing="8"
+                 Foreground="{DynamicResource DxTextPrimaryBrush}" />
+      <TextBlock Text="正在装载战术界面模块…"
+                 x:Name="StatusText"
+                 HorizontalAlignment="Center"
+                 FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif"
+                 FontSize="12.5"
+                 Foreground="{DynamicResource DxTextMutedBrush}" />
+      <Border Width="220"
+              Height="2"
+              HorizontalAlignment="Center"
+              Background="{DynamicResource DxLineMutedBrush}"
+              ClipToBounds="True">
+        <Border x:Name="LoadingBar"
+                Width="72"
+                Height="2"
+                HorizontalAlignment="Left"
+                Background="{DynamicResource DxAccentPrimaryBrush}" />
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

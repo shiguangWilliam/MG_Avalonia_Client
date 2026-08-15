@@ -1,5 +1,7 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Rendering;
 using ClientCore;
@@ -27,6 +29,7 @@ public static class CnCNetGameOptionsUiBridge
         (IReadOnlyList<UiNodeViewModel> checkBoxes, IReadOnlyList<UiNodeViewModel> dropDowns) =
             CnCNetGameOptionsCatalog.Enumerate(root);
 
+        IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
         return new CnCNetGameOptionsState
         {
             CheckBoxValues = checkBoxes.Select(c => c.IsChecked).ToList(),
@@ -35,9 +38,9 @@ public static class CnCNetGameOptionsUiBridge
             MapSha1 = map?.Sha1 ?? string.Empty,
             GameModeName = gameMode?.Name ?? string.Empty,
             MapUntranslatedName = map?.UntranslatedName ?? string.Empty,
-            FrameSendRate = ClientConfiguration.Instance.DefaultFrameSendRate,
-            MaxAhead = ClientConfiguration.Instance.DefaultMaxAhead,
-            ProtocolVersion = ClientConfiguration.Instance.DefaultProtocolVersion,
+            FrameSendRate = config.DefaultFrameSendRate,
+            MaxAhead = config.DefaultMaxAhead,
+            ProtocolVersion = config.DefaultProtocolVersion,
             RandomSeed = randomSeed,
             RemoveStartingLocations = removeStartingLocations,
         };

@@ -2,6 +2,7 @@ using ClientAvalonia.CnCNet.Tunnels;
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -21,14 +22,14 @@ public enum CnCNetConnectionState
 /// <summary>
 /// CnCNet 网络会话接口（Network 域）。
 ///
-/// 作用：把 CnCNetSessionService.Instance 单例封装为接口，让 MainWindow /
+/// 作用：把 AppState.CnCNet 单例封装为接口，让 MainWindow /
 /// LobbyBehaviors / GameCreationOverlay 等所有调 IRC 的代码可注入 mock。
 ///
 /// ★ 本接口是网络层，不实现 IGameSession。当前活动的游戏房间通过
 /// ActiveGameRoom : ICnCNetGameSession? 暴露。
 ///
 /// 后补的 Auto-Refresh 与 Low-Latency Tunnel（TunnelSorter）目前都直接读
-/// CnCNetSessionService.Instance，迁移后通过此接口注入即可单测。
+/// AppState.CnCNet，迁移后通过此接口注入即可单测。
 /// </summary>
 public interface ICnCNetSession
 {
@@ -153,10 +154,6 @@ public interface ICnCNetSession
 
     /// <summary>Host 尝试切换 tunnel（用于 Low-Latency / 自动维护）。</summary>
     bool TryHostChangeTunnel(CnCNetTunnel tunnel);
-
-    /// <summary>把当前 UI LobbyPlayerState 同步到 CnCNet 房间广播。</summary>
-    [Obsolete("Phase 3 P3-4: 改用 ICnCNetGameSession.BroadcastPlayerOptionsFromSlots。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    void SyncGameRoomFromLobby(LobbyPlayerState state);
 
     /// <summary>确保游戏广播频道已加入（房间关闭/恢复时使用）。</summary>
     void EnsureGameBroadcastChannelsJoined();

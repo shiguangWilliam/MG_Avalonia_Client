@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -24,7 +25,7 @@ public static class CnCNetTunnelListLoader
 
     public static byte[]? LoadRawBytes()
     {
-        string url = ClientConfiguration.Instance.CnCNetTunnelListURL;
+        string url = AppState.Configuration.Legacy.CnCNetTunnelListURL;
         if (!string.IsNullOrWhiteSpace(url))
         {
             byte[]? online = CnCNetHttp.DownloadBytes(url);

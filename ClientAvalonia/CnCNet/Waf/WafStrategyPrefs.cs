@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet.Waf;
 
@@ -116,7 +117,7 @@ public sealed class WafStrategyPrefs
 
     private static string ResolvePath()
     {
-        string root = ProgramConstants.GamePath;
+        string root = AppState.Environment.GamePath;
         if (string.IsNullOrWhiteSpace(root))
             root = AppContext.BaseDirectory;
         return Path.Combine(root, "Client", FileName);

@@ -11,6 +11,7 @@ using ClientCore;
 using ClientCore.Enums;
 using ClientCore.Settings;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -92,7 +93,7 @@ public sealed class CnCNetSession : IDisposable
 
     public CnCNetGameRoomSession? GameRoom => _gameRoom;
 
-    public string LocalNick => _connection?.CurrentNick ?? ProgramConstants.PLAYERNAME;
+    public string LocalNick => _connection?.CurrentNick ?? AppState.Environment.PlayerName;
 
     public event Action<CnCNetStartGameInfo>? GameStarting;
 
@@ -318,6 +319,12 @@ public sealed class CnCNetSession : IDisposable
                     _gameRoom.BroadcastLocalTunnelPing();
                 }
 
+                // Refresh lobby display lines so game-list ping stays current.
+                List<CnCNetHostedGameSummary> hosted = GetHostedGamesForCurrentChannel();
+                foreach (CnCNetHostedGameSummary game in hosted)
+                    game.TunnelPingInMs = ResolveTunnelPingMs(game);
+                LobbyState.SetHostedGames(hosted);
+
                 StateChanged?.Invoke();
             });
         }
@@ -409,7 +416,7 @@ public sealed class CnCNetSession : IDisposable
             if (_currentGame == null)
             {
                 LogActivity(
-                    $"No game collection entry for LocalGame={ClientConfiguration.Instance.LocalGame}. " +
+                    $"No game collection entry for LocalGame={AppState.Configuration.Legacy.LocalGame}. " +
                     "Add [CustomGames] in GameCollectionConfig.ini, set CnCNetChatChannel / CnCNetGameBroadcastChannel " +
                     "in ClientDefinitions.ini, or use a valid LocalGame id for #cncnet-{{id}} convention fallback.");
                 LobbyState.SetConnectionStatus("No chat channels configured.");
@@ -420,7 +427,7 @@ public sealed class CnCNetSession : IDisposable
             _selectedChannelIndex = IndexInSelectableGames(_currentGame);
             UpdateChannelListState();
             ApplyPlayerNameFromUserSettings();
-            if (NameValidator.IsNameValid(ProgramConstants.PLAYERNAME, out string? nameError) != NameValidationError.None)
+            if (NameValidator.IsNameValid(AppState.Environment.PlayerName, out string? nameError) != NameValidationError.None)
             {
                 string message = nameError ?? "Invalid CnCNet nickname.";
                 LogActivity(message);
@@ -430,7 +437,7 @@ public sealed class CnCNetSession : IDisposable
             }
 
             LobbyState.ClearConnectionLog();
-            LogActivity($"Starting session as {ProgramConstants.PLAYERNAME} ({ClientConfiguration.Instance.LocalGame})");
+            LogActivity($"Starting session as {AppState.Environment.PlayerName} ({AppState.Configuration.Legacy.LocalGame})");
             LogActivity($"Channels: chat={_currentGame.ChatChannel}, games={_currentGame.GameBroadcastChannel} ({_currentGame.UiName})");
 
             _systemId = CnCNetIdentity.CreateSystemId();
@@ -2024,7 +2031,7 @@ public sealed class CnCNetSession : IDisposable
 
         // First peer GAME on a joined listing channel locks R13 or R10 for the stay.
         // Skip our own echo so hosting unlocked-R13 does not pin an R10 channel wrongly.
-        bool fromLocal = sender.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+        bool fromLocal = sender.Equals(AppState.Environment.PlayerName, StringComparison.OrdinalIgnoreCase);
         _broadcastDialect.ObserveInbound(normalizedBroadcast, ctcp, fromLocalSender: fromLocal);
 
         CnCNetGameEntry? sourceGame = _gameCollection?.FindByBroadcastChannel(normalizedBroadcast);
@@ -2159,8 +2166,21 @@ public sealed class CnCNetSession : IDisposable
     private void RefreshHostedGames()
     {
         List<CnCNetHostedGameSummary> list = GetHostedGamesForCurrentChannel();
+        foreach (CnCNetHostedGameSummary game in list)
+            game.TunnelPingInMs = ResolveTunnelPingMs(game);
         LobbyState.SetHostedGames(list);
         StateChanged?.Invoke();
+    }
+
+    private int ResolveTunnelPingMs(CnCNetHostedGameSummary game)
+    {
+        if (string.IsNullOrWhiteSpace(game.TunnelAddress) || game.TunnelPort == 0)
+            return -1;
+
+        CnCNetTunnel? tunnel = Tunnels.FirstOrDefault(t =>
+            t.Address.Equals(game.TunnelAddress, StringComparison.OrdinalIgnoreCase)
+            && t.Port == game.TunnelPort);
+        return tunnel?.PingInMs ?? -1;
     }
 
     private void PruneStaleHostedGames()

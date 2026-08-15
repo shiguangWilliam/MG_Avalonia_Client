@@ -33,17 +33,8 @@ public static class LobbyPlayerBindingApplier
     private const int PanelRightReserve = 12;
 
     /// <summary>
-    /// Session-aware 入口（Slice 5 新增）：直接吃 <see cref="SkirmishSession"/> + <see cref="ILobbyCatalogService"/>。
-    /// 写操作仍走 <see cref="IPlayerSlotSink"/>（在 Apply 内回调）。
+    /// Session-aware 入口：直接吃 <see cref="SkirmishSession"/> + <see cref="ILobbyCatalogService"/>。
     /// </summary>
-    /// <remarks>
-    /// 设计理由（见 layered-architecture-progress-report.md §9.5 Slice 5）：
-    /// <list type="bullet">
-    /// <item>BindingApplier 不再硬依赖 <c>LobbyPlayerState</c>，只依赖 Session + Catalog 抽象。</item>
-    /// <item>调用方负责传 UI 输入态（如 AllowHostPlayerOptions）；不再读 <c>LobbyPlayerState.Mode</c>。</item>
-    /// <item>UI 重入保护用 <see cref="IGameSession.Revision"/>；本方法不持有 Revision，由调用方在订阅 <see cref="IGameSession.StateChanged"/> 时管理。</item>
-    /// </list>
-    /// </remarks>
     public static void ApplyWithSession(
         UiNodeViewModel root,
         SkirmishSession session,
@@ -56,35 +47,17 @@ public static class LobbyPlayerBindingApplier
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(catalogs);
 
-        Apply(root, session.Player, resources, behaviors, onSlotsMutated, gameRoomProvider);
+        var ui = new LobbySessionState();
+        LobbyPlayerSlotUiRules.ConfigureForSkirmish(ui, session);
+        Apply(root, session, ui, catalogs, resources, behaviors, gameRoomProvider, onSlotsMutated);
     }
 
     /// <summary>
-    /// Phase 4 P4-1：Session-aware 主入口——吃任意 <see cref="IGameSession"/> + <see cref="LobbySessionState"/>。
-    /// 设计要点（见 phase3 报告 §7）：
-    /// <list type="bullet">
-    /// <item><b>写路径走 sink</b>：UI dropdown 改槽位 → <see cref="IPlayerSlotSink.WriteSlot"/> 一次原子更新多字段，
-    /// 触发 Session 内部 Revision bump + StateChanged。</item>
-    /// <item><b>读路径用镜像</b>：渲染层（<see cref="SyncUiFromState"/> / <see cref="BuildSideItems"/> 等）仍读
-    /// <paramref name="playerState"/>，它由调用方在订阅 <see cref="IGameSession.StateChanged"/> 时通过
-    /// <see cref="LobbyPlayerState.SyncFromSlots"/> 同步。这样保持渲染的局部一致性。</item>
-    /// <item><b>防环</b>：本方法内部对 sink 写入时设 <see cref="LobbyPlayerState.PlayerUpdatingInProgress"/>
-    /// 为 true（迁移期沿用此标志，Phase 4 P4-5 改为 Revision 比对）。</item>
-    /// </list>
+    /// Session-aware 主入口——读 <see cref="IGameSession.PlayerSlots"/>，写 <see cref="IPlayerSlotSink"/>。
     /// </summary>
-    /// <param name="root">UI 根节点。</param>
-    /// <param name="session">当前会话（Skirmish / CnCNet / LAN 均可）。</param>
-    /// <param name="playerState">UI 镜像（由调用方在 StateChanged 时 SyncFromSlots 同步）。</param>
-    /// <param name="uiState">UI 输入态（Mode / AllowHostPlayerOptions / LocalPlayerName / HostPlayerName）。</param>
-    /// <param name="resources">资源解析器。</param>
-    /// <param name="behaviors">行为注册表。</param>
-    /// <param name="catalogs">大厅目录（Side / Color / Team / AI 名字）。</param>
-    /// <param name="gameRoomProvider">CnCNet 房间提供委托（仅 Multiplayer 用）。</param>
-    /// <param name="onSlotsMutated">每次 UI 改槽的回调（用于刷新 start markers 等）。</param>
     public static void Apply(
         UiNodeViewModel root,
         IGameSession session,
-        LobbyPlayerState playerState,
         LobbySessionState uiState,
         ILobbyCatalogService catalogs,
         ResourceResolver resources,
@@ -93,89 +66,37 @@ public static class LobbyPlayerBindingApplier
         Action? onSlotsMutated = null)
     {
         ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(playerState);
         ArgumentNullException.ThrowIfNull(uiState);
         ArgumentNullException.ThrowIfNull(catalogs);
 
-        ApplyCore(
-            root,
-            playerState,
-            resources,
-            behaviors,
-            onSlotsMutated,
-            gameRoomProvider,
-            session.SlotSink,
-            uiState);
-    }
-
-    public static void Apply(
-        UiNodeViewModel root,
-        LobbyPlayerState playerState,
-        ResourceResolver resources,
-        BehaviorRegistry behaviors)
-    {
-        Apply(root, playerState, resources, behaviors, onSlotsMutated: null, gameRoomProvider: null);
-    }
-
-    /// <summary>
-    /// Apply overload that lets the caller observe slot mutations performed by
-    /// the dropdown event handlers. The callback fires after every UI-driven
-    /// mutation (name, side, color, team, start), regardless of lobby mode, so
-    /// the host window can refresh dependent UI (e.g. map start markers) without
-    /// waiting for an extra user click. See auto-refresh-design.md.
-    /// </summary>
-    public static void Apply(
-        UiNodeViewModel root,
-        LobbyPlayerState playerState,
-        ResourceResolver resources,
-        BehaviorRegistry behaviors,
-        Action? onSlotsMutated)
-    {
-        Apply(root, playerState, resources, behaviors, onSlotsMutated, gameRoomProvider: null);
-    }
-
-    /// <summary>
-    /// Full Apply with optional game-room provider (avoids CnCNetSession.Instance).
-    /// </summary>
-    public static void Apply(
-        UiNodeViewModel root,
-        LobbyPlayerState playerState,
-        ResourceResolver resources,
-        BehaviorRegistry behaviors,
-        Action? onSlotsMutated,
-        Func<CnCNetGameRoomSession?>? gameRoomProvider)
-    {
-        ApplyCore(root, playerState, resources, behaviors, onSlotsMutated, gameRoomProvider, sink: null, uiState: null);
-    }
-
-    private static void ApplyCore(
-        UiNodeViewModel root,
-        LobbyPlayerState playerState,
-        ResourceResolver resources,
-        BehaviorRegistry behaviors,
-        Action? onSlotsMutated,
-        Func<CnCNetGameRoomSession?>? gameRoomProvider,
-        IPlayerSlotSink? sink = null,
-        LobbySessionState? uiState = null)
-    {
         UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
         if (panel == null)
             return;
 
         HideOrphanPlayerControls(root, panel);
 
+        IReadOnlyList<IPlayerSlot> slots = session.PlayerSlots;
+        LobbyPlayerMode mode = uiState.UIMode;
+        bool allowHost = uiState.AllowHostPlayerOptions;
+        IReadOnlyList<string> aiNames = catalogs.AiNames;
+        IReadOnlyList<LobbySideEntry> sideEntries = catalogs.SideEntries;
+        IReadOnlyList<string> teamNames = catalogs.TeamNames;
+        var shield = new FlagReentrancyShield();
+
         if (panel.Node.Props.ContainsKey("LobbyPlayerSlotsBuilt"))
         {
             RelayoutPlayerColumns(root, panel, resources, behaviors);
-            SyncUiFromState(panel, playerState);
+            SyncUiFromState(panel, slots, mode, allowHost, aiNames, shield);
             return;
         }
 
         PlayerOptionLayout layout = ReadLayout(root);
-        var sideItems = BuildSideItems(playerState, resources);
-        var teamItems = BuildTeamItems(playerState);
+        var sideItems = BuildSideItems(sideEntries, resources);
+        var teamItems = BuildTeamItems(teamNames);
         var colorItems = BuildColorItems(resources);
-        var startItems = Enumerable.Range(0, 8).Select(i => i.ToString()).ToArray();
+        // Combo SelectedIndex is 0-7; labels are 1-8 (DX GameLobbyBase ddPlayerStart).
+        // Slot.StartIndex stays 1-based (0 = unset/random), matching map markers.
+        var startItems = Enumerable.Range(1, 8).Select(i => i.ToString()).ToArray();
 
         UiNodeViewModel? firstName = null;
         UiNodeViewModel? firstSide = null;
@@ -188,7 +109,7 @@ public static class LobbyPlayerBindingApplier
             double y = layout.LocationY + (DropDownHeight + layout.VerticalMargin) * slot;
             double x = layout.LocationX;
 
-            string[] nameItems = LobbyPlayerSlotUiRules.BuildNameItems(slot, playerState);
+            string[] nameItems = LobbyPlayerSlotUiRules.BuildNameItems(slot, slots, mode, allowHost, aiNames);
             UiNodeViewModel ddName = CreateDropdown(
                 $"ddPlayerName{slot}", x, y, layout.NameWidth, DropDownHeight, resources, behaviors, nameItems);
             x += layout.NameWidth + layout.HorizontalMargin;
@@ -218,7 +139,21 @@ public static class LobbyPlayerBindingApplier
                 firstStart ??= ddStart;
             }
 
-            WireSlot(slot, playerState, panel, ddName, ddSide, ddColor, ddTeam, ddStart, onSlotsMutated, gameRoomProvider, sink, uiState);
+            WireSlot(
+                slot,
+                panel,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                ddStart,
+                onSlotsMutated,
+                gameRoomProvider,
+                session.SlotSink,
+                uiState,
+                session,
+                catalogs,
+                shield);
 
             panel.Children.Add(ddName);
             panel.Children.Add(ddSide);
@@ -231,7 +166,7 @@ public static class LobbyPlayerBindingApplier
         EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
 
         panel.Node.Props["LobbyPlayerSlotsBuilt"] = true;
-        SyncUiFromState(panel, playerState);
+        SyncUiFromState(panel, slots, mode, allowHost, aiNames, shield);
     }
 
     private static void RelayoutPlayerColumns(
@@ -396,19 +331,31 @@ public static class LobbyPlayerBindingApplier
         panel.Children.Add(vm);
     }
 
-    public static void SyncFromUi(UiNodeViewModel root, LobbyPlayerState playerState)
+    /// <summary>
+    /// Session-aware：把 UI 写回 <see cref="IGameSession.SlotSink"/>。
+    /// </summary>
+    public static void SyncFromUi(
+        UiNodeViewModel root,
+        IGameSession session,
+        LobbySessionState uiState,
+        IReadOnlyList<string> aiNames)
     {
-        if (playerState.PlayerUpdatingInProgress)
-            return;
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(uiState);
+        ArgumentNullException.ThrowIfNull(aiNames);
 
         UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
         if (panel == null)
             return;
 
-        for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots; slot++)
+        for (int slot = 0; slot < LobbyPlayerSlot.MaxSlots && slot < session.PlayerSlots.Count; slot++)
         {
-            if (LobbyPlayerSlotUiRules.GetUiRowKind(slot, playerState) == LobbyPlayerRowKind.Closed)
+            if (LobbyPlayerSlotUiRules.GetUiRowKind(
+                    slot, session.PlayerSlots, uiState.UIMode, uiState.AllowHostPlayerOptions)
+                == LobbyPlayerRowKind.Closed)
+            {
                 continue;
+            }
 
             UiNodeViewModel? ddName = FindVm(panel, $"ddPlayerName{slot}");
             UiNodeViewModel? ddSide = FindVm(panel, $"ddPlayerSide{slot}");
@@ -418,44 +365,38 @@ public static class LobbyPlayerBindingApplier
             if (ddName == null)
                 continue;
 
-            ApplySlotFromUi(
+            SlotFieldUpdate? update = BuildSlotUpdateFromUi(
                 slot,
-                playerState.Slots[slot],
-                playerState,
+                session.PlayerSlots[slot],
+                session.PlayerSlots,
+                uiState.LocalPlayerName,
+                aiNames,
+                uiState.UIMode,
+                uiState.AllowHostPlayerOptions,
                 ddName,
                 ddSide,
                 ddColor,
                 ddTeam,
                 ddStart);
+            if (update == null)
+                continue;
+
+            session.SlotSink.WriteSlot(slot, update.Value);
         }
     }
 
-    private static void ApplySlotFromUi(
-        int slotIndex,
-        LobbyPlayerSlot slot,
-        LobbyPlayerState playerState,
-        UiNodeViewModel ddName,
-        UiNodeViewModel? ddSide,
-        UiNodeViewModel? ddColor,
-        UiNodeViewModel? ddTeam,
-        UiNodeViewModel? ddStart)
-    {
-        // Phase 4 P4-1：委派给纯函数 BuildSlotUpdateFromUi，再应用到具体 slot（保持旧入口行为）。
-        SlotFieldUpdate? update = BuildSlotUpdateFromUi(slotIndex, slot, playerState, ddName, ddSide, ddColor, ddTeam, ddStart);
-        if (update == null)
-            return;
-
-        ApplyUpdateToSlot(slot, update.Value);
-    }
-
     /// <summary>
-    /// Phase 4 P4-1：纯函数版本——从 UI dropdown 读取意图，构造 <see cref="SlotFieldUpdate"/>，
-    /// 不直接写 slot。返回 null 表示 "UI 选择被忽略（kick/ban）"。
+    /// 纯函数版本——从 UI dropdown 读取意图，构造 <see cref="SlotFieldUpdate"/>。
+    /// 返回 null 表示 "UI 选择被忽略（kick/ban）"。
     /// </summary>
     private static SlotFieldUpdate? BuildSlotUpdateFromUi(
         int slotIndex,
         IPlayerSlot current,
-        LobbyPlayerState playerState,
+        IReadOnlyList<IPlayerSlot>? slots,
+        string localPlayerName,
+        IReadOnlyList<string> aiNames,
+        LobbyPlayerMode mode,
+        bool allowHostPlayerOptions,
         UiNodeViewModel ddName,
         UiNodeViewModel? ddSide,
         UiNodeViewModel? ddColor,
@@ -465,12 +406,16 @@ public static class LobbyPlayerBindingApplier
         if (LobbyPlayerSlotUiRules.IsKickSelection(ddName) || LobbyPlayerSlotUiRules.IsBanSelection(ddName))
             return null;
 
-        LobbyPlayerRowKind rowKind = LobbyPlayerSlotUiRules.GetUiRowKind(slotIndex, playerState);
+        LobbyPlayerRowKind rowKind = slots != null
+            ? LobbyPlayerSlotUiRules.GetUiRowKind(slotIndex, slots, mode, allowHostPlayerOptions)
+            : current.IsOccupied
+                ? (current.IsAi ? LobbyPlayerRowKind.Ai : LobbyPlayerRowKind.Human)
+                : LobbyPlayerRowKind.Open;
 
         int side = ddSide?.SelectedIndex >= 0 ? ddSide.SelectedIndex : 0;
         int color = ddColor?.SelectedIndex >= 0 ? ddColor.SelectedIndex : 0;
         int team = ddTeam?.SelectedIndex >= 0 ? ddTeam.SelectedIndex : 0;
-        int start = ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex : 0;
+        int start = StartIndexFromCombo(ddStart);
 
         if (rowKind == LobbyPlayerRowKind.Human)
         {
@@ -486,7 +431,6 @@ public static class LobbyPlayerBindingApplier
         string name = ReadSelectedText(ddName);
         if (string.IsNullOrWhiteSpace(name) || name == "-")
         {
-            // Clear slot
             return new SlotFieldUpdate
             {
                 Name = string.Empty,
@@ -500,10 +444,10 @@ public static class LobbyPlayerBindingApplier
             };
         }
 
-        bool isHumanLocal = name.Equals(playerState.LocalPlayerName, StringComparison.OrdinalIgnoreCase);
+        bool isHumanLocal = name.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase);
         bool isAi = !isHumanLocal
-            && playerState.AiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
-        int aiLevel = isAi ? Math.Max(0, IndexOfAiName(playerState.AiNames, name)) : 0;
+            && aiNames.Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+        int aiLevel = isAi ? Math.Max(0, IndexOfAiName(aiNames, name)) : 0;
 
         return new SlotFieldUpdate
         {
@@ -519,8 +463,8 @@ public static class LobbyPlayerBindingApplier
     }
 
     /// <summary>
-    /// Phase 4 P4-1：把 <see cref="SlotFieldUpdate"/> 应用到具体 <see cref="LobbyPlayerSlot"/>（旧入口路径用）。
-    /// 注意 Name="" 时被视作 "Clear" 信号——按 <see cref="LobbyPlayerSlot.Clear"/> 语义。
+    /// 把 <see cref="SlotFieldUpdate"/> 应用到具体 <see cref="LobbyPlayerSlot"/>。
+    /// Name="" 时视作 Clear。
     /// </summary>
     private static void ApplyUpdateToSlot(LobbyPlayerSlot slot, in SlotFieldUpdate u)
     {
@@ -528,7 +472,6 @@ public static class LobbyPlayerBindingApplier
             && !u.IsAi.GetValueOrDefault()
             && !u.IsHumanLocal.GetValueOrDefault())
         {
-            // 等价于 slot.Clear()：Name 空字符串 + 全部字段归零
             slot.Clear();
             return;
         }
@@ -545,7 +488,6 @@ public static class LobbyPlayerBindingApplier
 
     private static void WireSlot(
         int slotIndex,
-        LobbyPlayerState playerState,
         UiNodeViewModel panel,
         UiNodeViewModel ddName,
         UiNodeViewModel ddSide,
@@ -554,128 +496,134 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel? ddStart,
         Action? onSlotsMutated,
         Func<CnCNetGameRoomSession?>? gameRoomProvider,
-        IPlayerSlotSink? sink = null,
-        LobbySessionState? uiState = null)
+        IPlayerSlotSink sink,
+        LobbySessionState uiState,
+        IGameSession session,
+        ILobbyCatalogService catalogs,
+        IReentrancyShield? shield = null)
     {
-        CnCNetGameRoomSession? ResolveGameRoom()
-            => gameRoomProvider?.Invoke()
-               ?? (TryResolveCnCNetSession()?.GameRoom);
+        _ = gameRoomProvider;
+        shield ??= new FlagReentrancyShield();
+        LobbyPlayerMode mode = uiState.UIMode;
+        bool allowHost = uiState.AllowHostPlayerOptions;
+        string hostName = uiState.HostPlayerName;
+        IReadOnlyList<string> aiNames = catalogs.AiNames;
 
-        // Phase 4 P4-1：当传入 sink 时，UI 改槽经 sink.WriteSlot 写入；否则走旧 setter 路径。
-        bool useSink = sink != null;
+        IPlayerSlot ResolveSlot()
+            => slotIndex < session.PlayerSlots.Count
+                ? session.PlayerSlots[slotIndex]
+                : session.PlayerSlots[0];
+
+        IReadOnlyList<IPlayerSlot> ResolveSlots() => session.PlayerSlots;
 
         void SyncNameFromUi()
         {
-            if (playerState.PlayerUpdatingInProgress)
+            if (shield.IsEntered)
                 return;
 
-            LobbyPlayerSlot previous = playerState.Slots[slotIndex].Clone();
+            IPlayerSlot current = ResolveSlot();
+            LobbyPlayerSlot previous = current is LobbyPlayerSlot concrete
+                ? concrete.Clone()
+                : ToLobbyClone(current);
 
-            // Phase 4 P4-1：sink 路径下，UI 改槽 → sink.WriteSlot（一次性原子更新）。
-            // 然后 playerState 镜像由调用方在订阅 session.StateChanged 时 SyncFromSlots。
-            // 这里我们仍调用 ApplySlotFromUi 兼容旧渲染路径（renderer 读 playerState.Slots）。
-            if (useSink)
+            SlotFieldUpdate? update = BuildSlotUpdateFromUi(
+                slotIndex,
+                current,
+                ResolveSlots(),
+                uiState.LocalPlayerName,
+                aiNames,
+                mode,
+                allowHost,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                ddStart);
+            if (update == null)
+                return;
+
+            if (current is LobbyPlayerSlot localMirror)
+                ApplyUpdateToSlot(localMirror, update.Value);
+
+            shield.Enter();
+            try
             {
-                SlotFieldUpdate? update = BuildSlotUpdateFromUi(
-                    slotIndex, playerState.Slots[slotIndex], playerState,
-                    ddName, ddSide, ddColor, ddTeam, ddStart);
-                if (update == null)
-                    return;
-
-                // 先应用到本地镜像，保证下面的 Coordinator 调用读到新值
-                ApplyUpdateToSlot(playerState.Slots[slotIndex], update.Value);
-                // 再通过 sink 写入 Session 真相源（bump revision + 触发广播）
-                playerState.PlayerUpdatingInProgress = true;
-                try
-                {
-                    sink!.WriteSlot(slotIndex, update.Value);
-                }
-                finally
-                {
-                    playerState.PlayerUpdatingInProgress = false;
-                }
+                sink.WriteSlot(slotIndex, update.Value);
             }
-            else
+            finally
             {
-                ApplySlotFromUi(
-                    slotIndex,
-                    playerState.Slots[slotIndex],
-                    playerState,
-                    ddName,
-                    ddSide,
-                    ddColor,
-                    ddTeam,
-                    ddStart);
+                shield.Exit();
             }
 
-            if (playerState.Mode == LobbyPlayerMode.Multiplayer)
+            if (mode == LobbyPlayerMode.Multiplayer && session is ICnCNetGameSession cnc)
+            {
                 MultiplayerSlotCoordinator.HandleHostSlotEdit(
-                    playerState,
+                    cnc,
                     slotIndex,
                     previous,
                     ddName,
-                    ResolveGameRoom());
-            else
-                MultiplayerSlotCoordinator.HandleSkirmishNameEdit(playerState, slotIndex, ddName);
+                    allowHost,
+                    hostName,
+                    aiNames);
+            }
+            else if (mode != LobbyPlayerMode.Multiplayer)
+            {
+                MultiplayerSlotCoordinator.HandleSkirmishNameEdit(session, aiNames, slotIndex, ddName);
+            }
 
-            SyncUiFromState(panel, playerState);
+            SyncUiFromState(panel, ResolveSlots(), mode, allowHost, aiNames, shield);
             onSlotsMutated?.Invoke();
         }
 
         void SyncOptionsFromUi()
         {
-            if (playerState.PlayerUpdatingInProgress)
+            if (shield.IsEntered)
                 return;
 
-            if (useSink)
-            {
-                SlotFieldUpdate? update = BuildSlotUpdateFromUi(
-                    slotIndex, playerState.Slots[slotIndex], playerState,
-                    ddName, ddSide, ddColor, ddTeam, ddStart);
-                if (update == null)
-                    return;
+            IPlayerSlot current = ResolveSlot();
 
-                ApplyUpdateToSlot(playerState.Slots[slotIndex], update.Value);
-                playerState.PlayerUpdatingInProgress = true;
-                try
-                {
-                    sink!.WriteSlot(slotIndex, update.Value);
-                }
-                finally
-                {
-                    playerState.PlayerUpdatingInProgress = false;
-                }
-            }
-            else
+            SlotFieldUpdate? update = BuildSlotUpdateFromUi(
+                slotIndex,
+                current,
+                ResolveSlots(),
+                uiState.LocalPlayerName,
+                aiNames,
+                mode,
+                allowHost,
+                ddName,
+                ddSide,
+                ddColor,
+                ddTeam,
+                ddStart);
+            if (update == null)
+                return;
+
+            if (current is LobbyPlayerSlot localMirror)
+                ApplyUpdateToSlot(localMirror, update.Value);
+
+            shield.Enter();
+            try
             {
-                ApplySlotFromUi(
-                    slotIndex,
-                    playerState.Slots[slotIndex],
-                    playerState,
-                    ddName,
-                    ddSide,
-                    ddColor,
-                    ddTeam,
-                    ddStart);
+                sink.WriteSlot(slotIndex, update.Value);
+            }
+            finally
+            {
+                shield.Exit();
             }
 
-            if (playerState.Mode == LobbyPlayerMode.Multiplayer)
+            if (mode == LobbyPlayerMode.Multiplayer && session is ICnCNetGameSession cnc)
             {
-                CnCNetGameRoomSession? gameRoom = ResolveGameRoom();
-                if (playerState.AllowHostPlayerOptions)
+                if (allowHost)
                 {
-                    MultiplayerSlotCoordinator.HandleHostOptionsEdit(playerState, gameRoom);
-                    SyncUiFromState(panel, playerState);
+                    MultiplayerSlotCoordinator.HandleHostOptionsEdit(cnc, hostName, aiNames);
+                    SyncUiFromState(panel, ResolveSlots(), mode, allowHost, aiNames, shield);
                 }
-                else if (playerState.Slots[slotIndex].IsHumanLocal)
+                else if (ResolveSlot().IsHumanLocal)
                 {
-                    MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(playerState, slotIndex, gameRoom);
+                    MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(cnc, slotIndex);
                 }
             }
 
-            // Fire for every mode (skirmish included) so the host window can refresh
-            // dependent UI (map start markers, launch button) without waiting for an
-            // extra user click. See auto-refresh-design.md — this is the bug fix.
             onSlotsMutated?.Invoke();
         }
 
@@ -686,6 +634,19 @@ public static class LobbyPlayerBindingApplier
         if (ddStart != null)
             ddStart.SelectionChanged += SyncOptionsFromUi;
     }
+
+    private static LobbyPlayerSlot ToLobbyClone(IPlayerSlot slot)
+        => new()
+        {
+            Name = slot.Name,
+            SideIndex = slot.SideIndex,
+            ColorIndex = slot.ColorIndex,
+            TeamIndex = slot.TeamIndex,
+            StartIndex = slot.StartIndex,
+            AiLevel = slot.AiLevel,
+            IsAi = slot.IsAi,
+            IsHumanLocal = slot.IsHumanLocal,
+        };
 
     private static ICnCNetSession? TryResolveCnCNetSession()
     {
@@ -700,7 +661,7 @@ public static class LobbyPlayerBindingApplier
     }
 
     /// <summary>
-    /// Phase 5 P5-1：把 UI 节点同步到给定槽位（脱离 LobbyPlayerState 专用入口）。
+    /// 把 UI 节点同步到给定槽位。
     /// </summary>
     private static void SyncUiFromState(
         UiNodeViewModel panel,
@@ -745,7 +706,7 @@ public static class LobbyPlayerBindingApplier
                 if (ddStart != null)
                 {
                     ddStart.IsVisible = showOptions;
-                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled, state.StartIndex);
+                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled, StartIndexToCombo(state.StartIndex));
                 }
             }
         }
@@ -753,17 +714,6 @@ public static class LobbyPlayerBindingApplier
         {
             shield?.Exit();
         }
-    }
-
-    private static void SyncUiFromState(UiNodeViewModel panel, LobbyPlayerState playerState)
-    {
-        SyncUiFromState(
-            panel,
-            playerState.Slots,
-            playerState.Mode,
-            playerState.AllowHostPlayerOptions,
-            playerState.AiNames,
-            shield: new LobbyPlayerStateShield(playerState));
     }
 
     private static void ApplyOptionDropdown(
@@ -780,6 +730,18 @@ public static class LobbyPlayerBindingApplier
             ? ResolveSelectedIndex(dropdown, selectedIndex)
             : -1);
     }
+
+    /// <summary>
+    /// Slot.StartIndex (0 = unset, 1-8 = spawn) → combo SelectedIndex (0-7), or -1 when unset.
+    /// </summary>
+    private static int StartIndexToCombo(int startIndex)
+        => startIndex >= 1 && startIndex <= 8 ? startIndex - 1 : -1;
+
+    /// <summary>
+    /// Combo SelectedIndex (0-7 showing labels 1-8) → Slot.StartIndex (1-8), or 0 when unset.
+    /// </summary>
+    private static int StartIndexFromCombo(UiNodeViewModel? ddStart)
+        => ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex + 1 : 0;
 
     /// <summary>Maps slot index to combo index; -1 clears selection (XNA unused slots).</summary>
     private static int ResolveSelectedIndex(UiNodeViewModel dropdown, int index)
@@ -798,12 +760,8 @@ public static class LobbyPlayerBindingApplier
         return dropdown.ComboItems[dropdown.SelectedIndex];
     }
 
-    private static IReadOnlyList<ComboItemViewModel> BuildSideItems(LobbyPlayerState playerState, ResourceResolver resources)
-        => BuildSideItems(playerState.SideEntries, resources);
-
     /// <summary>
-    /// Phase 5 P5-1：纯参数版本——直接吃 <see cref="IReadOnlyList{LobbySideEntry}"/>，
-    /// 不再依赖 <see cref="LobbyPlayerState"/>。供 Session-aware 路径复用。
+    /// 纯参数版本——直接吃 <see cref="IReadOnlyList{LobbySideEntry}"/>。
     /// </summary>
     private static IReadOnlyList<ComboItemViewModel> BuildSideItems(
         IReadOnlyList<LobbySideEntry> sideEntries,
@@ -829,10 +787,7 @@ public static class LobbyPlayerBindingApplier
         }).ToList();
     }
 
-    private static string[] BuildTeamItems(LobbyPlayerState playerState)
-        => BuildTeamItems(playerState.TeamNames);
-
-    /// <summary>Phase 5 P5-1：纯参数版本——直接吃 <see cref="IReadOnlyList{String}"/>。</summary>
+    /// <summary>纯参数版本——直接吃 <see cref="IReadOnlyList{String}"/>。</summary>
     private static string[] BuildTeamItems(IReadOnlyList<string> teamNames)
     {
         var items = new List<string> { "-" };
@@ -1053,22 +1008,20 @@ public static class LobbyPlayerBindingApplier
 }
 
 /// <summary>
-/// Phase 5 P5-1：UI 重入保护抽象——BindingApplier 在程序化写 UI 时临时启用此 shield，
+/// UI 重入保护抽象——BindingApplier 在程序化写 UI 时临时启用此 shield，
 /// 防止 UI SelectionChanged 事件回调把"程序化刷新"误判为"用户操作"。
-/// 默认实现包住 LobbyPlayerState.PlayerUpdatingInProgress（迁移期保留兼容）；
-/// 未来可用 Session.Revision + 订阅时缓存 tag 实现更强版本。
 /// </summary>
 internal interface IReentrancyShield
 {
+    bool IsEntered { get; }
     void Enter();
     void Exit();
 }
 
-/// <summary>包住 LobbyPlayerState.PlayerUpdatingInProgress 的兼容实现。</summary>
-internal sealed class LobbyPlayerStateShield : IReentrancyShield
+/// <summary>简单布尔重入盾（替代已删除的 PlayerUpdatingInProgress）。</summary>
+internal sealed class FlagReentrancyShield : IReentrancyShield
 {
-    private readonly LobbyPlayerState _state;
-    public LobbyPlayerStateShield(LobbyPlayerState state) { _state = state; }
-    public void Enter() => _state.PlayerUpdatingInProgress = true;
-    public void Exit() => _state.PlayerUpdatingInProgress = false;
+    public bool IsEntered { get; private set; }
+    public void Enter() => IsEntered = true;
+    public void Exit() => IsEntered = false;
 }

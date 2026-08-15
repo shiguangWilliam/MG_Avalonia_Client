@@ -4,11 +4,13 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using ClientCore;
+using ClientCore.Extensions;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Overlays;
 
-using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>Create-game dialog (XNA GameCreationWindow subset, programmatic fallback).</summary>
 public sealed class GameCreationOverlayContext
 {
@@ -34,6 +36,9 @@ public sealed class GameCreationOverlayContext
 
     public CnCNetTunnel? SelectedTunnel { get; set; }
 
+    /// <summary>True after the user clicks a tunnel row — stops auto-following TunnelSorter best.</summary>
+    public bool UserManuallySelectedTunnel { get; set; }
+
     internal List<Border> TunnelRows { get; init; } = [];
 }
 
@@ -56,26 +61,34 @@ public static class GameCreationOverlayBuilder
     private static readonly IBrush OverlayDimBrush = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0));
 
     public static (Control Root, GameCreationOverlayContext Context, Size PreferredSize) Build(
-        IReadOnlyList<CnCNetTunnel> tunnels)
+        IReadOnlyList<CnCNetTunnel> tunnels,
+        CnCNetTunnel? preferredTunnel = null)
     {
-        var roomName = CreateTextBox($"{ProgramConstants.PLAYERNAME}'s Game");
+        var roomName = CreateTextBox($"{AppState.Environment.PlayerName}'s Game");
         var maxPlayers = CreateComboBox();
         for (int i = 8; i > 1; i--)
             maxPlayers.Items.Add(i.ToString());
         maxPlayers.SelectedIndex = 0;
 
         var skillLevel = CreateComboBox();
-        string[] skillOptions = ClientConfiguration.Instance.SkillLevelOptions
+        string[] skillOptions = AppState.Configuration.Legacy.SkillLevelOptions
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (string option in skillOptions)
-            skillLevel.Items.Add(option);
-        skillLevel.SelectedIndex = Math.Clamp(ClientConfiguration.Instance.DefaultSkillLevelIndex, 0, Math.Max(0, skillOptions.Length - 1));
+        for (int i = 0; i < skillOptions.Length; i++)
+        {
+            string localized = skillOptions[i].L10N($"INI:ClientDefinitions:SkillLevel:{i}");
+            skillLevel.Items.Add(localized);
+        }
+
+        skillLevel.SelectedIndex = Math.Clamp(
+            AppState.Configuration.Legacy.DefaultSkillLevelIndex,
+            0,
+            Math.Max(0, skillOptions.Length - 1));
 
         var password = CreateTextBox(string.Empty);
         password.IsEnabled = false;
         var requiresPassword = new CheckBox
         {
-            Content = "Password protect this game",
+            Content = "Password protect this game".L10N("Client:Main:PasswordProtectGame"),
             Foreground = TitleBrush,
             FontSize = 12,
             IsChecked = false,
@@ -87,9 +100,9 @@ public static class GameCreationOverlayBuilder
             if (!enabled)
                 password.Text = string.Empty;
         };
-        var createButton = CreatePrimaryButton("Create Game");
-        var cancelButton = CreateSecondaryButton("Cancel");
-        var moreOptionsButton = CreateSecondaryButton("More options...");
+        var createButton = CreatePrimaryButton("Create Game".L10N("Client:Main:CreateGame"));
+        var cancelButton = CreateSecondaryButton("Cancel".L10N("Client:Main:ButtonCancel"));
+        var moreOptionsButton = CreateSecondaryButton("More options...".L10N("Client:Main:AdvancedOptions"));
         var tunnelSummary = new TextBlock
         {
             FontSize = 12,
@@ -111,12 +124,26 @@ public static class GameCreationOverlayBuilder
             MoreOptionsButton = moreOptionsButton,
         };
 
-        int defaultIndex = tunnels.ToList().FindIndex(t => t.Official);
-        if (defaultIndex < 0 && tunnels.Count > 0)
-            defaultIndex = 0;
+        // Prefer TunnelSorter best (lowest ping); fall back to first Official / first entry.
+        CnCNetTunnel? initial = preferredTunnel;
+        if (initial == null || !tunnels.Any(t => ReferenceEquals(t, initial)
+                || (t.Address.Equals(initial.Address, StringComparison.OrdinalIgnoreCase) && t.Port == initial.Port)))
+        {
+            int defaultIndex = tunnels.ToList().FindIndex(t => t.Official);
+            if (defaultIndex < 0 && tunnels.Count > 0)
+                defaultIndex = 0;
+            initial = defaultIndex >= 0 && defaultIndex < tunnels.Count ? tunnels[defaultIndex] : null;
+        }
+        else
+        {
+            // Resolve to the list instance so Tag/selection comparisons stay reference-stable.
+            initial = tunnels.First(t =>
+                ReferenceEquals(t, preferredTunnel)
+                || (t.Address.Equals(preferredTunnel!.Address, StringComparison.OrdinalIgnoreCase)
+                    && t.Port == preferredTunnel.Port));
+        }
 
-        if (defaultIndex >= 0 && defaultIndex < tunnels.Count)
-            context.SelectedTunnel = tunnels[defaultIndex];
+        context.SelectedTunnel = initial;
 
         Control tunnelPickerOverlay = CreateTunnelPickerOverlay(context, tunnels);
         context.TunnelPickerOverlay = tunnelPickerOverlay;
@@ -135,12 +162,14 @@ public static class GameCreationOverlayBuilder
             Spacing = 14,
             Children =
             {
-                CreateSectionTitle("Room settings"),
-                CreateField("Game room name", roomName),
-                CreateField("Maximum players", maxPlayers),
-                CreateField("Skill level", skillLevel),
+                CreateSectionTitle("Room settings".L10N("Client:Main:RoomSettings")),
+                CreateField("Game room name:".L10N("Client:Main:GameRoomName"), roomName),
+                CreateField("Maximum number of players:".L10N("Client:Main:GameMaxPlayerCount"), maxPlayers),
+                CreateField(
+                    "Select preferred skill level of players:".L10N("Client:Main:SelectSkillLevel"),
+                    skillLevel),
                 CreatePasswordSection(requiresPassword, password),
-                CreateSectionTitle("Tunnel server"),
+                CreateSectionTitle("Tunnel server:".L10N("Client:Main:TunnelServer")),
                 CreateTunnelSummaryRow(tunnelSummary, moreOptionsButton),
             },
         };
@@ -222,7 +251,7 @@ public static class GameCreationOverlayBuilder
         string roomName = context.RoomNameBox.Text?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(roomName))
         {
-            message = "Game room name is required.";
+            message = "Game room name is required.".L10N("Client:Main:GameRoomNameRequired");
             return null;
         }
 
@@ -231,7 +260,7 @@ public static class GameCreationOverlayBuilder
 
         if (context.SelectedTunnel == null)
         {
-            message = "Select a tunnel server.";
+            message = "Select a tunnel server.".L10N("Client:Main:SelectTunnelServerPrompt");
             return null;
         }
 
@@ -239,7 +268,8 @@ public static class GameCreationOverlayBuilder
         string password = (context.PasswordBox.Text ?? string.Empty).Trim();
         if (requiresPassword && string.IsNullOrWhiteSpace(password))
         {
-            message = "Enter a password or disable password protection.";
+            message = "Enter a password or disable password protection."
+                .L10N("Client:Main:PasswordRequiredOrDisable");
             return null;
         }
 
@@ -258,7 +288,7 @@ public static class GameCreationOverlayBuilder
     {
         var caption = new TextBlock
         {
-            Text = "Password",
+            Text = "Password (leave blank for none):".L10N("Client:Main:PasswordTextBlankForNone"),
             FontSize = 12,
             Foreground = MutedTextBrush,
             Margin = new Thickness(0, 0, 0, 6),
@@ -295,7 +325,8 @@ public static class GameCreationOverlayBuilder
         }
 
         if (tunnels.Count == 0)
-            tunnelRowsPanel.Children.Add(CreateHintLabel("No tunnel servers available."));
+            tunnelRowsPanel.Children.Add(CreateHintLabel(
+                "No tunnel servers available.".L10N("Client:Main:NoTunnelServers")));
 
         var scroll = new ScrollViewer
         {
@@ -304,9 +335,9 @@ public static class GameCreationOverlayBuilder
             Content = tunnelRowsPanel,
         };
 
-        var confirmButton = CreatePrimaryButton("Confirm");
+        var confirmButton = CreatePrimaryButton("Confirm".L10N("Client:Main:ButtonConfirm"));
         confirmButton.MinWidth = 110;
-        var cancelButton = CreateSecondaryButton("Cancel");
+        var cancelButton = CreateSecondaryButton("Cancel".L10N("Client:Main:ButtonCancel"));
         cancelButton.MinWidth = 90;
 
         var footer = new Grid
@@ -327,7 +358,7 @@ public static class GameCreationOverlayBuilder
 
         var title = new TextBlock
         {
-            Text = "Select tunnel server",
+            Text = "Select tunnel server:".L10N("Client:Main:SelectTunnelServer"),
             FontSize = 16,
             FontWeight = FontWeight.Bold,
             Foreground = TitleBrush,
@@ -404,10 +435,23 @@ public static class GameCreationOverlayBuilder
 
     private static void UpdateTunnelSummary(GameCreationOverlayContext context)
     {
-        context.TunnelSummaryText.Text = context.SelectedTunnel == null
-            ? "No tunnel server selected ??open More options to choose one."
-            : $"{context.SelectedTunnel.Name}  ({context.SelectedTunnel.Address}:{context.SelectedTunnel.Port})";
+        if (context.SelectedTunnel == null)
+        {
+            context.TunnelSummaryText.Text =
+                "No tunnel server selected — open More options to choose one."
+                    .L10N("Client:Main:NoTunnelSelectedHint");
+            return;
+        }
+
+        string ping = FormatPing(context.SelectedTunnel.PingInMs);
+        context.TunnelSummaryText.Text =
+            $"{context.SelectedTunnel.Name}  ({context.SelectedTunnel.Address}:{context.SelectedTunnel.Port})  ·  {ping}";
     }
+
+    private static string FormatPing(int pingInMs)
+        => pingInMs >= 0
+            ? $"{pingInMs} ms"
+            : "Unknown".L10N("Client:Main:UnknownPing");
 
     private static Border CreateTunnelRow(GameCreationOverlayContext context, CnCNetTunnel tunnel, bool selected)
     {
@@ -418,7 +462,9 @@ public static class GameCreationOverlayBuilder
             Padding = new Thickness(6, 2),
             Child = new TextBlock
             {
-                Text = tunnel.Official ? "Official" : "Community",
+                Text = tunnel.Official
+                    ? "Official".L10N("Client:Main:OfficialHeader")
+                    : "Community".L10N("Client:Main:CommunityTunnel"),
                 FontSize = 10,
                 Foreground = Brushes.White,
             },
@@ -434,6 +480,16 @@ public static class GameCreationOverlayBuilder
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
 
+        var pingText = new TextBlock
+        {
+            Text = FormatPing(tunnel.PingInMs),
+            FontSize = 11,
+            Foreground = MutedTextBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 64,
+        };
+
         var addressText = new TextBlock
         {
             Text = $"{tunnel.Address}:{tunnel.Port}",
@@ -445,13 +501,15 @@ public static class GameCreationOverlayBuilder
 
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,12,*,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("Auto,12,*,Auto,12,Auto"),
         };
         Grid.SetColumn(badge, 0);
         Grid.SetColumn(nameText, 2);
-        Grid.SetColumn(addressText, 3);
+        Grid.SetColumn(pingText, 3);
+        Grid.SetColumn(addressText, 5);
         grid.Children.Add(badge);
         grid.Children.Add(nameText);
+        grid.Children.Add(pingText);
         grid.Children.Add(addressText);
 
         var row = new Border
@@ -476,6 +534,7 @@ public static class GameCreationOverlayBuilder
 
     private static void SelectTunnelRow(GameCreationOverlayContext context, Border selectedRow, CnCNetTunnel tunnel)
     {
+        context.UserManuallySelectedTunnel = true;
         context.SelectedTunnel = tunnel;
         foreach (Border row in context.TunnelRows)
         {
@@ -488,15 +547,61 @@ public static class GameCreationOverlayBuilder
         UpdateTunnelSummary(context);
     }
 
+    /// <summary>Refresh ping labels after ICMP results land (TunnelSorter / session StateChanged).</summary>
+    public static void RefreshTunnelPings(GameCreationOverlayContext context)
+    {
+        UpdateTunnelSummary(context);
+        foreach (Border row in context.TunnelRows)
+        {
+            if (row.Tag is not CnCNetTunnel tunnel || row.Child is not Grid grid)
+                continue;
+
+            foreach (Control child in grid.Children)
+            {
+                if (child is TextBlock tb && Grid.GetColumn(tb) == 3)
+                    tb.Text = FormatPing(tunnel.PingInMs);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Follow <see cref="ClientAvalonia.CnCNet.Tunnels.TunnelSorter"/> best while the user has not
+    /// manually picked a row.
+    /// </summary>
+    public static void ApplyPreferredTunnel(GameCreationOverlayContext context, CnCNetTunnel preferred)
+    {
+        if (context.UserManuallySelectedTunnel || preferred == null)
+            return;
+
+        Border? match = context.TunnelRows.FirstOrDefault(row =>
+            row.Tag is CnCNetTunnel t
+            && t.Address.Equals(preferred.Address, StringComparison.OrdinalIgnoreCase)
+            && t.Port == preferred.Port);
+
+        if (match == null || match.Tag is not CnCNetTunnel tunnel)
+            return;
+
+        context.SelectedTunnel = tunnel;
+        foreach (Border row in context.TunnelRows)
+        {
+            bool isSelected = ReferenceEquals(row, match);
+            row.Background = isSelected ? RowSelectedBg : RowNormalBg;
+            row.BorderBrush = isSelected ? AccentBrush : BorderBrush;
+            row.BoxShadow = isSelected ? BoxShadows.Parse("0 0 12 0 #60FF8C32") : default;
+        }
+
+        UpdateTunnelSummary(context);
+    }
+
     private static Grid CreateTunnelHeader()
     {
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,12,*,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("Auto,12,*,Auto,12,Auto"),
             Margin = new Thickness(0, 0, 0, 4),
         };
 
-        void AddHeader(string text, int column)
+        void AddHeader(string text, int column, HorizontalAlignment align = HorizontalAlignment.Left)
         {
             var tb = new TextBlock
             {
@@ -504,29 +609,22 @@ public static class GameCreationOverlayBuilder
                 FontSize = 10,
                 Foreground = MutedTextBrush,
                 FontWeight = FontWeight.Bold,
+                HorizontalAlignment = align,
             };
             Grid.SetColumn(tb, column);
             grid.Children.Add(tb);
         }
 
-        AddHeader("TYPE", 0);
-        AddHeader("SERVER", 2);
-        var addr = new TextBlock
-        {
-            Text = "ADDRESS",
-            FontSize = 10,
-            Foreground = MutedTextBrush,
-            FontWeight = FontWeight.Bold,
-            HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        Grid.SetColumn(addr, 3);
-        grid.Children.Add(addr);
+        AddHeader("Official".L10N("Client:Main:OfficialHeader"), 0);
+        AddHeader("Name".L10N("Client:Main:NameHeader"), 2);
+        AddHeader("Ping".L10N("Client:Main:PingHeader"), 3, HorizontalAlignment.Right);
+        AddHeader("Address".L10N("Client:Main:AddressHeader"), 5, HorizontalAlignment.Right);
         return grid;
     }
 
     private static TextBlock CreateHeader() => new()
     {
-        Text = "Create Game Room",
+        Text = "Create Game Room".L10N("Client:Main:CreateGameRoom"),
         FontSize = 18,
         FontWeight = FontWeight.Bold,
         Foreground = TitleBrush,

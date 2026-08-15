@@ -142,6 +142,8 @@ public sealed class IniBehaviorApplierCatalogTests
         public bool TryLaunchSkirmish(out string message) { message = ""; return false; }
         public bool TryLaunchCampaign(out string message) { message = ""; return false; }
         public bool TryLaunchCnCNetGame(out string message) { message = ""; return false; }
+        public bool TryLaunchLanGame(out string message) { message = ""; return false; }
+        public void OpenLoadGameOverlay() { }
         public void RefreshCnCNetGameListing() { }
         public void RefreshCnCNetGameRoomPlayers() { }
         public void TryJoinSelectedCnCNetGame() { }

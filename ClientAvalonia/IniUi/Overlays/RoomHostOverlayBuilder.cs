@@ -5,6 +5,7 @@ using Avalonia.Media;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Overlays;
 
@@ -99,7 +100,7 @@ public static class RoomHostOverlayBuilder
         maxPlayers.SelectedIndex = Math.Clamp(8 - Math.Max(2, room.MaxPlayers), 0, maxPlayers.Items.Count - 1);
 
         var skill = new ComboBox { Background = FieldBg, Foreground = TitleBrush };
-        string[] skillOptions = ClientConfiguration.Instance.SkillLevelOptions
+        string[] skillOptions = AppState.Configuration.Legacy.SkillLevelOptions
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (string option in skillOptions)
             skill.Items.Add(option);

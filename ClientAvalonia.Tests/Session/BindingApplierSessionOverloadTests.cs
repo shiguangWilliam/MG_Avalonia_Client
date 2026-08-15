@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
 using ClientAvalonia.GlobalState.Environment;
@@ -104,22 +105,38 @@ public sealed class MultiplayerSlotCoordinatorSessionOverloadTests
         var dd = MakeDropDown();
         Action act = () => MultiplayerSlotCoordinator.HandleHostSlotEdit(
             session: null!, slotIndex: 0, previous: null!, ddName: dd,
-            allowHostPlayerOptions: true, hostPlayerName: "host");
+            allowHostPlayerOptions: true, hostPlayerName: "host",
+            aiNames: Array.Empty<string>());
 
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
-    public void HandleHostSlotEdit_SessionOverload_NonConcrete_Returns_Silently()
+    public void HandleHostSlotEdit_SessionOverload_NullAiNames_Throws()
     {
-        // session 不是 CnCNetGameRoomSession 时直接 return，不抛
         var mockSession = new Mock<ICnCNetGameSession>();
         var dd = MakeDropDown();
 
         Action act = () => MultiplayerSlotCoordinator.HandleHostSlotEdit(
             mockSession.Object, slotIndex: 0, previous: null!, ddName: dd,
-            allowHostPlayerOptions: true, hostPlayerName: "host");
+            allowHostPlayerOptions: true, hostPlayerName: "host",
+            aiNames: null!);
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void HandleHostSlotEdit_SessionOverload_DisallowHost_Noops()
+    {
+        var mockSession = new Mock<ICnCNetGameSession>();
+        var dd = MakeDropDown();
+
+        Action act = () => MultiplayerSlotCoordinator.HandleHostSlotEdit(
+            mockSession.Object, slotIndex: 0, previous: null!, ddName: dd,
+            allowHostPlayerOptions: false, hostPlayerName: "host",
+            aiNames: Array.Empty<string>());
 
         act.Should().NotThrow();
+        mockSession.Verify(s => s.BroadcastPlayerOptionsFromSlots(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
 }

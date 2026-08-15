@@ -4,6 +4,7 @@ using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -284,7 +285,7 @@ public static class GameAssetResolver
         try
         {
             string full = Path.Combine(
-                ProgramConstants.GamePath,
+                AppState.Environment.GamePath,
                 gameRelativePath.Replace('/', Path.DirectorySeparatorChar));
             return File.Exists(full);
         }

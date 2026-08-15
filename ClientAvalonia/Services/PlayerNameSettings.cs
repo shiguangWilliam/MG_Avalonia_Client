@@ -1,5 +1,6 @@
 using ClientCore;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -29,7 +30,7 @@ public static class PlayerNameSettings
         if (!string.IsNullOrEmpty(saved))
             return saved;
 
-        string current = Sanitize(ProgramConstants.PLAYERNAME);
+        string current = Sanitize(AppState.Environment.PlayerName);
         return string.IsNullOrEmpty(current) || current.Equals("No name", StringComparison.OrdinalIgnoreCase)
             ? string.Empty
             : current;

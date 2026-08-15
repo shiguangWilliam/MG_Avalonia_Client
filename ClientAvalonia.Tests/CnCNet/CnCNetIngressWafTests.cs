@@ -76,6 +76,73 @@ public sealed class CnCNetIngressWafTests
     }
 
     [Fact]
+    public void Normal_Game_Broadcast_Cadence_Does_Not_Trip_Burst_Rule()
+    {
+        // DX/Avalonia hosts refresh GAME CTCP about every 30s; option changes can accelerate
+        // briefly to ~10s. Old rule (4 / 20s) false-positived on legitimate rooms / hang farms
+        // that share that cadence.
+        var waf = CreateWaf();
+        var game = new WafGameBroadcastFields
+        {
+            Revision = "R13",
+            FieldCount = 13,
+            ChannelName = "#legit-room",
+            RoomName = "正常房间",
+            TunnelHost = "1.2.3.4",
+            TunnelPort = 50000,
+            Players = ["Alpha"],
+        };
+
+        WafDecision? last = null;
+        for (int i = 0; i < 6; i++)
+        {
+            last = waf.Evaluate(new WafIngressEvent
+            {
+                Kind = WafIngressKind.GameBroadcast,
+                Surface = WafSurface.Protocol,
+                SenderNick = "Alpha",
+                Game = game,
+            });
+        }
+
+        last.Should().NotBeNull();
+        last!.MatchedRuleIds.Should().NotContain("proto.game.burst");
+        last.Severity.Should().Be(WafSeverity.Allow);
+    }
+
+    [Fact]
+    public void Default_Rules_Omit_Game_Burst_Even_Under_Flood()
+    {
+        // Frequency/burst scoring removed from rules.default.json — cadence alone is not scored.
+        var waf = CreateWaf();
+        var game = new WafGameBroadcastFields
+        {
+            Revision = "R13",
+            FieldCount = 13,
+            ChannelName = "#flood-room",
+            RoomName = "刷屏房",
+            TunnelHost = "1.2.3.4",
+            TunnelPort = 50000,
+            Players = ["FloodBot"],
+        };
+
+        WafDecision? last = null;
+        for (int i = 0; i < 12; i++)
+        {
+            last = waf.Evaluate(new WafIngressEvent
+            {
+                Kind = WafIngressKind.GameBroadcast,
+                Surface = WafSurface.Protocol,
+                SenderNick = "FloodBot",
+                Game = game,
+            });
+        }
+
+        last.Should().NotBeNull();
+        last!.MatchedRuleIds.Should().NotContain("proto.game.burst");
+    }
+
+    [Fact]
     public void R8_And_FakePlayers_Accumulate_Score()
     {
         var waf = CreateWaf();

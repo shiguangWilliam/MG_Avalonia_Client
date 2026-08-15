@@ -1,6 +1,7 @@
 using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -14,7 +15,7 @@ public static class MultiplayerColorCatalog
         if (_cache != null)
             return _cache;
 
-        string path = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        string path = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, ClientConfiguration.GAME_OPTIONS);
         var ini = new IniFile(path);
         List<string>? keys = ini.GetSectionKeys("MPColors");
         if (keys == null || keys.Count == 0)
@@ -53,7 +54,7 @@ public static class MultiplayerColorCatalog
     /// <summary>RandomColor from GameOptions.ini [General] (XNA GameLobbyBase color dropdown index 0).</summary>
     public static (byte R, byte G, byte B) LoadRandomColorRgb()
     {
-        string path = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        string path = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, ClientConfiguration.GAME_OPTIONS);
         var ini = new IniFile(path);
         string[] values = ini.GetStringListValue("General", "RandomColor", "255,255,255");
         if (values.Length < 3)

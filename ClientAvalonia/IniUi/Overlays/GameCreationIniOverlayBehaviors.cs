@@ -5,6 +5,7 @@ using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientCore;
 using System.Linq;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Overlays;
 
@@ -16,7 +17,64 @@ public static class GameCreationIniOverlayBehaviors
     {
         registry.Register("btnCreateGame", _ => TryCreate(host, root));
         registry.Register("btnNewGame", _ => TryCreate(host, root));
+        registry.Register("btnLoadMPGame", _ => TryCreateLoaded(host, root));
         registry.Register("btnCancel", _ => host.CloseGameCreationOverlay());
+    }
+
+    private static void TryCreateLoaded(IUiNavigationHost host, UiNodeViewModel root)
+    {
+        ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
+        if (cncnet.IsGameRoomJoinPending || cncnet.ActiveGameRoom != null)
+        {
+            host.ShowStatus("Already in a game room.");
+            return;
+        }
+
+        if (!MultiplayerLoadGameSupport.AllowHostingLoadedGame())
+        {
+            host.ShowStatus("Cannot load MP game â€” spawnSG.ini missing or you were not the host.");
+            return;
+        }
+
+        if (cncnet.Tunnels.Count == 0)
+        {
+            host.ShowStatus("No NAT tunnels available.");
+            return;
+        }
+
+        string roomName = ReadText(root, "tbGameName", "tbRoomName") ?? $"{AppState.Environment.PlayerName}'s Game";
+        int skillLevel = ReadComboIndex(root, "ddSkillLevel");
+        int maxPlayers = MultiplayerLoadGameSupport.ReadPlayerCount();
+        if (maxPlayers <= 0)
+            maxPlayers = 2;
+
+        CnCNetTunnel tunnel = cncnet.TunnelSorter.TryPeekBest()
+            ?? cncnet.Tunnels.FirstOrDefault(t => t.Official)
+            ?? cncnet.Tunnels[0];
+
+        string password = MultiplayerLoadGameSupport.ComputeLoadedGamePassword();
+        var request = new CnCNetGameCreationRequest
+        {
+            RoomName = roomName.Trim(),
+            MaxPlayers = maxPlayers,
+            RequiresPassword = true,
+            Password = password,
+            Tunnel = tunnel,
+            SkillLevel = skillLevel,
+            IsLoadedGame = true,
+        };
+
+        host.CloseGameCreationOverlay();
+
+        if (!cncnet.TryCreateGame(request, out string message))
+        {
+            host.ShowStatus(message);
+            return;
+        }
+
+        host.EnterCnCNetGameLobbyConnecting();
+        host.NavigateTo("CnCNetGameLoadingLobby");
+        host.ShowStatus(message);
     }
 
     private static void TryCreate(IUiNavigationHost host, UiNodeViewModel root)
@@ -24,7 +82,7 @@ public static class GameCreationIniOverlayBehaviors
         ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
         if (cncnet.IsGameRoomJoinPending)
         {
-            host.ShowStatus("Joining game room — please wait...");
+            host.ShowStatus("Joining game room - please wait...");
             return;
         }
 
@@ -36,7 +94,7 @@ public static class GameCreationIniOverlayBehaviors
             return;
         }
 
-        string roomName = ReadText(root, "tbGameName", "tbRoomName") ?? $"{ProgramConstants.PLAYERNAME}'s Game";
+        string roomName = ReadText(root, "tbGameName", "tbRoomName") ?? $"{AppState.Environment.PlayerName}'s Game";
         bool requiresPassword = ReadCheckBox(root, "chkRequiresPassword", "chkPasswordProtect");
         string password = (ReadText(root, "tbPassword") ?? string.Empty).Trim();
         if (!requiresPassword && !string.IsNullOrWhiteSpace(password))
@@ -55,7 +113,9 @@ public static class GameCreationIniOverlayBehaviors
             return;
         }
 
-        CnCNetTunnel tunnel = cncnet.Tunnels.FirstOrDefault(t => t.Official)
+        // Prefer TunnelSorter min-heap best (lowest ping); Official only as cold-start fallback.
+        CnCNetTunnel tunnel = cncnet.TunnelSorter.TryPeekBest()
+            ?? cncnet.Tunnels.FirstOrDefault(t => t.Official)
             ?? cncnet.Tunnels[0];
 
         var request = new CnCNetGameCreationRequest

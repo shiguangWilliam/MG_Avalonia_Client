@@ -29,9 +29,16 @@ public sealed class ChangeMapAction : LobbyAction
             ? ctx.Game.PlayerSlots[0].Name
             : "Player";
 
-        IReadOnlyList<string> aiNames = ctx.Game is Session.SkirmishSession skirmish
-            ? skirmish.Player.AiNames
-            : [];
+        IReadOnlyList<string> aiNames = [];
+        try
+        {
+            aiNames = GlobalState.Environment.EnvironmentServices
+                .Resolve<Services.ILobbyCatalogService>().AiNames;
+        }
+        catch (InvalidOperationException)
+        {
+            // Tests may not register EnvironmentServices.
+        }
 
         IMultiplayerColorCatalog colors =
             GlobalState.Environment.EnvironmentServices.Resolve<IMultiplayerColorCatalog>();

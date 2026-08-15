@@ -1,6 +1,7 @@
 using ClientCore;
 using System;
 using System.Collections.Generic;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -104,7 +105,7 @@ public sealed class CnCNetGameBroadcastDialect
     /// </summary>
     public WireShape ResolveEmitShape(string? broadcastChannel)
     {
-        string forced = ClientConfiguration.Instance.CnCNetProtocolRevision;
+        string forced = AppState.Configuration.Legacy.CnCNetProtocolRevision;
         if (!string.IsNullOrWhiteSpace(forced))
         {
             return forced.Trim().Equals(LegacyRevision, StringComparison.OrdinalIgnoreCase)

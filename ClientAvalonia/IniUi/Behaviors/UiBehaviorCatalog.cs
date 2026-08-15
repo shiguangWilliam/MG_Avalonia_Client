@@ -21,6 +21,9 @@ public static class UiBehaviorCatalog
             case "MultiplayerGameLobby":
             case "CnCNetGameLobby":
             case "LANGameLobby":
+            case "CnCNetGameLoadingLobby":
+            case "LANGameLoadingLobby":
+            case "GameLoadingLobby":
                 LobbyBehaviors.Register(registry, host, windowName);
                 break;
             case "OptionsWindow":

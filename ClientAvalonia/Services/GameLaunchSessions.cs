@@ -21,19 +21,7 @@ public sealed class SkirmishLaunchSession(SkirmishLaunchRequest request) : IGame
 
     public void PrepareSpawnFiles()
     {
-        // Phase 3 P3-2：优先走 Session-aware 入口（Slots + SideCount）。
-        IReadOnlyList<IPlayerSlot>? slots = request.Slots;
-        if (slots == null)
-        {
-#pragma warning disable CS0618 // 兼容期：调用方未升级时退回 Players。
-            LobbyPlayerState? legacy = request.Players;
-            int sideCount = legacy?.SideNames.Count ?? 0;
-            slots = legacy?.Slots ?? Array.Empty<LobbyPlayerSlot>();
-            SkirmishSpawnWriter.Write(request.Map, request.GameMode, slots, sideCount, request.LobbyRoot);
-            return;
-#pragma warning restore CS0618
-        }
-
+        IReadOnlyList<IPlayerSlot> slots = request.Slots ?? Array.Empty<LobbyPlayerSlot>();
         SkirmishSpawnWriter.Write(request.Map, request.GameMode, slots, request.SideCount, request.LobbyRoot);
     }
 }
@@ -51,6 +39,7 @@ public sealed class MultiplayerLaunchSession : IGameLaunchSession
 {
     private readonly SkirmishLaunchRequest _skirmish;
     private readonly CnCNetStartGameInfo? _cncNet;
+    private readonly LanStartGameInfo? _lan;
     private readonly IReadOnlyList<CnCNetGameRoomPlayer>? _roomPlayers;
     private readonly CnCNetGameOptionsState? _gameOptions;
 
@@ -58,27 +47,24 @@ public sealed class MultiplayerLaunchSession : IGameLaunchSession
         SkirmishLaunchRequest skirmish,
         CnCNetStartGameInfo? cncNet = null,
         IReadOnlyList<CnCNetGameRoomPlayer>? roomPlayers = null,
-        CnCNetGameOptionsState? gameOptions = null)
+        CnCNetGameOptionsState? gameOptions = null,
+        LanStartGameInfo? lan = null)
     {
         _skirmish = skirmish;
         _cncNet = cncNet;
         _roomPlayers = roomPlayers;
         _gameOptions = gameOptions;
+        _lan = lan;
     }
 
-    public string LaunchModeLabel => _cncNet != null ? "CnCNetMultiplayer" : "LanMultiplayer";
+    public string LaunchModeLabel
+        => _cncNet != null ? "CnCNetMultiplayer"
+            : _lan != null ? "LanMultiplayer"
+            : "Multiplayer";
 
     public void PrepareSpawnFiles()
     {
-        // Phase 3 P3-2：优先走 Session-aware 入口（Slots）；否则退回 Players（legacy）。
-        IReadOnlyList<IPlayerSlot>? slots = _skirmish.Slots;
-        bool useLegacyPlayers = slots == null;
-        if (useLegacyPlayers)
-        {
-#pragma warning disable CS0618
-            slots = _skirmish.Players?.Slots ?? Array.Empty<LobbyPlayerSlot>();
-#pragma warning restore CS0618
-        }
+        IReadOnlyList<IPlayerSlot> slots = _skirmish.Slots ?? Array.Empty<LobbyPlayerSlot>();
 
         if (_cncNet != null)
         {
@@ -93,7 +79,18 @@ public sealed class MultiplayerLaunchSession : IGameLaunchSession
             return;
         }
 
-        // LAN / generic multiplayer until dedicated LAN spawn additions exist.
+        if (_lan != null)
+        {
+            LanMultiplayerSpawnWriter.Write(
+                _skirmish.Map,
+                _skirmish.GameMode,
+                _lan,
+                slots,
+                _skirmish.LobbyRoot,
+                _skirmish.SideCount);
+            return;
+        }
+
         SkirmishSpawnWriter.Write(_skirmish.Map, _skirmish.GameMode, slots, _skirmish.SideCount, _skirmish.LobbyRoot);
     }
 }

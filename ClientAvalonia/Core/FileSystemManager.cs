@@ -1,11 +1,12 @@
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
 /// <summary>
 /// Resolves install and user-data paths. Install root prefers the Windows registry
-/// InstallPath value, then ProgramConstants.GamePath.
+/// InstallPath value, then AppState.Environment.GamePath.
 /// </summary>
 public sealed class FileSystemManager
 {
@@ -43,8 +44,8 @@ public sealed class FileSystemManager
         if (!string.IsNullOrWhiteSpace(fromRegistry) && Directory.Exists(fromRegistry))
             return fromRegistry;
 
-        if (ClientCoreBootstrap.IsInitialized && !string.IsNullOrWhiteSpace(ProgramConstants.GamePath))
-            return ProgramConstants.GamePath;
+        if (ClientCoreBootstrap.IsInitialized && !string.IsNullOrWhiteSpace(AppState.Environment.GamePath))
+            return AppState.Environment.GamePath;
 
         return Directory.GetCurrentDirectory();
     }

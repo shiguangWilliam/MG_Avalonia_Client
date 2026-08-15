@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using ClientAvalonia.CnCNet;
@@ -13,15 +13,7 @@ using Xunit;
 namespace ClientAvalonia.Tests.Session;
 
 /// <summary>
-/// Phase 2 P2-1 / P2-3 / P2-5 生产迁移的新 API 单测。
-///
-/// 覆盖：
-/// <list type="bullet">
-/// <item><see cref="LobbyPlayerState.SyncFromSlots"/>：Session → LobbyState 投影</item>
-/// <item><see cref="MultiplayerSlotCoordinator.HandleHostOptionsEdit(ICnCNetGameSession, string, IReadOnlyList{string})"/>
-///   + <see cref="MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(ICnCNetGameSession, int)"/>：Session-aware 重载</item>
-/// <item><see cref="LobbySessionState"/> ↔ <see cref="LobbyPlayerState"/> Owner 转发的"双份真相消除"</item>
-/// </list>
+/// Phase 2 / Phase 6：Session 槽位真相源 + Coordinator Session-aware API。
 /// </summary>
 public sealed class Phase2ProductionMigrationTests
 {
@@ -41,106 +33,68 @@ public sealed class Phase2ProductionMigrationTests
     }
 
     [Fact]
-    public void SyncFromSlots_Projects_Session_Slots_Into_LobbyState()
+    public void Session_PlayerSlots_Are_Mutable_Source_Of_Truth()
     {
-        // Phase 2 P2-5：LobbyPlayerState.SyncFromSlots 是 Session → UI 绑定数组的投影。
-        var state = new LobbyPlayerState();
         var session = new HostFakeSession();
         session.SetSlot(0, "Alice", isAi: false, isHumanLocal: true, side: 2, color: 3, team: 1, start: 4);
         session.SetSlot(1, "EasyAI", isAi: true, aiLevel: 0);
 
-        state.SyncFromSlots(session.PlayerSlots);
-
-        state.Slots[0].Name.Should().Be("Alice");
-        state.Slots[0].SideIndex.Should().Be(2);
-        state.Slots[0].ColorIndex.Should().Be(3);
-        state.Slots[0].IsHumanLocal.Should().BeTrue();
-        state.Slots[1].Name.Should().Be("EasyAI");
-        state.Slots[1].IsAi.Should().BeTrue();
-        state.Slots[1].AiLevel.Should().Be(0);
+        session.PlayerSlots[0].Name.Should().Be("Alice");
+        session.PlayerSlots[0].SideIndex.Should().Be(2);
+        session.PlayerSlots[0].ColorIndex.Should().Be(3);
+        session.PlayerSlots[0].IsHumanLocal.Should().BeTrue();
+        session.PlayerSlots[1].Name.Should().Be("EasyAI");
+        session.PlayerSlots[1].IsAi.Should().BeTrue();
+        session.PlayerSlots[1].AiLevel.Should().Be(0);
     }
 
     [Fact]
-    public void SyncFromSlots_Null_Source_Throws()
+    public void SkirmishSession_Owns_Private_Slots()
     {
-        var state = new LobbyPlayerState();
-        Action act = () => state.SyncFromSlots(null!);
-        act.Should().Throw<ArgumentNullException>();
+        var session = new SkirmishSession();
+        session.Slots[0].Name = "Local";
+        session.PlayerSlots[0].Name.Should().Be("Local");
+        ReferenceEquals(session.Slots, session.PlayerSlots).Should().BeTrue();
     }
 
     [Fact]
-    public void SyncFromSlots_Truncates_And_Clears_When_Source_Shorter()
+    public void LobbySessionState_UIMode_RoundTrips()
     {
-        var state = new LobbyPlayerState();
-        state.Slots[0].Name = "Stale";
-        var session = new HostFakeSession(); // 默认所有槽位空
-
-        state.SyncFromSlots(session.PlayerSlots);
-
-        state.Slots[0].IsOccupied.Should().BeFalse("短源应清空目标槽位");
-    }
-
-    [Fact]
-    public void LobbySessionState_OwnerBackref_Keeps_UIMode_Synchronized()
-    {
-        // Phase 2 P2-1：LobbySessionState ↔ LobbyPlayerState 双向转发，消除双份真相。
         var session = new LobbySessionState();
-
         session.UIMode = LobbyPlayerMode.Multiplayer;
-        session.PlayerState.Mode.Should().Be(LobbyPlayerMode.Multiplayer, "写 owner 应转发到 PlayerState");
-
-        session.PlayerState.Mode = LobbyPlayerMode.Skirmish;
-        session.UIMode.Should().Be(LobbyPlayerMode.Skirmish, "写 PlayerState.Mode 应转发回 owner");
+        session.UIMode.Should().Be(LobbyPlayerMode.Multiplayer);
+        session.UIMode = LobbyPlayerMode.Skirmish;
+        session.UIMode.Should().Be(LobbyPlayerMode.Skirmish);
     }
 
     [Fact]
-    public void LobbySessionState_OwnerBackref_Keeps_AllowHostPlayerOptions_Synchronized()
+    public void LobbySessionState_AllowHostPlayerOptions_RoundTrips()
     {
-        var session = new LobbySessionState();
-
-        session.AllowHostPlayerOptions = false;
-        session.PlayerState.AllowHostPlayerOptions.Should().BeFalse();
-
-        session.PlayerState.AllowHostPlayerOptions = true;
+        var session = new LobbySessionState { AllowHostPlayerOptions = false };
+        session.AllowHostPlayerOptions.Should().BeFalse();
+        session.AllowHostPlayerOptions = true;
         session.AllowHostPlayerOptions.Should().BeTrue();
     }
 
     [Fact]
-    public void LobbySessionState_OwnerBackref_Keeps_LocalPlayerName_Synchronized()
+    public void LobbySessionState_LocalPlayerName_RoundTrips()
     {
-        var session = new LobbySessionState();
-
-        session.LocalPlayerName = "Host";
-        session.PlayerState.LocalPlayerName.Should().Be("Host");
-
-        session.PlayerState.LocalPlayerName = "Joiner";
+        var session = new LobbySessionState { LocalPlayerName = "Host" };
+        session.LocalPlayerName.Should().Be("Host");
+        session.LocalPlayerName = "Joiner";
         session.LocalPlayerName.Should().Be("Joiner");
-    }
-
-    [Fact]
-    public void LobbySessionState_Standalone_LobbyPlayerState_Still_Works()
-    {
-        // Owner == null（独立 new 的 LobbyPlayerState，比如老测试）应仍按本地字段存储。
-        var standalone = new LobbyPlayerState();
-        standalone.Mode = LobbyPlayerMode.Multiplayer;
-        standalone.Mode.Should().Be(LobbyPlayerMode.Multiplayer);
-        standalone.LocalPlayerName = "X";
-        standalone.LocalPlayerName.Should().Be("X");
     }
 
     [Fact]
     public void HandleHostOptionsEdit_SessionOverload_Broadcasts_FromSlots()
     {
-        // Phase 2 P2-3：Session-aware 重载走 BroadcastPlayerOptionsFromSlots，不再依赖 LobbyPlayerState。
         var session = NewHostSession("Alice");
         session.InitHostSlots("Alice");
-        // 房主改自己 side=2
         session.SlotSink.WriteSlot(0, new SlotFieldUpdate { SideIndex = 2, ColorIndex = 1 });
 
-        // 因为 BroadcastPlayerOptionsFromSlots 需要 _connection 才能 SendCtcp，本测只验证 Revision bump。
         long before = session.Revision;
         MultiplayerSlotCoordinator.HandleHostOptionsEdit(session, "Alice", new[] { "Easy", "Medium" });
-        session.Revision.Should().BeGreaterThan(before, "广播后必须 BumpRevision");
+        session.Revision.Should().BeGreaterThan(before);
     }
 
     [Fact]
@@ -162,10 +116,9 @@ public sealed class Phase2ProductionMigrationTests
     public void HandleJoinerOptionsEdit_SessionOverload_OutOfRangeSlot_Noops()
     {
         var session = NewHostSession("Alice");
-        // 越界 index 不应抛
-        var act = () => MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(session, -1);
+        Action act = () => MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(session, -1);
         act.Should().NotThrow();
-        var act2 = () => MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(session, 999);
+        Action act2 = () => MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(session, 999);
         act2.Should().NotThrow();
     }
 
@@ -174,17 +127,14 @@ public sealed class Phase2ProductionMigrationTests
     {
         var session = NewHostSession("Alice");
         session.InitHostSlots("Alice");
-        // slot 0 是本地人；但 joiner 路径本不该被 host 触发，验证不会异常
         long before = session.Revision;
         MultiplayerSlotCoordinator.HandleJoinerOptionsEdit(session, 0);
-        // RequestLocalPlayerOptions 在 IsHost=true 时直接 return，所以 Revision 不变
         session.Revision.Should().Be(before);
     }
 
     [Fact]
     public void SkirmishLaunchValidator_SessionOverload_Accepts_IPlayerSlot_List()
     {
-        // Phase 2 P2-4：SkirmishLaunchValidator 新重载吃 IReadOnlyList<IPlayerSlot>。
         var map = MakeMap(maxPlayers: 4, minPlayers: 1);
         var gameMode = MakeGameMode();
 
@@ -195,19 +145,19 @@ public sealed class Phase2ProductionMigrationTests
         };
 
         string? result = SkirmishLaunchValidator.Validate(map, gameMode, slots, sideCount: 3);
-        result.Should().BeNull("standard config should pass");
+        result.Should().BeNull();
     }
 
     [Fact]
-    public void SkirmishLaunchValidator_Legacy_Overload_Still_Works()
+    public void SkirmishLaunchValidator_Empty_Slots_With_MinPlayers_Zero_Passes()
     {
-        // 旧重载应仍工作（委托到新重载）。minPlayers=0 让空 lobby 通过。
         var map = MakeMap(maxPlayers: 4, minPlayers: 0, enforceMaxPlayers: true);
         var gameMode = MakeGameMode();
-        var players = new LobbyPlayerState();
+        var slots = Enumerable.Range(0, LobbyPlayerSlot.MaxSlots)
+            .Select(_ => (IPlayerSlot)new LobbyPlayerSlot()).ToList();
 
-        string? result = SkirmishLaunchValidator.Validate(map, gameMode, players);
-        result.Should().BeNull("empty lobby with minPlayers=0 passes");
+        string? result = SkirmishLaunchValidator.Validate(map, gameMode, slots, sideCount: 3);
+        result.Should().BeNull();
     }
 
     [Fact]
@@ -248,10 +198,6 @@ public sealed class Phase2ProductionMigrationTests
             UntranslatedUIName = name,
         };
 
-    /// <summary>
-    /// 极简 IGameSession 实现，仅供 SyncFromSlots 单测使用。
-    /// 不实现网络协议；只暴露槽位数组。
-    /// </summary>
     private sealed class HostFakeSession : IGameSession
     {
         private readonly LobbyPlayerSlot[] _slots =

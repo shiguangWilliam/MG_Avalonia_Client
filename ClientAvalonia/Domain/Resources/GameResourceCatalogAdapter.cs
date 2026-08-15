@@ -14,6 +14,14 @@ public sealed class GameResourceCatalogAdapter : IResourceCatalog
     public GameResourceCatalogAdapter(GameResourceCatalog catalog)
         => _catalog = catalog;
 
+    /// <summary>
+    /// 迁移期 escape hatch：暴露底层具体 catalog。
+    /// MainWindow / GameDataBindingApplier 等遗留代码仍依赖 GameResourceCatalog
+    /// 具体类型（FavoriteMapsLabel / FilterMapsBySearch 等未抽接口的方法），
+    /// 通过此属性访问避免直接读 GameResourceCatalog.Instance。
+    /// </summary>
+    public GameResourceCatalog InternalCatalog => _catalog;
+
     /// <inheritdoc />
     public IReadOnlyList<IMapResource> Maps => _catalog.Maps;
 

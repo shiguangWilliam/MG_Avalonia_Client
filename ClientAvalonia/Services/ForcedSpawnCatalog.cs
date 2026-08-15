@@ -1,6 +1,7 @@
 using ClientAvalonia.Domain;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -11,7 +12,7 @@ public static class ForcedSpawnCatalog
 
     public static void ApplyGameModeForcedSpawn(IniFile spawnIni, GameModeEntry gameMode)
     {
-        string mpMapsPath = SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath);
+        string mpMapsPath = SafePath.CombineFilePath(AppState.Environment.GamePath, AppState.Configuration.Legacy.MPMapsIniPath);
         if (!File.Exists(mpMapsPath))
             return;
 
@@ -39,7 +40,7 @@ public static class ForcedSpawnCatalog
             return;
         }
 
-        string mpMapsPath = SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath);
+        string mpMapsPath = SafePath.CombineFilePath(AppState.Environment.GamePath, AppState.Configuration.Legacy.MPMapsIniPath);
         if (!File.Exists(mpMapsPath) || !map.IsOfficial)
             return;
 

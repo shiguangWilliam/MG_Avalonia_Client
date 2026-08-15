@@ -16,4 +16,7 @@ public sealed class CnCNetGameCreationRequest
     public required CnCNetTunnel Tunnel { get; init; }
 
     public int SkillLevel { get; init; }
+
+    /// <summary>DX loaded MP game room (spawnSG.ini host path).</summary>
+    public bool IsLoadedGame { get; init; }
 }

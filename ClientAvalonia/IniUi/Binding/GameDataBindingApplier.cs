@@ -21,7 +21,8 @@ public static class GameDataBindingApplier
         GameResourceCatalog catalog,
         LobbySessionState session,
         ResourceResolver resources,
-        int filterIndex = 1)
+        int filterIndex = 1,
+        IReadOnlyList<IPlayerSlot>? slots = null)
     {
         catalog.EnsureLoaded();
 
@@ -37,7 +38,13 @@ public static class GameDataBindingApplier
             session.FilterIndex = clamped;
         }
 
-        ApplyLobbyMapList(root, catalog, session, resources, ddGameMode?.SelectedIndex ?? filterIndex);
+        ApplyLobbyMapList(
+            root,
+            catalog,
+            session,
+            resources,
+            ddGameMode?.SelectedIndex ?? filterIndex,
+            slots);
     }
 
     public static void ApplyLobbyMapList(
@@ -45,7 +52,8 @@ public static class GameDataBindingApplier
         GameResourceCatalog catalog,
         LobbySessionState session,
         ResourceResolver resources,
-        int filterIndex)
+        int filterIndex,
+        IReadOnlyList<IPlayerSlot>? slots = null)
     {
         catalog.EnsureLoaded();
         session.FilterIndex = filterIndex;
@@ -65,8 +73,8 @@ public static class GameDataBindingApplier
         }
 
         ResolveStartInteractionFlags(
-            session.PlayerState.Mode,
-            session.PlayerState.AllowHostPlayerOptions,
+            session.UIMode,
+            session.AllowHostPlayerOptions,
             out bool canAssign,
             out bool canSelectLocal);
         UpdateMapSelectionDisplay(
@@ -74,14 +82,13 @@ public static class GameDataBindingApplier
             maps,
             selectedIndex,
             resources,
-            session.PlayerState.Slots,
+            slots,
             canAssign,
             canSelectLocal);
     }
 
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>，
-    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// Session-aware：直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>。
     /// </summary>
     public static void ResolveStartInteractionFlags(
         LobbyPlayerMode mode,
@@ -101,15 +108,8 @@ public static class GameDataBindingApplier
         canSelectLocal = true;
     }
 
-    public static void ResolveStartInteractionFlags(
-        LobbyPlayerState playerState,
-        out bool canAssign,
-        out bool canSelectLocal)
-        => ResolveStartInteractionFlags(playerState.Mode, playerState.AllowHostPlayerOptions, out canAssign, out canSelectLocal);
-
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
-    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// Session-aware：直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
     /// </summary>
     public static void UpdateMapSelectionDisplay(
         UiNodeViewModel root,
@@ -142,25 +142,8 @@ public static class GameDataBindingApplier
         }
     }
 
-    public static void UpdateMapSelectionDisplay(
-        UiNodeViewModel root,
-        IReadOnlyList<MapEntry> maps,
-        int selectedIndex,
-        ResourceResolver resources,
-        LobbyPlayerState? playerState = null,
-        bool canAssignStarts = false,
-        bool canSelectLocalStart = false)
-        => UpdateMapSelectionDisplay(
-            root,
-            maps,
-            selectedIndex,
-            resources,
-            playerState?.Slots,
-            canAssignStarts,
-            canSelectLocalStart);
-
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
+    /// Session-aware：刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
     /// </summary>
     public static void RefreshMapStartMarkers(
         UiNodeViewModel root,
@@ -180,15 +163,6 @@ public static class GameDataBindingApplier
             canAssignStarts,
             canSelectLocalStart);
     }
-
-    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
-    public static void RefreshMapStartMarkers(
-        UiNodeViewModel root,
-        MapEntry? map,
-        LobbyPlayerState playerState,
-        bool canAssignStarts,
-        bool canSelectLocalStart)
-        => RefreshMapStartMarkers(root, map, playerState.Slots, canAssignStarts, canSelectLocalStart);
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
     {

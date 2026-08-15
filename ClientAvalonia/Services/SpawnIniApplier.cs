@@ -1,5 +1,7 @@
 using System.Globalization;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientCore;
@@ -44,10 +46,11 @@ public static class SpawnIniApplier
 
     public static void ApplySpawnDefaults(IniFile spawnIni)
     {
-        spawnIni.SetBooleanValue("Settings", "SidebarHack", ClientConfiguration.Instance.SidebarHack);
-        spawnIni.SetIntValue("Settings", "FrameSendRate", ClientConfiguration.Instance.DefaultFrameSendRate);
-        spawnIni.SetIntValue("Settings", "Protocol", ClientConfiguration.Instance.DefaultProtocolVersion);
-        spawnIni.SetIntValue("Settings", "MaxAhead", ClientConfiguration.Instance.DefaultMaxAhead);
+        IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+        spawnIni.SetBooleanValue("Settings", "SidebarHack", config.SidebarHack);
+        spawnIni.SetIntValue("Settings", "FrameSendRate", config.DefaultFrameSendRate);
+        spawnIni.SetIntValue("Settings", "Protocol", config.DefaultProtocolVersion);
+        spawnIni.SetIntValue("Settings", "MaxAhead", config.DefaultMaxAhead);
     }
 
     private static void ApplyCheckBox(UiNodeViewModel vm, IniFile spawnIni)

@@ -415,6 +415,7 @@ internal static class OptionsWindowLayout
             "chkDiscordIntegration", "chkPingUnofficialTunnels", "chkWriteInstallPathToRegistry",
             "chkSteamIntegration", "lblAllowPrivateMessagesFrom", "ddAllowPrivateMessagesFrom",
             "lblAllowPrivateMessagesFromHint",
+            "lblGameBroadcastInterval", "ddGameBroadcastInterval",
         })
             map[id] = "CnCNetOptionsPanel";
 

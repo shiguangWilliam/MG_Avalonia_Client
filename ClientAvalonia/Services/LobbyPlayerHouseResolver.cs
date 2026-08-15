@@ -1,6 +1,7 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Session;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -56,15 +57,6 @@ public static class LobbyPlayerHouseResolver
 
         return resolved;
     }
-
-    /// <summary>
-    /// Legacy overload (delegates to <see cref="Resolve(IReadOnlyList{IPlayerSlot}, int)"/>).
-    /// </summary>
-    [Obsolete("Phase 3 P3-1: 改用 Resolve(IReadOnlyList<IPlayerSlot>, int)。Phase 5 调用方已迁移。")]
-    public static IReadOnlyList<ResolvedHouse> Resolve(
-        IReadOnlyList<LobbyPlayerSlot> occupiedSlots,
-        int randomSeed)
-        => Resolve((IReadOnlyList<IPlayerSlot>)occupiedSlots, randomSeed);
 
     private static int ResolveSideIndex(
         int sideId,
@@ -130,11 +122,11 @@ public static class LobbyPlayerHouseResolver
 
     private static int ToInternalSideIndex(int sideIndex, bool isSpectator)
     {
-        if (isSpectator && !string.IsNullOrEmpty(ClientConfiguration.Instance.SpectatorInternalSideIndex)
-            && int.TryParse(ClientConfiguration.Instance.SpectatorInternalSideIndex, out int spectatorIndex))
+        if (isSpectator && !string.IsNullOrEmpty(AppState.Configuration.Legacy.SpectatorInternalSideIndex)
+            && int.TryParse(AppState.Configuration.Legacy.SpectatorInternalSideIndex, out int spectatorIndex))
             return spectatorIndex;
 
-        string internalIndices = ClientConfiguration.Instance.InternalSideIndices;
+        string internalIndices = AppState.Configuration.Legacy.InternalSideIndices;
         if (!string.IsNullOrEmpty(internalIndices))
         {
             int[] mapped = internalIndices.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

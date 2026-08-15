@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using ClientAvalonia.Domain;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -27,10 +28,10 @@ public interface ILobbyCatalogService
     /// <summary>阵营条目（含 InternalName / Icon / DisplayName 等）。</summary>
     IReadOnlyList<LobbySideEntry> SideEntries { get; }
 
-    /// <summary>AI 名列表（按 AiLevel 索引；来自 ProgramConstants.AI_PLAYER_NAMES）。</summary>
+    /// <summary>AI 名列表（按 AiLevel 索引；来自 AppState.Environment.AiPlayerNames）。</summary>
     IReadOnlyList<string> AiNames { get; }
 
-    /// <summary>队伍名列表（来自 ProgramConstants.TEAMS）。</summary>
+    /// <summary>队伍名列表（来自 AppState.Environment.TeamNames）。</summary>
     IReadOnlyList<string> TeamNames { get; }
 
     /// <summary>
@@ -73,7 +74,7 @@ public sealed class LobbyCatalogService : ILobbyCatalogService
         LobbySideCatalogSnapshot snapshot = LobbySideCatalog.GetSnapshot(includeSpectator);
         SideEntries = snapshot.Entries;
         SideNames = snapshot.Entries.Select(s => s.DisplayName).ToList();
-        AiNames = ProgramConstants.AI_PLAYER_NAMES.ToList();
-        TeamNames = ProgramConstants.TEAMS.ToList();
+        AiNames = AppState.Environment.AiPlayerNames.ToList();
+        TeamNames = AppState.Environment.TeamNames.ToList();
     }
 }

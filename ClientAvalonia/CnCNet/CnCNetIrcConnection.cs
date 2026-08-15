@@ -9,6 +9,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -63,7 +64,7 @@ public sealed class CnCNetIrcConnection : IDisposable
     public string? ConnectedServer { get; private set; }
 
     /// <summary>Confirmed IRC nick (001 / local JOIN / NICK).</summary>
-    public string CurrentNick { get; private set; } = ProgramConstants.PLAYERNAME;
+    public string CurrentNick { get; private set; } = AppState.Environment.PlayerName;
 
     public bool IsLocalUser(string nick)
         => !string.IsNullOrWhiteSpace(nick)
@@ -496,24 +497,24 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (_welcomeMessageReceived)
             return;
 
-        string localGame = ClientConfiguration.Instance.LocalGame;
-        string realname = ProgramConstants.GAME_VERSION + " " + localGame + " CnCNet";
+        string localGame = AppState.Configuration.Legacy.LocalGame;
+        string realname = AppState.Environment.GameVersion + " " + localGame + " CnCNet";
         SendImmediate($"USER {localGame}.{_systemId} 0 * :{realname}");
-        SendImmediate("NICK " + ProgramConstants.PLAYERNAME);
+        SendImmediate("NICK " + AppState.Environment.PlayerName);
         EmitActivity("Registering USER/NICK...");
-        EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
+        EmitActivity("??NICK " + AppState.Environment.PlayerName);
     }
 
     private void ChangeNickname()
     {
-        SendImmediate("NICK " + ProgramConstants.PLAYERNAME);
-        EmitActivity("??NICK " + ProgramConstants.PLAYERNAME);
+        SendImmediate("NICK " + AppState.Environment.PlayerName);
+        EmitActivity("??NICK " + AppState.Environment.PlayerName);
     }
 
     private void OnNameAlreadyInUse()
     {
-        var charList = ProgramConstants.PLAYERNAME.ToList();
-        int maxNameLength = ClientConfiguration.Instance.MaxNameLength;
+        var charList = AppState.Environment.PlayerName.ToList();
+        int maxNameLength = AppState.Configuration.Legacy.MaxNameLength;
 
         if (charList.Count < maxNameLength)
             charList.Add('_');
@@ -627,7 +628,7 @@ public sealed class CnCNetIrcConnection : IDisposable
         if (state is not CancellationToken token)
             return;
 
-        int sendDelay = Math.Max(1, ClientConfiguration.Instance.SendSleep);
+        int sendDelay = Math.Max(1, AppState.Configuration.Legacy.SendSleep);
 
         while (!token.IsCancellationRequested && IsConnected)
         {
