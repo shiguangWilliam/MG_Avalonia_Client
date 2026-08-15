@@ -101,6 +101,7 @@ public static class DxThemeManager
     {
         _userAccent = accent;
         ApplyAccentOverrides(Application.Current?.Resources);
+        TacticalAssetFactory.InvalidateCache();
 
         if (!persist)
             return;

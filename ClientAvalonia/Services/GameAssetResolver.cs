@@ -3,6 +3,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Themes;
 using ClientCore;
 using ClientAvalonia.GlobalState;
 
@@ -198,6 +199,10 @@ public static class GameAssetResolver
 
     public static void ApplyCampaignSideIcons(UiNodeViewModel root, ResourceResolver resources)
     {
+        // Tactical replaces faction icons with text-only tabs.
+        if (Themes.DxThemeManager.IsTactical)
+            return;
+
         foreach (string controlId in new[] { "GDI", "Nod", "ThirdSide", "FourthSide" })
         {
             UiNodeViewModel? tab = FindVm(root, controlId);
@@ -214,6 +219,10 @@ public static class GameAssetResolver
 
     public static void ApplyCampaignActionButtonTextures(UiNodeViewModel root, ResourceResolver resources)
     {
+        // Tactical drops PNG button chrome entirely.
+        if (Themes.DxThemeManager.IsTactical)
+            return;
+
         foreach (UiNodeViewModel button in EnumerateNodes(root))
         {
             if (!IsActionButton(button))

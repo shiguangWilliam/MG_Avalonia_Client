@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -10,9 +11,12 @@ using ClientCore;
 namespace ClientAvalonia.Controls;
 
 /// <summary>
-/// L1 wireframe globe: lat/long grid projected through a perspective camera on the CPU,
-/// rendered with Avalonia Path primitives. Supports drag-rotate, slow auto-rotation and
-/// mission nodes bound to (lat, lon) coordinates.
+/// Tactical geospatial globe with real continent outlines: simplified coastline
+/// polygons (lat/lon) are clipped against the visible hemisphere in 3D and
+/// projected through a perspective camera every frame. Land is filled with a
+/// translucent dark tone and stroked with a hairline; the sphere disc gets a
+/// radial limb-darkening gradient for depth. Supports drag-rotate, inertia,
+/// slow auto-rotation and mission nodes bound to (lat, lon).
 /// </summary>
 public class TacticalGlobeView : Control
 {
@@ -23,21 +27,22 @@ public class TacticalGlobeView : Control
         AvaloniaProperty.Register<TacticalGlobeView, int>(nameof(SelectedNodeIndex), -1);
 
     public static readonly StyledProperty<double> YawProperty =
-        AvaloniaProperty.Register<TacticalGlobeView, double>(nameof(Yaw), 0.0);
+        AvaloniaProperty.Register<TacticalGlobeView, double>(nameof(Yaw), 20.0);
 
     public static readonly StyledProperty<double> PitchProperty =
-        AvaloniaProperty.Register<TacticalGlobeView, double>(nameof(Pitch), -18.0);
+        AvaloniaProperty.Register<TacticalGlobeView, double>(nameof(Pitch), -16.0);
 
-    private const int Meridians = 20;
-    private const int Parallels = 12;
-    private const double RadiusFactor = 0.40;
-    private const double FocalFactor = 3.2;
-    private const double BackSideAlpha = 0.22;
+    private const int Meridians = 12;
+    private const int Parallels = 6;
+    private const double RadiusFactor = 0.44;
+    private const double FocalFactor = 3.4;
     private const double DragSensitivity = 0.32;
-    private const double AutoRotateDegreesPerSecond = 3.0;
+    private const double AutoRotateDegreesPerSecond = 2.4;
 
     private readonly List<NodeMarker> _markers = new();
     private DispatcherTimer? _timer;
+    private IBrush? _landFill;
+    private IBrush? _landStroke;
     private IBrush? _lineBrush;
     private IBrush? _mutedLineBrush;
     private IBrush? _accentBrush;
@@ -161,7 +166,6 @@ public class TacticalGlobeView : Control
         double cx = size.Width / 2.0;
         double cy = size.Height / 2.0;
         double radius = Math.Min(cx, cy) * RadiusFactor * 2.0;
-        double focal = Math.Min(cx, cy) * FocalFactor;
 
         double yawRad = Yaw * Math.PI / 180.0;
         double pitchRad = Pitch * Math.PI / 180.0;
@@ -170,127 +174,268 @@ public class TacticalGlobeView : Control
         double cosPitch = Math.Cos(pitchRad);
         double sinPitch = Math.Sin(pitchRad);
 
-        // Camera sits at +Z looking at origin; perspective divide by camera-space z.
-        (double sx, double sy, double cz, bool front) Project(double latDeg, double lonDeg)
+        // Unit sphere direction after yaw/pitch, plus camera-space z for clipping.
+        (double X, double Y, double Z) Dir(double latDeg, double lonDeg)
         {
             double lat = latDeg * Math.PI / 180.0;
             double lon = lonDeg * Math.PI / 180.0;
-
             double x = Math.Cos(lat) * Math.Sin(lon + yawRad);
             double y = Math.Sin(lat);
             double z = Math.Cos(lat) * Math.Cos(lon + yawRad);
-
-            // Pitch rotation around X axis.
             double y1 = y * cosPitch - z * sinPitch;
             double z1 = y * sinPitch + z * cosPitch;
-
-            bool isFront = z1 > 0;
-            double scale = focal / (focal - z1 * radius);
-            return (cx + x * radius * scale, cy - y1 * radius * scale, z1, isFront);
+            return (x, y1, z1);
         }
 
-        // Meridians (longitude lines).
-        for (int m = 0; m < Meridians; m++)
+        Point Project(double x, double y1, double z1)
         {
-            var front = new StreamGeometry();
-            var back = new StreamGeometry();
-            using (StreamGeometryContext fc = front.Open())
-            using (StreamGeometryContext bc = back.Open())
+            double scale = FocalFactor / (FocalFactor - z1);
+            return new Point(cx + x * radius * scale, cy - y1 * radius * scale);
+        }
+
+        // ---- Sphere disc: limb-darkened surface ----
+        var disc = new EllipseGeometry(new Rect(cx - radius, cy - radius, radius * 2, radius * 2));
+        var surfaceBrush = new RadialGradientBrush
+        {
+            Center = new RelativePoint(0.42, 0.38, RelativeUnit.Relative),
+            GradientStops =
             {
-                bool frontStarted = false;
-                bool backStarted = false;
-                for (int p = 0; p <= 90; p++)
-                {
-                    double lat = -90.0 + p * (180.0 / 90);
-                    (double sx, double sy, double cz, bool isFront) = Project(lat, m * (360.0 / Meridians));
-                    if (isFront)
-                    {
-                        if (!frontStarted) { fc.BeginFigure(new Point(sx, sy), false); frontStarted = true; }
-                        else fc.LineTo(new Point(sx, sy));
-                    }
-                    else
-                    {
-                        if (!backStarted) { bc.BeginFigure(new Point(sx, sy), false); backStarted = true; }
-                        else bc.LineTo(new Point(sx, sy));
-                    }
-                }
+                new GradientStop(Color.FromRgb(0x11, 0x16, 0x1C), 0.0),
+                new GradientStop(Color.FromRgb(0x0B, 0x0E, 0x13), 0.62),
+                new GradientStop(Color.FromRgb(0x05, 0x07, 0x0A), 1.0),
+            },
+        };
+        context.DrawGeometry(surfaceBrush, null, disc);
+
+        // ---- Continents: clip polygon against the front hemisphere, then project ----
+        var landPen = new Pen(_landStroke ?? Brushes.SlateGray, 0.75, null, PenLineCap.Round, PenLineJoin.Round);
+        foreach (double[] outline in ContinentOutlines.All)
+        {
+            List<(double X, double Y, double Z)>? front = ClipToHemisphere(outline, Dir);
+            if (front is not { Count: > 2 })
+                continue;
+
+            var geo = new StreamGeometry();
+            using (StreamGeometryContext gc = geo.Open())
+            {
+                gc.BeginFigure(Project(front[0].X, front[0].Y, front[0].Z), true);
+                for (int i = 1; i < front.Count; i++)
+                    gc.LineTo(Project(front[i].X, front[i].Y, front[i].Z));
             }
 
-            DrawPolylines(context, front, back, m == 0, _lineBrush, _mutedLineBrush);
+            context.DrawGeometry(_landFill, landPen, geo);
         }
 
-        // Parallels (latitude lines).
+        // ---- Graticule (very subtle) ----
+        var gridPen = new Pen(_mutedLineBrush ?? Brushes.Gray, 0.6);
+        var gridPenBright = new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.35), 0.7);
+        for (int m = 0; m < Meridians; m++)
+            DrawGreatCircleArc(context, m * 360.0 / Meridians, Dir, Project, m == 0 ? gridPenBright : gridPen);
         for (int p = 1; p < Parallels; p++)
         {
             double lat = -90.0 + p * (180.0 / Parallels);
-            var front = new StreamGeometry();
-            var back = new StreamGeometry();
-            using (StreamGeometryContext fc = front.Open())
-            using (StreamGeometryContext bc = back.Open())
-            {
-                bool frontStarted = false;
-                bool backStarted = false;
-                for (int s = 0; s <= 120; s++)
-                {
-                    double lon = s * (360.0 / 120);
-                    (double sx, double sy, double cz, bool isFront) = Project(lat, lon);
-                    if (isFront)
-                    {
-                        if (!frontStarted) { fc.BeginFigure(new Point(sx, sy), false); frontStarted = true; }
-                        else fc.LineTo(new Point(sx, sy));
-                    }
-                    else
-                    {
-                        if (!backStarted) { bc.BeginFigure(new Point(sx, sy), false); backStarted = true; }
-                        else bc.LineTo(new Point(sx, sy));
-                    }
-                }
-            }
-
-            DrawPolylines(context, front, back, p == Parallels / 2, _lineBrush, _mutedLineBrush);
+            DrawParallel(context, lat, Dir, Project, p == Parallels / 2 ? gridPenBright : gridPen);
         }
 
-        // Nodes.
+        // ---- Rim ----
+        context.DrawGeometry(
+            null,
+            new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.55), 1.0),
+            disc);
+        // Faint atmosphere ring just outside the rim.
+        context.DrawEllipse(
+            null,
+            new Pen(ApplyOpacity(_accentBrush ?? Brushes.Cyan, 0.18), 3.0),
+            new Point(cx, cy),
+            radius + 3.5,
+            radius + 3.5);
+
+        // ---- Nodes ----
         RebuildMarkers();
         for (int i = 0; i < _markers.Count; i++)
         {
             NodeMarker marker = _markers[i];
-            (double sx, double sy, double cz, bool front) = Project(marker.Node.LatitudeDegrees, marker.Node.LongitudeDegrees);
-            marker.Position = new Point(sx, sy);
+            (double x, double y1, double z1) = Dir(marker.Node.LatitudeDegrees, marker.Node.LongitudeDegrees);
+            bool front = z1 > 0;
+            Point sp = Project(x, y1, z1);
+            marker.Position = sp;
             marker.IsFront = front;
             marker.Scale = front ? 1.0 : 0.6;
 
+            bool selected = i == SelectedNodeIndex;
             IBrush brush = marker.Node.Locked
-                ? (_mutedLineBrush ?? Brushes.DarkGray)
-                : i == SelectedNodeIndex || marker.IsHovered
-                    ? (_accentInverseBrush ?? Brushes.OrangeRed)
-                    : (_accentBrush ?? Brushes.Cyan);
+                ? ApplyOpacity(_mutedLineBrush ?? Brushes.Gray, 0.7)
+                : selected || marker.IsHovered
+                    ? _accentInverseBrush ?? Brushes.OrangeRed
+                    : _accentBrush ?? Brushes.Cyan;
 
             if (!front)
-                brush = ApplyOpacity(brush, 0.35);
+                brush = ApplyOpacity(brush, 0.30);
 
-            double nodeRadius = (i == SelectedNodeIndex ? 3.6 : 2.6) * marker.Scale;
-            context.DrawEllipse(brush, null, new Point(sx, sy), nodeRadius, nodeRadius);
+            // Square tactical marker with a center dot.
+            double s = (selected ? 3.4 : 2.4) * marker.Scale;
+            context.DrawRectangle(
+                null,
+                new Pen(brush, 1.0),
+                new Rect(sp.X - s, sp.Y - s, s * 2, s * 2));
+            context.DrawEllipse(brush, null, sp, 1.1, 1.1);
 
-            if (i == SelectedNodeIndex && front)
+            if (selected && front)
             {
-                // Pulsing selection ring.
-                context.DrawEllipse(null, new Pen(_accentInverseBrush ?? Brushes.OrangeRed, 1.2), new Point(sx, sy), 6.5, 6.5);
+                // Pulsing bracket reticle.
+                double b = s + 4.0;
+                var pen = new Pen(_accentInverseBrush ?? Brushes.OrangeRed, 1.0);
+                const double t = 3.2;
+                DrawCorner(context, pen, sp, -b, -b, t, 1, 1);
+                DrawCorner(context, pen, sp, b, -b, t, -1, 1);
+                DrawCorner(context, pen, sp, -b, b, t, 1, -1);
+                DrawCorner(context, pen, sp, b, b, t, -1, -1);
+
+                var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
+                var formatted = new FormattedText(
+                    marker.Node.Label,
+                    CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight,
+                    typeface,
+                    11,
+                    _accentInverseBrush ?? Brushes.OrangeRed);
+                context.DrawText(formatted, new Point(sp.X + b + 6, sp.Y - formatted.Height / 2));
             }
         }
     }
 
-    private static void DrawPolylines(DrawingContext context, StreamGeometry front, StreamGeometry back, bool highlight, IBrush? lineBrush, IBrush? mutedLineBrush)
+    private static void DrawCorner(DrawingContext ctx, Pen pen, Point c, double ox, double oy, double len, int sx, int sy)
     {
-        IBrush frontBrush = lineBrush ?? Brushes.Silver;
-        IBrush backBrush = mutedLineBrush ?? Brushes.Gray;
+        var geo = new StreamGeometry();
+        using StreamGeometryContext gc = geo.Open();
+        gc.BeginFigure(new Point(c.X + ox, c.Y + oy + sy * len), false);
+        gc.LineTo(new Point(c.X + ox, c.Y + oy));
+        gc.LineTo(new Point(c.X + ox + sx * len, c.Y + oy));
+        ctx.DrawGeometry(null, pen, geo);
+    }
 
-        context.DrawGeometry(null, new Pen(backBrush, 1.0, null, PenLineCap.Round), back);
-        context.DrawGeometry(null, new Pen(highlight ? frontBrush : ApplyOpacity(frontBrush, 0.8), highlight ? 1.2 : 1.0, null, PenLineCap.Round), front);
+    /// <summary>Sutherland-Hodgman clip of a lat/lon polygon against the camera-facing hemisphere.</summary>
+    private static List<(double X, double Y, double Z)>? ClipToHemisphere(
+        double[] outline,
+        Func<double, double, (double X, double Y, double Z)> dir)
+    {
+        var result = new List<(double, double, double)>();
+        int count = outline.Length / 2;
+        (double X, double Y, double Z) prev = dir(outline[0], outline[1]);
+        bool prevInside = prev.Z > 0;
+
+        for (int i = 1; i <= count; i++)
+        {
+            int idx = (i % count) * 2;
+            (double X, double Y, double Z) cur = dir(outline[idx], outline[idx + 1]);
+            bool curInside = cur.Z > 0;
+
+            if (curInside != prevInside)
+            {
+                // Interpolate to the horizon (z=0) on the unit sphere.
+                double t = prev.Z / (prev.Z - cur.Z);
+                double ix = prev.X + (cur.X - prev.X) * t;
+                double iy = prev.Y + (cur.Y - prev.Y) * t;
+                double norm = Math.Sqrt(ix * ix + iy * iy);
+                if (norm > 1e-6)
+                {
+                    ix /= norm;
+                    iy /= norm;
+                }
+
+                result.Add((ix, iy, 0.0));
+            }
+
+            if (curInside)
+                result.Add(cur);
+
+            prev = cur;
+            prevInside = curInside;
+        }
+
+        return result.Count > 2 ? result : null;
+    }
+
+    private void DrawGreatCircleArc(
+        DrawingContext context,
+        double lonDeg,
+        Func<double, double, (double X, double Y, double Z)> dir,
+        Func<double, double, double, Point> project,
+        Pen pen)
+    {
+        var geo = new StreamGeometry();
+        using StreamGeometryContext gc = geo.Open();
+        bool started = false;
+        for (int p = 0; p <= 60; p++)
+        {
+            double lat = -90.0 + p * 3.0;
+            (double x, double y, double z) = dir(lat, lonDeg);
+            if (z <= 0)
+            {
+                started = false;
+                continue;
+            }
+
+            Point pt = project(x, y, z);
+            if (!started)
+            {
+                gc.BeginFigure(pt, false);
+                started = true;
+            }
+            else
+            {
+                gc.LineTo(pt);
+            }
+        }
+
+        context.DrawGeometry(null, pen, geo);
+    }
+
+    private void DrawParallel(
+        DrawingContext context,
+        double latDeg,
+        Func<double, double, (double X, double Y, double Z)> dir,
+        Func<double, double, double, Point> project,
+        Pen pen)
+    {
+        var geo = new StreamGeometry();
+        using StreamGeometryContext gc = geo.Open();
+        bool started = false;
+        for (int s = 0; s <= 90; s++)
+        {
+            double lon = s * 4.0;
+            (double x, double y, double z) = dir(latDeg, lon);
+            if (z <= 0)
+            {
+                started = false;
+                continue;
+            }
+
+            Point pt = project(x, y, z);
+            if (!started)
+            {
+                gc.BeginFigure(pt, false);
+                started = true;
+            }
+            else
+            {
+                gc.LineTo(pt);
+            }
+        }
+
+        context.DrawGeometry(null, pen, geo);
     }
 
     private void ResolveBrushes()
     {
+        _landFill = this.TryFindResource("DxGlobeLandFillBrush", out object? fillObj) && fillObj is IBrush fill
+            ? fill
+            : new SolidColorBrush(Color.FromArgb(0x46, 0x8F, 0xB8, 0xCC));
+
+        _landStroke = this.TryFindResource("DxGlobeLandStrokeBrush", out object? strokeObj) && strokeObj is IBrush stroke
+            ? stroke
+            : new SolidColorBrush(Color.FromRgb(0x9E, 0xC4, 0xD8));
+
         _lineBrush = this.TryFindResource("DxLineBrightBrush", out object? lineObj) && lineObj is IBrush line
             ? line
             : Brushes.Silver;
@@ -337,10 +482,11 @@ public class TacticalGlobeView : Control
         Point pos = e.GetPosition(this);
         double dx = pos.X - _lastPointer.X;
         double dy = pos.Y - _lastPointer.Y;
+        _inertiaYaw = dx * DragSensitivity;
         _lastPointer = pos;
 
         Yaw += dx * DragSensitivity;
-        Pitch = Math.Clamp(Pitch - dy * DragSensitivity, -35.0, 35.0);
+        Pitch = Math.Clamp(Pitch - dy * DragSensitivity * 0.6, -40.0, 40.0);
         InvalidateVisual();
         e.Handled = true;
     }
@@ -369,9 +515,18 @@ public class TacticalGlobeView : Control
     private void UpdateHover(Point pos)
     {
         int hit = HitTest(pos);
+        bool changed = false;
         for (int i = 0; i < _markers.Count; i++)
-            _markers[i].IsHovered = i == hit;
-        if (hit >= 0)
+        {
+            bool hovered = i == hit;
+            if (_markers[i].IsHovered != hovered)
+            {
+                _markers[i].IsHovered = hovered;
+                changed = true;
+            }
+        }
+
+        if (changed)
             InvalidateVisual();
     }
 

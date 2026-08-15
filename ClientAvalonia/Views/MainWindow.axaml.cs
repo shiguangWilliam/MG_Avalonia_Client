@@ -514,9 +514,37 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             ShowStatus($"视觉风格切换失败，已回退 Classic：{applyError.Message}");
         }
+        else
+        {
+            // Style changed: already-built trees still hold the old style's bitmaps
+            // (Tactical drops all PNG chrome). Reload the current window so the
+            // switch is visible immediately without a manual re-navigation.
+            if (IsOptionsOverlayOpen)
+                CloseFloatingOverlaySilently();
+            ReloadMainWindowUnderNewStyle();
+        }
 
         PART_ThemeLoadingHost.IsVisible = false;
         UpdateGenesisBackdrop();
+    }
+
+    private void ReloadMainWindowUnderNewStyle()
+    {
+        try
+        {
+            string window = CurrentWindow;
+            if (string.IsNullOrEmpty(window))
+                return;
+
+            // Reset so the reload does not pollute the back-navigation stack.
+            _navStack.Clear();
+            NavigateTo(window, fromBack: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"VisualStyle reload of '{CurrentWindow}' failed: {ex}");
+            ShowStatus($"视觉风格已切换，但当前界面刷新失败：{ex.Message}");
+        }
     }
 
     public void DiscardSettings()

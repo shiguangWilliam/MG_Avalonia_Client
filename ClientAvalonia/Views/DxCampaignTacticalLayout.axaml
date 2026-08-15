@@ -1,0 +1,79 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:ClientAvalonia.Views"
+             xmlns:ctrl="using:ClientAvalonia.Controls"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Views.DxCampaignTacticalLayout"
+             x:DataType="vm:UiNodeViewModel"
+             ClipToBounds="True">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.tactical-column-title">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="3" />
+      <Setter Property="Foreground" Value="{DynamicResource DxTextMutedBrush}" />
+    </Style>
+    <Style Selector="Border.tactical-panel">
+      <Setter Property="BorderBrush" Value="{DynamicResource DxLineBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource DxSurface1Brush}" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+  </UserControl.Styles>
+
+  <Panel>
+  <!-- Three-column tactical console: list / globe / briefing. Each column is a
+       real Grid column so the globe can never be covered by its neighbours. -->
+  <Grid ColumnDefinitions="330,*,390" Margin="16,14,16,12" MinWidth="940">
+
+    <!-- Left column: faction tabs on top, campaign list below -->
+    <DockPanel Grid.Column="0" Margin="0,0,14,0">
+      <TextBlock DockPanel.Dock="Top"
+                 Text="CAMPAIGN"
+                 Classes="tactical-column-title"
+                 Margin="2,0,0,8" />
+      <StackPanel x:Name="SideTabs"
+                  DockPanel.Dock="Top"
+                  Orientation="Horizontal"
+                  Spacing="6"
+                  Margin="0,0,0,10" />
+      <Border Classes="tactical-panel">
+        <ContentControl x:Name="ListHost" Margin="6" />
+      </Border>
+    </DockPanel>
+
+    <!-- Middle column: tactical globe, dedicated column, never covered -->
+    <ctrl:DxCampaignGlobeHost x:Name="GlobeHost"
+                              Grid.Column="1"
+                              MinWidth="220"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              OverlayRoot="{Binding}" />
+
+    <!-- Right column: briefing (top) + difficulty + actions (bottom) -->
+    <Grid Grid.Column="2" RowDefinitions="*,Auto" Margin="14,0,0,0">
+      <DockPanel Grid.Row="0">
+        <TextBlock DockPanel.Dock="Top"
+                   Text="BRIEFING"
+                   Classes="tactical-column-title"
+                   Margin="2,0,0,8" />
+        <Border Classes="tactical-panel">
+          <ContentControl x:Name="BriefingHost" Margin="6" />
+        </Border>
+      </DockPanel>
+      <StackPanel Grid.Row="1" Spacing="10" Margin="0,12,0,0">
+        <ContentControl x:Name="DifficultyHeaderHost" />
+        <ContentControl x:Name="DifficultyHost" />
+        <StackPanel x:Name="ButtonsRow"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    HorizontalAlignment="Right" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+
+  <!-- Unmapped INI controls are kept alive (bindings keep working) but hidden. -->
+  <Panel x:Name="MiscHost" IsVisible="False" />
+  </Panel>
+</UserControl>
