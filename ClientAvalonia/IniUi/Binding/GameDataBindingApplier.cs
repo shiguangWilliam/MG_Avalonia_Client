@@ -9,6 +9,7 @@ using ClientAvalonia.Services;
 using ClientAvalonia.Session;
 using ClientAvalonia.Themes;
 using ClientCore;
+using ClientCore.Extensions;
 using ClientCore.Settings;
 using Rampastring.Tools;
 
@@ -681,6 +682,16 @@ public static class GameDataBindingApplier
 
     private static void ApplyCampaignDifficulty(UiNodeViewModel root, ResourceResolver resources)
     {
+        // CampaignSelector.ini omits Text=; DX sets it in C#. Mirror that so the
+        // Tactical briefing-column difficulty dock has a visible header.
+        UiNodeViewModel? difficultyHeader = FindVm(root, "lblDifficultyLevel");
+        if (difficultyHeader != null && string.IsNullOrWhiteSpace(difficultyHeader.Text))
+        {
+            difficultyHeader.SetDisplayText(
+                "DIFFICULTY LEVEL".L10N("Client:Main:DifficultyLevel"));
+            difficultyHeader.RefreshLayout();
+        }
+
         UiNodeViewModel? trackbar = FindVm(root, "trbDifficultySelector");
         if (trackbar == null)
             return;

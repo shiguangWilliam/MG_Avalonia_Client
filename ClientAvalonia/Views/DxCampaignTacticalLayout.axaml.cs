@@ -10,8 +10,9 @@ namespace ClientAvalonia.Views;
 /// <summary>
 /// Tactical campaign three-column console. Reparents INI-defined child nodes by ID
 /// into dedicated columns so the globe gets a real middle column instead of being
-/// stacked behind the list/briefing columns. Applies GLM art plates (starfield
-/// backdrop + panel texture) when available.
+/// stacked behind the list/briefing columns. Difficulty lives at the bottom of
+/// the briefing column; Launch/Cancel stay in the floating bottom action bar.
+/// Applies GLM art plates (starfield backdrop + panel texture) when available.
 /// </summary>
 public partial class DxCampaignTacticalLayout : UserControl
 {

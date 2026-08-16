@@ -156,7 +156,7 @@
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
             ClipToBounds="True">
-      <Grid Margin="12,10" RowDefinitions="Auto,Auto,*">
+      <Grid Margin="8,4,8,0" RowDefinitions="Auto,Auto,*">
         <Border Grid.Row="0"
                 Margin="0,0,0,10"
                 Height="104"
@@ -348,15 +348,16 @@
     </Button>
   </DataTemplate>
 
-  <!-- Difficulty: three-segment control bound to the legacy SelectedIndex (0-2) -->
+  <!-- Difficulty: three-segment control bound to the legacy SelectedIndex (0-2).
+       Stretches to the briefing column width in DxCampaignTacticalLayout. -->
   <DataTemplate x:Key="DxCampaignTacticalDifficulty" DataType="vm:UiNodeViewModel">
-    <Border Width="{Binding Width}"
-            MinHeight="44"
+    <Border MinHeight="44"
             Padding="8,6"
             CornerRadius="0"
             BorderBrush="{DynamicResource DxLineBrush}"
             BorderThickness="1"
             Background="{DynamicResource DxSurface1Brush}"
+            HorizontalAlignment="Stretch"
             IsVisible="{Binding IsVisible}"
             IsEnabled="{Binding IsEnabled}">
       <ctrl:DxCampaignDifficultySegment Value="{Binding SelectedIndex, Mode=TwoWay}" />
@@ -366,6 +367,19 @@
   <!-- Legacy per-difficulty labels are folded into the segment control in Tactical -->
   <DataTemplate x:Key="DxCampaignTacticalDifficultyLabel" DataType="vm:UiNodeViewModel">
     <Panel Width="0" Height="0" IsVisible="False" />
+  </DataTemplate>
+
+  <!-- Compact section header for the difficulty dock at the briefing column
+       bottom: 11px muted caps so the three-segment control owns the width. -->
+  <DataTemplate x:Key="DxCampaignTacticalDifficultyHeader" DataType="vm:UiNodeViewModel">
+    <TextBlock Text="{Binding Text}"
+               FontFamily="{Binding LabelFontFamily}"
+               FontSize="11"
+               FontWeight="SemiBold"
+               LetterSpacing="2"
+               Foreground="{DynamicResource DxTextMutedBrush}"
+               VerticalAlignment="Center"
+               IsVisible="{Binding IsVisible}" />
   </DataTemplate>
 
   <!-- Launch (primary CTA): system button + accent border; textures ignored -->

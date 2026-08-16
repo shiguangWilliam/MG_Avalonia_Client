@@ -58,7 +58,7 @@
               Grid.Column="0"
               Classes="tactical-panel"
               Width="300"
-              Margin="18,18,0,18"
+              Margin="18,18,0,78"
               VerticalAlignment="Stretch"
               HorizontalAlignment="Left">
         <DockPanel>
@@ -80,32 +80,49 @@
       <Border Classes="accent-rail"
               Grid.Column="0"
               HorizontalAlignment="Right"
-              Margin="0,18,0,18" />
+              Margin="0,18,0,78" />
 
       <!-- Center column reserved for the globe (columns clamp it visually) -->
       <Border Grid.Column="1" Background="Transparent" IsHitTestVisible="False" />
 
-      <!-- Right column: briefing + difficulty + actions -->
+      <!-- Right column: briefing on top, difficulty docked at the bottom
+           (bottom margin clears the floating Launch/Cancel action bar). -->
       <Border x:Name="RightPanel"
               Grid.Column="2"
               Classes="tactical-panel"
               Width="340"
-              Margin="0,18,18,18"
+              Margin="0,18,18,78"
               VerticalAlignment="Stretch"
               HorizontalAlignment="Right">
-        <DockPanel>
-          <TextBlock DockPanel.Dock="Top"
+        <Grid RowDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Row="0"
                      Text="BRIEFING"
                      Classes="tactical-column-title"
                      Margin="0,0,0,10" />
-          <ContentControl x:Name="BriefingHost" VerticalAlignment="Stretch" />
-        </DockPanel>
+          <ContentControl x:Name="BriefingHost"
+                          Grid.Row="1"
+                          VerticalAlignment="Stretch" />
+          <!-- Difficulty: hairline separator + compact header + full-width segments. -->
+          <StackPanel Grid.Row="2" Margin="0,8,0,0">
+            <Border BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource DxLineMutedBrush}"
+                    Margin="0,0,0,8" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+              <Border Width="14"
+                      Height="2"
+                      VerticalAlignment="Center"
+                      Background="{DynamicResource DxAccentPrimaryBrush}" />
+              <ContentControl x:Name="DifficultyHeaderHost" VerticalAlignment="Center" />
+            </StackPanel>
+            <ContentControl x:Name="DifficultyHost" HorizontalAlignment="Stretch" />
+          </StackPanel>
+        </Grid>
       </Border>
       <!-- Accent rail on the globe-facing (left) edge of the right panel -->
       <Border Classes="accent-rail"
               Grid.Column="2"
               HorizontalAlignment="Left"
-              Margin="0,18,0,18" />
+              Margin="0,18,0,78" />
     </Grid>
 
     <!-- Bottom action bar spans the full width beneath the globe horizon -->
@@ -115,22 +132,10 @@
             Margin="0,0,0,16"
             Padding="14,10"
             CornerRadius="0">
-      <StackPanel Orientation="Horizontal" Spacing="18">
-        <ContentControl x:Name="DifficultyHeaderHost" VerticalAlignment="Center" />
-        <Border Width="1"
-                Height="16"
-                Background="{DynamicResource DxLineMutedBrush}"
-                VerticalAlignment="Center" />
-        <ContentControl x:Name="DifficultyHost" VerticalAlignment="Center" />
-        <Border Width="1"
-                Height="16"
-                Background="{DynamicResource DxLineMutedBrush}"
-                VerticalAlignment="Center" />
-        <StackPanel x:Name="ButtonsRow"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    VerticalAlignment="Center" />
-      </StackPanel>
+      <StackPanel x:Name="ButtonsRow"
+                  Orientation="Horizontal"
+                  Spacing="18"
+                  VerticalAlignment="Center" />
     </Border>
 
     <!-- Unmapped INI controls are kept alive (bindings keep working) but hidden. -->
