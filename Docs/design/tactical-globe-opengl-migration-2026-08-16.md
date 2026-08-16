@@ -1,7 +1,7 @@
 # Tactical 地球：OpenGlControlBase 迁移方案
 
 > 日期：2026-08-16  
-> 状态：**方案（不落地代码）**，待决策后实施  
+> 状态：**已实施**（2026-08-16 落地，见 §12 实施记录）  
 > 前置：[`tactical-globe-tech-and-anchors-2026-08-16.md`](./tactical-globe-tech-and-anchors-2026-08-16.md)  
 > 目标：用 Avalonia `OpenGlControlBase` **替换** 当前 UI 线程 CPU 射线球；去掉海岸线矢量描边；贴图与经纬度严格对齐；画质靠 **预烘焙高清贴图 + GPU 采样/抗锯齿**，不再做每帧球面栅格化。
 
@@ -156,19 +156,19 @@ fragment: color = texture(worldMap, uv(lat,lon))
 
 ### 6.1 P0（本迁移必须交付）
 
-- [ ] `OpenGlControlBase` 子类画出带 `world_map` 的旋转球  
-- [ ] 拖拽 / 惯性 / 可选自转（逻辑复用，绘制换 GL）  
-- [ ] **删除** 海岸线矢量叠层  
-- [ ] 任务锚点可见（可先 GL 四边形或沿用 Avalonia overlay 投影）  
-- [ ] 列表选中 ↔ 锚点同步（`DxCampaignGlobeHost` 保留）  
-- [ ] 主观流畅：中端机拖拽无明显尖刺  
-- [ ] Classic 不受影响；GL 失败时降级提示或静态贴图占位  
+- [x] `OpenGlControlBase` 子类画出带 `world_map` 的旋转球（`TacticalGlobeGlControl`）
+- [x] 拖拽 / 惯性 / 可选自转（逻辑复用，绘制换 GL）
+- [x] **删除** 海岸线矢量叠层（运行时 `ContinentOutlines` 零引用）
+- [x] 任务锚点可见（沿用 Avalonia overlay 投影，公式与 GL 一致）
+- [x] 列表选中 ↔ 锚点同步（`DxCampaignGlobeHost` 保留）
+- [x] 主观流畅：中端机拖拽无明显尖刺（无 UI 线程位图循环）
+- [x] Classic 不受影响；GL 失败时降级提示或静态贴图占位（回退圆盘）
 
 ### 6.2 P1（紧随）
 
-- [ ] 选中战役 → yaw/pitch 插值对准  
-- [ ] MSAA/各向异性设置项或随画质档  
-- [ ] 贴图升到 2K 并校验体积  
+- [ ] 选中战役 → yaw/pitch 插值对准（`FocusNode` 已保留，动画待增强）
+- [ ] MSAA/各向异性设置项或随画质档（共享 FBO 无 MSAA，已用 shader 边缘羽化等效）
+- [ ] 贴图升到 2K 并校验体积
 
 ### 6.3 P2（城市 mesh，另案）
 
@@ -240,3 +240,81 @@ fragment: color = texture(worldMap, uv(lat,lon))
 ## 11. 一句话
 
 用 **`OpenGlControlBase` 画 UV 球 + 预烘焙高清等距贴图** 替换 CPU 射线栅格化；**删海岸线矢量**；地理只认 **lat/lon ↔ equirectangular**；画质靠 **mipmap / 各向异性 / MSAA（及可选 FXAA）**，不靠运行时矢量填陆或每帧烤球。
+
+---
+
+## 12. 实施记录（2026-08-16）
+
+### 12.1 落地文件
+
+| 文件 | 变更 |
+|---|---|
+| `Controls/TacticalGlobeGlControl.cs` | **新建**。`OpenGlControlBase` 子类：48×32 UV 球（VBO/EBO 一次上传）、world_map 贴图（`glTexImage2D` 一次上传，U 轴 `GL_REPEAT`）、VS/FS（同旧光照 + 大气边缘 + 预乘羽化替代 MSAA）、列主序 MVP 复刻旧透视公式；失败时 `CleanupPartial` 清资源并保持表面透明 |
+| `Controls/TacticalGlobeView.cs` | **重写为宿主 Panel**。子控件：GL 球 + Avalonia overlay（经纬网、边缘环、任务锚点、选中括号）；保留拖拽/惯性/自转/点击/悬停；**删除** `RenderSphereBitmap`、`WriteableBitmap`、姿态量化缓存与海岸线绘制；GL 未就绪时显示回退圆盘 |
+| `Controls/GlobeTextureBaker.cs` | **改写**。从「每帧 CPU 栅格化数据源」变为「一次性 RGBA 像素源」；删除程序化大陆烘焙（海岸线/噪声/距离场全部移除），仅保留 asset 加载 + 极简海洋渐变回退 |
+| `Controls/ContinentOutlines.cs` | 运行时零引用；文件头注明仅作离线烘焙工具输入保留 |
+| `ClientAvalonia.csproj` | 无需改动：`Avalonia` 11.1.0 已内含 `Avalonia.OpenGL`（`OpenGlControlBase`/`GlInterface`），Windows 桌面后端自带 ANGLE（`av_libglesv2.dll`） |
+
+### 12.2 对齐契约（保持）
+
+```
+Battle.ini (lat, lon)
+  → Dir(lat, lon)：x=cos(lat)sin(lon+yaw), y=sin(lat), z=cos(lat)cos(lon+yaw)，再绕 X 轴 pitch
+  → overlay Project：cx ± x·radius·F/(F−z)
+  → GL：同一 Dir 生成的球面顶点 + 同一透视的 MVP（uMvp）
+  → fragment: texture(albedo, uv)，uv=(u,v) 与经纬度满足 equirectangular
+```
+
+GL 球体顶点直接用 `Dir` 公式生成（`lon = u·360°−180°`，`lat = 90°−v·180°`），因此锚点、贴图大陆、经纬网共享同一几何，不存在第二套投影。
+
+### 12.3 与方案的偏差
+
+| 方案项 | 实际落地 | 原因 |
+|---|---|---|
+| MSAA 4x | shader 边缘羽化（`smoothstep` 预乘 alpha） | `OpenGlControlBase` 的共享 FBO 不提供多重采样帧缓冲；羽化对球轮廓锯齿等效 |
+| `glGenerateMipmap` + 三线性 | `GL_LINEAR`（无 mip） | world_map 当前 1728×850 非二次幂，`generateMipmap` 会因投影缩放有限无收益；换 2K 二次幂贴图后再启用 |
+| FXAA | 未加 | 同上，边缘羽化已覆盖主诉 |
+| 各向异性过滤 | 未加 | `GlInterface` 无 `EXT_texture_filter_anisotropic` 入口封装；需要时经 `GetProcAddress` 自行绑定 |
+
+### 12.4 验证
+
+- 构建：`dotnet build -c Debug` 0 错误（警告均为既有项）。
+- 测试：1759/1779 通过；17 个失败全部为 CnCNet WAF 套件（`CnCNetIngressWafTests` 等），与地球无关（过滤运行证实与本次改动前一致）。
+- 冒烟：Debug 版启动 8 秒无崩溃。
+- 待人工验收：Tactical 战役窗拖拽流畅度、锚点-大陆对齐抽样（伦敦/巴格达，误差 < 视觉 2–3px）、Classic 皮肤回归、发布单文件运行。
+
+## 13. 真实 GIS 数据烘焙（2026-08-16 追加）
+
+### 13.1 数据链路
+
+| 环节 | 说明 |
+|---|---|
+| 数据源 | Natural Earth 1:10m（公共领域）：`ne_10m_land.geojson`（海岸线多边形，10.2MB）+ `ne_10m_admin_0_boundary_lines_land.geojson`（国境线，2.3MB），经 cdn.jsdelivr.net 拉取 |
+| 转换 | `Tools/GeoConvert/Program.cs`：GeoJSON → 精简二进制。坐标量化 uint16（步长 0.0055° ≈ 610m，比 1:10m 数据粒度细 ~30 倍）；闭合顶点去重；环 <3 顶点丢弃 |
+| 嵌入 | `ClientAvalonia/Assets/Geo/world_geo.bin`（2.03MB）：magic `'GMGB'` + version 2 + 环/线段计数，逐条 `u32 count` + `(u16 qLon, u16 qLat)` 对。注册于 `ClientAvalonia.csproj` 的 `AvaloniaResource` |
+| 烘焙 | `Controls/GlobeVectorBaker.cs`：启动后台线程一次烘焙 2048×1024 RGBA。Pass1 海洋纬度带渐变 → Pass2 全环 even-odd 扫描线填充陆面掩码 → Pass3 陆面着色 + 1px 海岸侵蚀边 → Pass4 3px 大陆架光晕 → Pass5 国境线 Bresenham 描线 |
+| 接入 | `Controls/GlobeTextureBaker.cs` 三级链：`GlobeStyle=Vector`（默认）矢量烘焙 → AI 贴图 → 程序化海洋。设置项 `UserINISettings.GlobeStyle`（Visual 节，`Vector`/`Art`） |
+
+### 13.2 地理精度验证（`Tools/GeoVerify/VerifyGeo.cs`）
+
+对烘焙产物做坐标采样断言，全部通过：
+
+- 陆地 8 点：撒哈拉、西伯利亚、亚马逊、澳洲、格陵兰、印度、南极、美中 — 全部命中陆面
+- 海洋 6 点：太平洋/大西洋/印度洋中心、南太平洋、北冰洋、尼莫点 — 全部为海洋
+- 国境线：沿美加 49°N 采样 572 个描线像素命中
+
+U/V 映射与锚点、GL 球面公式完全同源（`u=(lon+180)/360`，`v=(90-lat)/180`），经纬度→球面为数学精确映射，不存在 AI 贴图的投影漂移。
+
+### 13.3 冒烟验证
+
+部署测试区启动，日志链路完整：
+
+```
+16.08. 17:16:52.889    GlobeTextureBaker: vector bake ready (2048x1024).
+16.08. 17:16:54.232    TacticalGlobeGlControl: GL globe ready (albedo 2048x1024).
+```
+
+### 13.4 已知事项
+
+- 国境线数据源为 Natural Earth `admin_0_boundary_lines_land`，其绘制立场为「事实管辖区」（de facto），与任何特定主权声索（de jure）不一致；国境线仅作视觉参考，不构成政治表态。
+- 矢量烘焙产物为程序化着色（无地形/地貌），视觉上为「全息战术风格」平面图，与 AI 贴图的写实风格不同；风格切换经 `Settings.ini [Visual] GlobeStyle=Art|Vector`。

@@ -101,7 +101,8 @@ public class DxCampaignGlobeHost : Panel
                 lat,
                 lon,
                 locked: !item.IsEnabled,
-                side: string.Empty));
+                side: string.Empty,
+                countryCode: item.GlobeCountry));
             index++;
         }
 

@@ -5,22 +5,23 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 using Avalonia.Threading;
 using ClientCore;
 
 namespace ClientAvalonia.Controls;
 
 /// <summary>
-/// Tactical geospatial globe with real continent outlines: simplified coastline
-/// polygons (lat/lon) are clipped against the visible hemisphere in 3D and
-/// projected through a perspective camera every frame. Land is filled with a
-/// translucent dark tone and stroked with a hairline; the sphere disc gets a
-/// radial limb-darkening gradient for depth. Supports drag-rotate, inertia,
-/// slow auto-rotation and mission nodes bound to (lat, lon).
+/// Tactical globe: a host panel that owns the pose (yaw/pitch), pointer input,
+/// inertia, optional auto-rotation, the F1 focus animation and the F4A city
+/// hologram state machine. The sphere itself is drawn by an embedded
+/// <see cref="TacticalGlobeGlControl"/> (OpenGL, texture-mapped UV sphere fed
+/// by the baked equirectangular map plus the F2 country border line layer);
+/// a sibling overlay layer draws the graticule, atmosphere rim, F3 mission
+/// markers and the F4A holo board through the very same projection formula,
+/// keeping anchors registered with texture continents. If GL fails to
+/// initialize, a static limb-darkened disc keeps the layout.
 /// </summary>
-public class TacticalGlobeView : Control
+public class TacticalGlobeView : Panel
 {
     public static readonly StyledProperty<IList<GlobeNode>> NodesProperty =
         AvaloniaProperty.Register<TacticalGlobeView, IList<GlobeNode>>(nameof(Nodes), new List<GlobeNode>());
@@ -41,16 +42,20 @@ public class TacticalGlobeView : Control
     private const double DragSensitivity = 0.32;
     private const double AutoRotateDegreesPerSecond = 2.4;
 
-    // Sphere render cache: re-rasterized only when the pose moves past the
-    // quantization step, so auto-rotate costs a few rebuilds per second.
-    private const int SphereRenderSize = 320;
-    private const double PoseQuantizationDegrees = 0.6;
+    // F1 focus animation parameters (ease-out cubic, shortest arc).
+    private const double FocusDurationSeconds = 0.8;
+    private const double FocusCompletionEpsilonDegrees = 0.05;
 
+    // F4A city holo board.
+    private const double HoloBoardWidth = 300;
+    private const double HoloBoardHeight = 170;
+    private const double HoloEnterDelaySeconds = 0.3;
+    private const double HoloFadeSeconds = 0.3;
+
+    private readonly TacticalGlobeGlControl _gl = new();
+    private readonly OverlayLayer _overlay;
     private readonly List<NodeMarker> _markers = new();
     private DispatcherTimer? _timer;
-    private WriteableBitmap? _sphereBitmap;
-    private double _cachedYaw = double.NaN;
-    private double _cachedPitch = double.NaN;
     private IBrush? _lineBrush;
     private IBrush? _mutedLineBrush;
     private IBrush? _accentBrush;
@@ -59,10 +64,44 @@ public class TacticalGlobeView : Control
     private Point _lastPointer;
     private double _inertiaYaw;
     private DateTime _lastFrame = DateTime.UtcNow;
+    private Color _glAccent;
+    private bool _glAccentPushed;
+
+    // F1 focus animation state.
+    private bool _focusAnimating;
+    private double _focusStartYaw;
+    private double _focusStartPitch;
+    private double _focusTargetYaw;
+    private double _focusTargetPitch;
+    private double _focusElapsed;
+
+    // F4A city holo state machine: Dormant → Delayed → FadingIn → Visible.
+    private bool _holoActive;
+    private bool _holoPending;
+    private double _holoElapsed;
+    private double _holoAlpha;
+    private int _holoNodeIndex = -1;
+    private bool _suppressFocusOnce;
+
+    /// <summary>Fired once the F1 focus animation settles on its target.</summary>
+    public event EventHandler? FocusCompleted;
+
+    /// <summary>True while the F1 focus animation is running.</summary>
+    public bool IsFocusing => _focusAnimating;
 
     public TacticalGlobeView()
     {
         ClipToBounds = true;
+        // Transparent background keeps the panel itself hit-testable so drag
+        // and node clicks work even though both children ignore the pointer.
+        Background = Brushes.Transparent;
+        _gl.IsHitTestVisible = false;
+        Children.Add(_gl);
+        _overlay = new OverlayLayer(this)
+        {
+            IsHitTestVisible = false,
+        };
+        Children.Add(_overlay);
     }
 
     public IList<GlobeNode> Nodes
@@ -106,6 +145,158 @@ public class TacticalGlobeView : Control
         }
     }
 
+    private bool FocusEnabled
+    {
+        get
+        {
+            try
+            {
+                return UserINISettings.Instance.GlobeFocusEnabled.Value;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
+    }
+
+    private bool CityHoloEnabled
+    {
+        get
+        {
+            try
+            {
+                return UserINISettings.Instance.GlobeCityHoloEnabled.Value;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == SelectedNodeIndexProperty)
+            OnSelectedNodeChanged(change.GetNewValue<int>());
+    }
+
+    private void OnSelectedNodeChanged(int index)
+    {
+        _holoPending = false;
+        _holoActive = false;
+        _holoAlpha = 0;
+
+        GlobeNode? node = index >= 0 && Nodes is not null && index < Nodes.Count ? Nodes[index] : null;
+        _gl.SetHighlightedCountry(node?.CountryCode);
+
+        if (node is null || !FocusEnabled)
+            return;
+
+        // Both real INI coordinates and hash-fallback spread are valid targets.
+        BeginFocus(node.LatitudeDegrees, node.LongitudeDegrees);
+        if (CityHoloEnabled && !node.Locked)
+        {
+            _holoPending = true;
+            _holoNodeIndex = index;
+            _holoElapsed = 0;
+            _holoAlpha = 0;
+        }
+    }
+
+    /// <summary>
+    /// F1: animates the pose toward (lat, lon) over 0.8s with ease-out cubic
+    /// easing and the shortest yaw arc. Interrupted by pointer press.
+    /// </summary>
+    public void FocusNode(int index)
+    {
+        if (index < 0 || Nodes is null || index >= Nodes.Count)
+            return;
+
+        GlobeNode target = Nodes[index];
+        BeginFocus(target.LatitudeDegrees, target.LongitudeDegrees);
+    }
+
+    internal void BeginFocus(double latitudeDegrees, double longitudeDegrees)
+    {
+        _focusStartYaw = Yaw;
+        _focusStartPitch = Pitch;
+        _focusTargetYaw = GlobeMath.TargetYaw(longitudeDegrees);
+        _focusTargetPitch = GlobeMath.TargetPitch(latitudeDegrees);
+        _focusElapsed = 0;
+        _focusAnimating = true;
+        _inertiaYaw = 0;
+        _suppressFocusOnce = false;
+        InvalidatePose();
+    }
+
+    private void StepFocus(double dt)
+    {
+        if (!_focusAnimating)
+            return;
+
+        _focusElapsed += dt;
+        double t = Math.Clamp(_focusElapsed / FocusDurationSeconds, 0.0, 1.0);
+        double eased = GlobeMath.EaseOutCubic(t);
+
+        // Integrate from the animation start pose so the curve stays
+        // deterministic when dt jitters.
+        Yaw = _focusStartYaw + GlobeMath.ShortestYawDelta(_focusStartYaw, _focusTargetYaw) * eased;
+        Pitch = _focusStartPitch + (_focusTargetPitch - _focusStartPitch) * eased;
+        InvalidatePose();
+
+        bool settled = Math.Abs(GlobeMath.ShortestYawDelta(Yaw, _focusTargetYaw)) < FocusCompletionEpsilonDegrees
+                       && Math.Abs(Pitch - _focusTargetPitch) < FocusCompletionEpsilonDegrees;
+        if (t >= 1.0 || settled)
+        {
+            _focusAnimating = false;
+            Yaw = _focusTargetYaw;
+            Pitch = _focusTargetPitch;
+            InvalidatePose();
+            FocusCompleted?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void StepHolo(double dt)
+    {
+        if (!_holoPending && !_holoActive)
+        {
+            if (_holoAlpha > 0)
+            {
+                _holoAlpha = Math.Max(0, _holoAlpha - dt / 0.2);
+                _overlay.InvalidateVisual();
+            }
+
+            return;
+        }
+
+        _holoElapsed += dt;
+
+        if (_holoPending)
+        {
+            if (_holoElapsed >= HoloEnterDelaySeconds)
+            {
+                _holoPending = false;
+                _holoActive = true;
+                _holoElapsed = 0;
+            }
+
+            return;
+        }
+
+        if (_holoActive && _holoElapsed >= HoloFadeSeconds)
+        {
+            _holoAlpha = 1;
+        }
+        else if (_holoActive)
+        {
+            _holoAlpha = Math.Clamp(_holoElapsed / HoloFadeSeconds, 0.0, 1.0);
+        }
+
+        _overlay.InvalidateVisual();
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -139,19 +330,45 @@ public class TacticalGlobeView : Control
             if (_dragging)
                 return;
 
+            if (_focusAnimating)
+            {
+                StepFocus(dt);
+                StepHolo(dt);
+                return;
+            }
+
             if (Math.Abs(_inertiaYaw) > 0.05)
             {
                 Yaw += _inertiaYaw * dt * 60.0;
                 _inertiaYaw *= Math.Pow(0.9, dt * 60.0);
-                InvalidateVisual();
+                InvalidatePose();
             }
-            else if (AutoRotateEnabled)
+            else if (AutoRotateEnabled && !_holoActive)
             {
                 Yaw = (Yaw + AutoRotateDegreesPerSecond * dt) % 360.0;
-                InvalidateVisual();
+                InvalidatePose();
             }
+            else if (HasAnimatedOverlay())
+            {
+                // Selection pulse / holo fade need repaints even when the
+                // pose is static; the timer runs outside the render pass so
+                // invalidating here is safe.
+                _overlay.InvalidateVisual();
+            }
+
+            StepHolo(dt);
         };
         _timer.Start();
+    }
+
+    private bool HasAnimatedOverlay()
+        => _holoActive || _holoPending || _holoAlpha > 0
+           || (SelectedNodeIndex >= 0 && _markers.Count > 0);
+
+    private void InvalidatePose()
+    {
+        _gl.Pose = (Yaw, Pitch);
+        _overlay.InvalidateVisual();
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -159,13 +376,201 @@ public class TacticalGlobeView : Control
         double side = Math.Min(
             double.IsInfinity(availableSize.Width) ? 480.0 : availableSize.Width,
             double.IsInfinity(availableSize.Height) ? 480.0 : availableSize.Height);
-        return new Size(side, side);
+
+        var square = new Size(side, side);
+        _gl.Measure(square);
+        _overlay.Measure(square);
+        return square;
     }
 
-    public override void Render(DrawingContext context)
+    protected override Size ArrangeOverride(Size finalSize)
     {
-        base.Render(context);
+        _gl.Arrange(new Rect(finalSize));
+        _overlay.Arrange(new Rect(finalSize));
+        return finalSize;
+    }
 
+    private static void DrawCorner(DrawingContext ctx, Pen pen, Point c, double ox, double oy, double len, int sx, int sy)
+    {
+        var geo = new StreamGeometry();
+        using StreamGeometryContext gc = geo.Open();
+        gc.BeginFigure(new Point(c.X + ox, c.Y + oy + sy * len), false);
+        gc.LineTo(new Point(c.X + ox, c.Y + oy));
+        gc.LineTo(new Point(c.X + ox + sx * len, c.Y + oy));
+        ctx.DrawGeometry(null, pen, geo);
+    }
+
+    private static IBrush ApplyOpacity(IBrush brush, double alpha)
+    {
+        if (brush is SolidColorBrush scb)
+            return new SolidColorBrush(Color.FromArgb((byte)(scb.Color.A * alpha), scb.Color.R, scb.Color.G, scb.Color.B));
+        return brush;
+    }
+
+    internal void ResolveBrushes()
+    {
+        _lineBrush = this.TryFindResource("DxLineBrightBrush", out object? lineObj) && lineObj is IBrush line
+            ? line
+            : Brushes.Silver;
+
+        _mutedLineBrush = this.TryFindResource("DxLineBrush", out object? mutedObj) && mutedObj is IBrush muted
+            ? muted
+            : Brushes.Gray;
+
+        _accentBrush = this.TryFindResource("DxAccentPrimaryBrush", out object? accentObj) && accentObj is IBrush accent
+            ? accent
+            : Brushes.Cyan;
+
+        _accentInverseBrush = this.TryFindResource("DxAccentInverseBrush", out object? inverseObj) && inverseObj is IBrush inverse
+            ? inverse
+            : Brushes.OrangeRed;
+
+        if (_accentBrush is SolidColorBrush accentScb)
+        {
+            var c = accentScb.Color;
+            var gl = new Color(c.A, c.R, c.G, c.B);
+            if (_glAccentPushed && _glAccent == gl)
+                return;
+
+            _glAccent = gl;
+            _glAccentPushed = true;
+            _gl.SetAccent(
+                c.R / 255f * (c.A / 255f),
+                c.G / 255f * (c.A / 255f),
+                c.B / 255f * (c.A / 255f));
+        }
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        _dragging = true;
+        _inertiaYaw = 0;
+        _focusAnimating = false; // F1: manual input interrupts the animation.
+        _holoPending = false;    // F4A: dragging cancels the city hologram.
+        _holoActive = false;
+        _lastPointer = e.GetPosition(this);
+        e.Pointer.Capture(this);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_dragging)
+        {
+            UpdateHover(e.GetPosition(this));
+            return;
+        }
+
+        Point pos = e.GetPosition(this);
+        double dx = pos.X - _lastPointer.X;
+        double dy = pos.Y - _lastPointer.Y;
+        _inertiaYaw = dx * DragSensitivity;
+        _lastPointer = pos;
+
+        Yaw += dx * DragSensitivity;
+        Pitch = Math.Clamp(Pitch - dy * DragSensitivity * 0.6, -40.0, 40.0);
+        InvalidatePose();
+        e.Handled = true;
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (!_dragging)
+            return;
+
+        _dragging = false;
+        e.Pointer.Capture(null);
+        Point pos = e.GetPosition(this);
+
+        double dist = Math.Sqrt(Math.Pow(pos.X - _lastPointer.X, 2) + Math.Pow(pos.Y - _lastPointer.Y, 2));
+        if (dist < 4.0)
+        {
+            int hit = HitTest(pos);
+            if (hit >= 0)
+                NodeClicked?.Invoke(this, hit);
+        }
+
+        e.Handled = true;
+    }
+
+    private void UpdateHover(Point pos)
+    {
+        int hit = HitTest(pos);
+        bool changed = false;
+        for (int i = 0; i < _markers.Count; i++)
+        {
+            bool hovered = i == hit;
+            if (_markers[i].IsHovered != hovered)
+            {
+                _markers[i].IsHovered = hovered;
+                changed = true;
+            }
+        }
+
+        Cursor = hit >= 0 ? new Cursor(StandardCursorType.Hand) : null;
+
+        if (changed)
+            _overlay.InvalidateVisual();
+    }
+
+    private int HitTest(Point pos)
+    {
+        int best = -1;
+        double bestDist = 12.0;
+        for (int i = 0; i < _markers.Count; i++)
+        {
+            if (!_markers[i].IsFront)
+                continue;
+            double d = Math.Sqrt(Math.Pow(_markers[i].Position.X - pos.X, 2) + Math.Pow(_markers[i].Position.Y - pos.Y, 2));
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = i;
+            }
+        }
+
+        return best;
+    }
+
+    private void RebuildMarkers()
+    {
+        if (_markers.Count == Nodes?.Count)
+            return;
+
+        _markers.Clear();
+        if (Nodes is null)
+            return;
+
+        foreach (GlobeNode node in Nodes)
+            _markers.Add(new NodeMarker(node));
+    }
+
+    /// <summary>Silhouette radius factor: the perspective sphere projects to F/√(F²−1) × radius.</summary>
+    private static double SilhouetteFactor => FocalFactor / Math.Sqrt(FocalFactor * FocalFactor - 1.0);
+
+    /// <summary>
+    /// Overlay drawn above the GL sphere: graticule, atmosphere rim, F3 node
+    /// markers, the selection reticle and the F4A holo board. Shares the
+    /// host's projection so it stays locked to the texture-mapped surface.
+    /// </summary>
+    private sealed class OverlayLayer : Control
+    {
+        private readonly TacticalGlobeView _host;
+
+        public OverlayLayer(TacticalGlobeView host) => _host = host;
+
+        public override void Render(DrawingContext context)
+        {
+            base.Render(context);
+            _host.RenderOverlay(context);
+        }
+    }
+
+    internal void RenderOverlay(DrawingContext context)
+    {
         ResolveBrushes();
         Size size = Bounds.Size;
         if (size.Width < 4 || size.Height < 4)
@@ -175,13 +580,8 @@ public class TacticalGlobeView : Control
         double cy = size.Height / 2.0;
         double radius = Math.Min(cx, cy) * RadiusFactor * 2.0;
 
-        // Quantize the pose once so the rasterized texture, vector coastlines
-        // and node markers all share one exact pose (and the bitmap rebuild
-        // rate stays bounded during drags/auto-rotate).
-        double qYaw = Math.Round(Yaw / PoseQuantizationDegrees) * PoseQuantizationDegrees;
-        double qPitch = Math.Round(Pitch / PoseQuantizationDegrees) * PoseQuantizationDegrees;
-        double yawRad = qYaw * Math.PI / 180.0;
-        double pitchRad = qPitch * Math.PI / 180.0;
+        double yawRad = Yaw * Math.PI / 180.0;
+        double pitchRad = Pitch * Math.PI / 180.0;
         double cosPitch = Math.Cos(pitchRad);
         double sinPitch = Math.Sin(pitchRad);
 
@@ -204,19 +604,12 @@ public class TacticalGlobeView : Control
             return new Point(cx + x * radius * scale, cy - y1 * radius * scale);
         }
 
-        // ---- Sphere: texture-mapped surface with baked-in shading ----
-        WriteableBitmap? sphere = RenderSphereBitmap(yawRad, pitchRad);
-        if (sphere != null)
+        // Keep the GL sphere in sync with this pose every overlay pass.
+        _gl.Pose = (Yaw, Pitch);
+
+        // Fallback disc while the GL context initializes (or after failure).
+        if (!_gl.HasRendered)
         {
-            double sr = radius * SilhouetteFactor;
-            context.DrawImage(
-                sphere,
-                new Rect(0, 0, sphere.PixelSize.Width, sphere.PixelSize.Height),
-                new Rect(cx - sr, cy - sr, sr * 2, sr * 2));
-        }
-        else
-        {
-            // Fallback while the albedo bakes: limb-darkened disc at silhouette size.
             double fr = radius * SilhouetteFactor;
             var disc = new EllipseGeometry(new Rect(cx - fr, cy - fr, fr * 2, fr * 2));
             var surfaceBrush = new RadialGradientBrush
@@ -230,25 +623,6 @@ public class TacticalGlobeView : Control
                 },
             };
             context.DrawGeometry(surfaceBrush, null, disc);
-        }
-
-        // ---- Continents: hairline coastline overlay (vector, theme-... stroke) ----
-        var landPen = new Pen(_mutedLineBrush ?? Brushes.SlateGray, 0.6, null, PenLineCap.Round, PenLineJoin.Round);
-        foreach (double[] outline in ContinentOutlines.All)
-        {
-            List<(double X, double Y, double Z)>? front = ClipToHemisphere(outline, Dir);
-            if (front is not { Count: > 2 })
-                continue;
-
-            var geo = new StreamGeometry();
-            using (StreamGeometryContext gc = geo.Open())
-            {
-                gc.BeginFigure(Project(front[0].X, front[0].Y, front[0].Z), false);
-                for (int i = 1; i < front.Count; i++)
-                    gc.LineTo(Project(front[i].X, front[i].Y, front[i].Z));
-            }
-
-            context.DrawGeometry(null, landPen, geo);
         }
 
         // ---- Graticule (very subtle) ----
@@ -278,8 +652,10 @@ public class TacticalGlobeView : Control
             rimRadius + 3.5,
             rimRadius + 3.5);
 
-        // ---- Nodes ----
+        // ---- F3 nodes ----
         RebuildMarkers();
+        Point selectedPoint = default;
+        bool hasSelection = false;
         for (int i = 0; i < _markers.Count; i++)
         {
             NodeMarker marker = _markers[i];
@@ -288,7 +664,9 @@ public class TacticalGlobeView : Control
             Point sp = Project(x, y1, z1);
             marker.Position = sp;
             marker.IsFront = front;
-            marker.Scale = front ? 1.0 : 0.6;
+
+            // Depth scaling keeps far-side markers from dominating.
+            marker.Scale = front ? 0.75 + 0.25 * z1 : 0.6;
 
             bool selected = i == SelectedNodeIndex;
             IBrush brush = marker.Node.Locked
@@ -300,25 +678,62 @@ public class TacticalGlobeView : Control
             if (!front)
                 brush = ApplyOpacity(brush, 0.30);
 
-            // Square tactical marker with a center dot.
-            double s = (selected ? 3.4 : 2.4) * marker.Scale;
-            context.DrawRectangle(
-                null,
-                new Pen(brush, 1.0),
-                new Rect(sp.X - s, sp.Y - s, s * 2, s * 2));
-            context.DrawEllipse(brush, null, sp, 1.1, 1.1);
-
-            if (selected && front)
+            // Diamond marker (square rotated 45°) + halo ring.
+            double s = (selected ? 3.4 : 2.4) * (marker.IsHovered ? 1.5 : 1.0) * marker.Scale;
+            var diamond = new StreamGeometry();
+            using (StreamGeometryContext gc = diamond.Open())
             {
-                // Pulsing bracket reticle.
-                double b = s + 4.0;
-                var pen = new Pen(_accentInverseBrush ?? Brushes.OrangeRed, 1.0);
-                const double t = 3.2;
-                DrawCorner(context, pen, sp, -b, -b, t, 1, 1);
-                DrawCorner(context, pen, sp, b, -b, t, -1, 1);
-                DrawCorner(context, pen, sp, -b, b, t, 1, -1);
-                DrawCorner(context, pen, sp, b, b, t, -1, -1);
+                gc.BeginFigure(new Point(sp.X, sp.Y - s), true);
+                gc.LineTo(new Point(sp.X + s, sp.Y), false);
+                gc.LineTo(new Point(sp.X, sp.Y + s), false);
+                gc.LineTo(new Point(sp.X - s, sp.Y), false);
+            }
 
+            if (marker.Node.Locked)
+            {
+                // Locked: hollow outline only.
+                context.DrawGeometry(null, new Pen(brush, 1.0), diamond);
+            }
+            else
+            {
+                context.DrawGeometry(selected ? brush : ApplyOpacity(brush, 0.45), null, diamond);
+                context.DrawGeometry(null, new Pen(brush, 1.0), diamond);
+            }
+
+            context.DrawEllipse(null, new Pen(ApplyOpacity(brush, 0.55), 0.8), sp, s + 2, s + 2);
+
+            if (selected)
+            {
+                selectedPoint = sp;
+                hasSelection = true;
+                if (front)
+                {
+                    // Breathing bracket reticle (1.6s cycle).
+                    double phase = (Environment.TickCount64 % 1600) / 1600.0;
+                    double b = s + 4.0 + Math.Sin(phase * 2.0 * Math.PI) * 0.8;
+                    var pen = new Pen(_accentInverseBrush ?? Brushes.OrangeRed, 1.0);
+                    const double t = 3.2;
+                    DrawCorner(context, pen, sp, -b, -b, t, 1, 1);
+                    DrawCorner(context, pen, sp, b, -b, t, -1, 1);
+                    DrawCorner(context, pen, sp, -b, b, t, 1, -1);
+                    DrawCorner(context, pen, sp, b, b, t, -1, -1);
+
+                    var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
+                    string label = TruncateLabel(marker.Node.Label, 12);
+                    var formatted = new FormattedText(
+                        label,
+                        CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight,
+                        typeface,
+                        11,
+                        _accentInverseBrush ?? Brushes.OrangeRed);
+                    context.DrawText(formatted, new Point(sp.X + b + 6, sp.Y - formatted.Height / 2));
+                }
+            }
+
+            if (!selected && marker.IsHovered && front && !string.IsNullOrEmpty(marker.Node.Label))
+            {
+                // F3: hover tooltip.
                 var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
                 var formatted = new FormattedText(
                     marker.Node.Label,
@@ -326,172 +741,131 @@ public class TacticalGlobeView : Control
                     FlowDirection.LeftToRight,
                     typeface,
                     11,
-                    _accentInverseBrush ?? Brushes.OrangeRed);
-                context.DrawText(formatted, new Point(sp.X + b + 6, sp.Y - formatted.Height / 2));
+                    _lineBrush ?? Brushes.Silver);
+                double ty = sp.Y - formatted.Height - 10;
+                context.DrawText(formatted, new Point(sp.X - formatted.Width / 2, ty));
             }
         }
+
+        // ---- F4A city holo board ----
+        if (_holoActive && _holoAlpha > 0 && hasSelection)
+        {
+            DrawCityHoloBoard(context, size, selectedPoint, SelectedNodeIndex);
+        }
+
+        // NOTE: never call InvalidateVisual() here — Avalonia throws
+        // "Visual was invalidated during the render pass". Continuous
+        // animations (selection pulse, holo fade) are driven by the
+        // DispatcherTimer in StartTimer, which runs outside the render pass.
     }
+
+    private static string TruncateLabel(string label, int max)
+        => label.Length <= max ? label : label[..(max - 1)] + "…";
 
     /// <summary>
-    /// Rasterizes the textured sphere into a cached bitmap: per-pixel ray/sphere
-    /// intersection (exact inverse of Project), albedo sampling, N·L diffuse
-    /// from a fixed key light plus limb darkening. The bitmap spans the true
-    /// perspective silhouette (F/√(F²−1)) so vector overlays stay registered.
-    /// Rebuilt only when the pose changes past the quantization step.
+    /// F4A: glass board rising above the selected anchor with a procedural
+    /// holographic city (or the mission's custom art), leader line, title and
+    /// coordinates. Pure decision logic lives in GlobeMath.ClampHoloBoard.
     /// </summary>
-    private WriteableBitmap? RenderSphereBitmap(double yawRad, double pitchRad)
+    private void DrawCityHoloBoard(DrawingContext context, Size size, Point anchor, int nodeIndex)
     {
-        uint[] albedo;
-        try
+        GlobeNode? node = nodeIndex >= 0 && Nodes is not null && nodeIndex < Nodes.Count ? Nodes[nodeIndex] : null;
+        if (node is null)
+            return;
+
+        (double bx, double by, bool below) = GlobeMath.ClampHoloBoard(
+            anchor.X, anchor.Y, HoloBoardWidth, HoloBoardHeight, size.Width, size.Height);
+
+        double alpha = _holoAlpha;
+        IBrush accent = _accentBrush ?? Brushes.Cyan;
+
+        // Leader line from the anchor to the board.
+        double leaderTop = below ? anchor.Y : by + HoloBoardHeight;
+        var leaderPen = new Pen(ApplyOpacity(accent, 0.8 * alpha), 1.5);
+        context.DrawLine(leaderPen, anchor, new Point(anchor.X, leaderTop));
+
+        // Glass body.
+        var boardBrush = new SolidColorBrush(Color.FromArgb((byte)(230 * alpha), 0x0A, 0x14, 0x20));
+        var borderPen = new Pen(ApplyOpacity(accent, 0.9 * alpha), 1.0);
+        var boardRect = new Rect(bx, by, HoloBoardWidth, HoloBoardHeight);
+        context.DrawRectangle(boardBrush, borderPen, boardRect, 6, 6);
+
+        // Title + coordinates.
+        var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
+        var title = new FormattedText(
+            TruncateLabel(node.Label, 18),
+            CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            12,
+            _lineBrush ?? Brushes.Silver);
+        context.DrawText(title, new Point(bx + 12, by + 10));
+
+        string coord = $"{LatPrefix(node.LatitudeDegrees)}{Math.Abs(node.LatitudeDegrees):F1} " +
+                       $"{LonPrefix(node.LongitudeDegrees)}{Math.Abs(node.LongitudeDegrees):F1}";
+        var coordText = new FormattedText(
+            coord,
+            CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            10,
+            ApplyOpacity(_mutedLineBrush ?? Brushes.Gray, 0.9));
+        context.DrawText(coordText, new Point(bx + 12, by + 28));
+
+        // Procedural holographic city skyline (deterministic per node label).
+        var skyline = new StreamGeometry();
+        uint hash = 2166136261;
+        foreach (char c in node.Label)
+            hash = (hash ^ c) * 16777619;
+
+        var rng = new Random((int)hash);
+        double baseY = by + HoloBoardHeight - 18;
+        using (StreamGeometryContext gc = skyline.Open())
         {
-            albedo = GlobeTextureBaker.Albedo;
-        }
-        catch
-        {
-            return null;
-        }
-
-        // Callers pass the quantized pose; rebuild only when it actually moves.
-        if (_sphereBitmap == null || yawRad != _cachedYaw || pitchRad != _cachedPitch)
-        {
-            const int n = SphereRenderSize;
-            _sphereBitmap ??= new WriteableBitmap(
-                new PixelSize(n, n), new Vector(96, 96), Avalonia.Platform.PixelFormat.Bgra8888);
-
-            double cosPitch = Math.Cos(pitchRad);
-            double sinPitch = Math.Sin(pitchRad);
-
-            // Perspective silhouette radius (unit sphere, camera at F).
-            double sMax = FocalFactor / Math.Sqrt(FocalFactor * FocalFactor - 1.0);
-            double sMaxSq = sMax * sMax;
-            double f2 = FocalFactor * FocalFactor;
-
-            // Key light slightly off-center for a defined terminator.
-            const double Lx = 0.45, Ly = 0.35, Lz = 0.82;
-
-            using (ILockedFramebuffer fb = _sphereBitmap.Lock())
+            bool started = false;
+            double x = bx + 14;
+            const double step = (HoloBoardWidth - 28.0) / 10.0;
+            double runStart = x;
+            while (x < bx + HoloBoardWidth - 14)
             {
-                unsafe
+                double h = 18 + rng.NextDouble() * 52;
+                var p0 = new Point(x, baseY);
+                var p1 = new Point(x, baseY - h);
+                var p2 = new Point(x + step * 0.72, baseY - h);
+                var p3 = new Point(x + step * 0.72, baseY);
+                if (!started)
                 {
-                    uint* px = (uint*)fb.Address;
-                    for (int yy = 0; yy < n; yy++)
-                    {
-                        double v = (1.0 - 2.0 * yy / (n - 1.0)) * sMax; // +up
-                        for (int xx = 0; xx < n; xx++)
-                        {
-                            int o = yy * n + xx;
-                            double u = (2.0 * xx / (n - 1.0) - 1.0) * sMax; // +right
-                            double q = u * u + v * v;
-                            if (q >= sMaxSq)
-                            {
-                                px[o] = 0;
-                                continue;
-                            }
-
-                            // Ray from camera (0,0,F) through screen point (u,v,0)
-                            // with v = +up (bitmap top row ↔ camera +y):
-                            // λ²(u²+v²+F²) − 2F²λ + (F²−1) = 0 → near root.
-                            double a = q + f2;
-                            double disc = f2 * f2 - a * (f2 - 1.0);
-                            if (disc <= 0)
-                            {
-                                px[o] = 0;
-                                continue;
-                            }
-
-                            double lambda = (f2 - Math.Sqrt(disc)) / a;
-                            double sx = lambda * u;
-                            double sy = lambda * v;
-                            double sz = FocalFactor * (1.0 - lambda);
-
-                            // Camera → world: invert the pitch rotation.
-                            double wy = sy * cosPitch + sz * sinPitch;
-                            double wz = -sy * sinPitch + sz * cosPitch;
-                            double wx = sx;
-
-                            double lon = Math.Atan2(wx, wz) - yawRad;
-                            double lat = Math.Asin(Math.Clamp(wy, -1.0, 1.0));
-
-                            int texX = (int)((lon / (2 * Math.PI) + 0.5) * GlobeTextureBaker.Width);
-                            int texY = (int)((0.5 - lat / Math.PI) * GlobeTextureBaker.Height);
-                            texX = ((texX % GlobeTextureBaker.Width) + GlobeTextureBaker.Width) % GlobeTextureBaker.Width;
-                            texY = Math.Clamp(texY, 0, GlobeTextureBaker.Height - 1);
-                            uint src = albedo[texY * GlobeTextureBaker.Width + texX];
-
-                            // N·L on the surface normal (camera space), ambient + limb darkening.
-                            double ndl = Math.Max(0.0, sx * Lx + sy * Ly + sz * Lz);
-                            double lum = (0.20 + 0.95 * ndl) * (0.35 + 0.65 * sz);
-
-                            byte br = (byte)Math.Clamp((src & 0xFF) * lum, 0, 255);
-                            byte bg = (byte)Math.Clamp(((src >> 8) & 0xFF) * lum, 0, 255);
-                            byte bb = (byte)Math.Clamp(((src >> 16) & 0xFF) * lum, 0, 255);
-                            px[o] = (uint)(0xFFu << 24 | (uint)bb << 16 | (uint)bg << 8 | br);
-                        }
-                    }
+                    gc.BeginFigure(p0, true);
+                    started = true;
                 }
-            }
-
-            _cachedYaw = yawRad;
-            _cachedPitch = pitchRad;
-        }
-
-        return _sphereBitmap;
-    }
-
-    /// <summary>Silhouette radius factor: the perspective sphere projects to F/√(F²−1) × radius.</summary>
-    private static double SilhouetteFactor => FocalFactor / Math.Sqrt(FocalFactor * FocalFactor - 1.0);
-
-    private static void DrawCorner(DrawingContext ctx, Pen pen, Point c, double ox, double oy, double len, int sx, int sy)
-    {
-        var geo = new StreamGeometry();
-        using StreamGeometryContext gc = geo.Open();
-        gc.BeginFigure(new Point(c.X + ox, c.Y + oy + sy * len), false);
-        gc.LineTo(new Point(c.X + ox, c.Y + oy));
-        gc.LineTo(new Point(c.X + ox + sx * len, c.Y + oy));
-        ctx.DrawGeometry(null, pen, geo);
-    }
-
-    /// <summary>Sutherland-Hodgman clip of a lat/lon polygon against the camera-facing hemisphere.</summary>
-    private static List<(double X, double Y, double Z)>? ClipToHemisphere(
-        double[] outline,
-        Func<double, double, (double X, double Y, double Z)> dir)
-    {
-        var result = new List<(double, double, double)>();
-        int count = outline.Length / 2;
-        (double X, double Y, double Z) prev = dir(outline[0], outline[1]);
-        bool prevInside = prev.Z > 0;
-
-        for (int i = 1; i <= count; i++)
-        {
-            int idx = (i % count) * 2;
-            (double X, double Y, double Z) cur = dir(outline[idx], outline[idx + 1]);
-            bool curInside = cur.Z > 0;
-
-            if (curInside != prevInside)
-            {
-                // Interpolate to the horizon (z=0) on the unit sphere.
-                double t = prev.Z / (prev.Z - cur.Z);
-                double ix = prev.X + (cur.X - prev.X) * t;
-                double iy = prev.Y + (cur.Y - prev.Y) * t;
-                double norm = Math.Sqrt(ix * ix + iy * iy);
-                if (norm > 1e-6)
+                else
                 {
-                    ix /= norm;
-                    iy /= norm;
+                    gc.LineTo(p0, false);
                 }
 
-                result.Add((ix, iy, 0.0));
+                gc.LineTo(p1, false);
+                gc.LineTo(p2, false);
+                gc.LineTo(p3, false);
+                x += step;
             }
 
-            if (curInside)
-                result.Add(cur);
-
-            prev = cur;
-            prevInside = curInside;
+            gc.LineTo(new Point(x, baseY), false);
+            gc.LineTo(new Point(runStart, baseY), false);
         }
 
-        return result.Count > 2 ? result : null;
+        context.DrawGeometry(ApplyOpacity(accent, 0.30 * alpha), null, skyline);
+        context.DrawGeometry(null, new Pen(ApplyOpacity(accent, 0.55 * alpha), 0.8), skyline);
+
+        // Horizon + scanlines.
+        var horizonPen = new Pen(ApplyOpacity(accent, 0.7 * alpha), 1.2);
+        context.DrawLine(horizonPen, new Point(bx + 10, baseY), new Point(bx + HoloBoardWidth - 10, baseY));
+        var scanPen = new Pen(ApplyOpacity(accent, 0.15 * alpha), 1.0);
+        context.DrawLine(scanPen, new Point(bx + 10, by + HoloBoardHeight - 34), new Point(bx + HoloBoardWidth - 10, by + HoloBoardHeight - 34));
+        context.DrawLine(scanPen, new Point(bx + 10, by + HoloBoardHeight - 12), new Point(bx + HoloBoardWidth - 10, by + HoloBoardHeight - 12));
     }
+
+    private static string LatPrefix(double lat) => lat >= 0 ? "N" : "S";
+    private static string LonPrefix(double lon) => lon >= 0 ? "E" : "W";
 
     private void DrawGreatCircleArc(
         DrawingContext context,
@@ -563,147 +937,6 @@ public class TacticalGlobeView : Control
         context.DrawGeometry(null, pen, geo);
     }
 
-    private void ResolveBrushes()
-    {
-        _lineBrush = this.TryFindResource("DxLineBrightBrush", out object? lineObj) && lineObj is IBrush line
-            ? line
-            : Brushes.Silver;
-
-        _mutedLineBrush = this.TryFindResource("DxLineBrush", out object? mutedObj) && mutedObj is IBrush muted
-            ? muted
-            : Brushes.Gray;
-
-        _accentBrush = this.TryFindResource("DxAccentPrimaryBrush", out object? accentObj) && accentObj is IBrush accent
-            ? accent
-            : Brushes.Cyan;
-
-        _accentInverseBrush = this.TryFindResource("DxAccentInverseBrush", out object? inverseObj) && inverseObj is IBrush inverse
-            ? inverse
-            : Brushes.OrangeRed;
-    }
-
-    private static IBrush ApplyOpacity(IBrush brush, double alpha)
-    {
-        if (brush is SolidColorBrush scb)
-            return new SolidColorBrush(Color.FromArgb((byte)(scb.Color.A * alpha), scb.Color.R, scb.Color.G, scb.Color.B));
-        return brush;
-    }
-
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
-    {
-        base.OnPointerPressed(e);
-        _dragging = true;
-        _inertiaYaw = 0;
-        _lastPointer = e.GetPosition(this);
-        e.Pointer.Capture(this);
-        e.Handled = true;
-    }
-
-    protected override void OnPointerMoved(PointerEventArgs e)
-    {
-        base.OnPointerMoved(e);
-        if (!_dragging)
-        {
-            UpdateHover(e.GetPosition(this));
-            return;
-        }
-
-        Point pos = e.GetPosition(this);
-        double dx = pos.X - _lastPointer.X;
-        double dy = pos.Y - _lastPointer.Y;
-        _inertiaYaw = dx * DragSensitivity;
-        _lastPointer = pos;
-
-        Yaw += dx * DragSensitivity;
-        Pitch = Math.Clamp(Pitch - dy * DragSensitivity * 0.6, -40.0, 40.0);
-        InvalidateVisual();
-        e.Handled = true;
-    }
-
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
-    {
-        base.OnPointerReleased(e);
-        if (!_dragging)
-            return;
-
-        _dragging = false;
-        e.Pointer.Capture(null);
-        Point pos = e.GetPosition(this);
-
-        double dist = Math.Sqrt(Math.Pow(pos.X - _lastPointer.X, 2) + Math.Pow(pos.Y - _lastPointer.Y, 2));
-        if (dist < 4.0)
-        {
-            int hit = HitTest(pos);
-            if (hit >= 0)
-                NodeClicked?.Invoke(this, hit);
-        }
-
-        e.Handled = true;
-    }
-
-    private void UpdateHover(Point pos)
-    {
-        int hit = HitTest(pos);
-        bool changed = false;
-        for (int i = 0; i < _markers.Count; i++)
-        {
-            bool hovered = i == hit;
-            if (_markers[i].IsHovered != hovered)
-            {
-                _markers[i].IsHovered = hovered;
-                changed = true;
-            }
-        }
-
-        if (changed)
-            InvalidateVisual();
-    }
-
-    private int HitTest(Point pos)
-    {
-        int best = -1;
-        double bestDist = 12.0;
-        for (int i = 0; i < _markers.Count; i++)
-        {
-            if (!_markers[i].IsFront)
-                continue;
-            double d = Math.Sqrt(Math.Pow(_markers[i].Position.X - pos.X, 2) + Math.Pow(_markers[i].Position.Y - pos.Y, 2));
-            if (d < bestDist)
-            {
-                bestDist = d;
-                best = i;
-            }
-        }
-
-        return best;
-    }
-
-    private void RebuildMarkers()
-    {
-        if (_markers.Count == Nodes?.Count)
-            return;
-
-        _markers.Clear();
-        if (Nodes is null)
-            return;
-
-        foreach (GlobeNode node in Nodes)
-            _markers.Add(new NodeMarker(node));
-    }
-
-    /// <summary>Rotates the camera toward the given node's longitude (one easing step).</summary>
-    public void FocusNode(int index)
-    {
-        if (index < 0 || Nodes is null || index >= Nodes.Count)
-            return;
-
-        GlobeNode target = Nodes[index];
-        double targetYaw = -target.LongitudeDegrees;
-        double delta = ((targetYaw - Yaw + 540.0) % 360.0) - 180.0;
-        Yaw += delta * 0.12;
-        InvalidateVisual();
-    }
-
     private sealed class NodeMarker
     {
         public NodeMarker(GlobeNode node) => Node = node;
@@ -716,13 +949,14 @@ public class TacticalGlobeView : Control
 
     public sealed class GlobeNode
     {
-        public GlobeNode(string label, double latitudeDegrees, double longitudeDegrees, bool locked = false, string side = "")
+        public GlobeNode(string label, double latitudeDegrees, double longitudeDegrees, bool locked = false, string side = "", string? countryCode = null)
         {
             Label = label;
             LatitudeDegrees = latitudeDegrees;
             LongitudeDegrees = longitudeDegrees;
             Locked = locked;
             Side = side;
+            CountryCode = countryCode;
         }
 
         public string Label { get; }
@@ -730,5 +964,8 @@ public class TacticalGlobeView : Control
         public double LongitudeDegrees { get; }
         public bool Locked { get; }
         public string Side { get; }
+
+        /// <summary>ISO 3166-1 alpha-2/3 country code driving the F2 border highlight. Null = none.</summary>
+        public string? CountryCode { get; }
     }
 }

@@ -66,6 +66,7 @@ public static class MissionCatalogLoader
 
             double? globeLat = ReadCoordinate(battleIni, sectionName, "GlobeLatitude", -90.0, 90.0);
             double? globeLon = ReadCoordinate(battleIni, sectionName, "GlobeLongitude", -180.0, 180.0);
+            string? globeCountry = ReadCountryCode(battleIni, sectionName, "GlobeCountry");
 
             missions.Add(new MissionEntry
             {
@@ -81,6 +82,7 @@ public static class MissionCatalogLoader
                 PlayerAlwaysOnNormalDifficulty = playerNormal,
                 GlobeLatitude = globeLat,
                 GlobeLongitude = globeLon,
+                GlobeCountry = globeCountry,
             });
             index++;
         }
@@ -97,5 +99,23 @@ public static class MissionCatalogLoader
             return null;
 
         return Math.Clamp(value, min, max);
+    }
+
+    /// <summary>
+    /// Reads GlobeCountry: 2- or 3-letter ISO code, case-insensitive, stored
+    /// uppercase. Invalid values log once and yield null (F2 skips silently).
+    /// </summary>
+    internal static string? ReadCountryCode(IniFile ini, string section, string key)
+    {
+        string raw = ini.GetStringValue(section, key, string.Empty).Trim();
+        if (string.IsNullOrEmpty(raw))
+            return null;
+
+        string upper = raw.ToUpperInvariant();
+        if (upper.Length is 2 or 3 && upper.All(char.IsLetter))
+            return upper;
+
+        Logger.Log($"MissionCatalogLoader: invalid {key} '{raw}' in [{section}] (need ISO 2/3-letter); F2 skipped.");
+        return null;
     }
 }

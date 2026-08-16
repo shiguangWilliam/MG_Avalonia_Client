@@ -469,6 +469,7 @@ public static class GameDataBindingApplier
                 ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
                 GlobeLatitude = m.GlobeLatitude,
                 GlobeLongitude = m.GlobeLongitude,
+                GlobeCountry = m.GlobeCountry,
             }).ToList();
 
             lbCampaignList.SetCatalogListItems(listItems);

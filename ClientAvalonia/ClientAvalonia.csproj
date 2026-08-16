@@ -57,5 +57,7 @@
     <EmbeddedResource Include="CnCNet\Waf\rules.default.json" LogicalName="ClientAvalonia.CnCNet.Waf.rules.default.json" />
     <None Include="CnCNet\Waf\rules.default.json" Link="Client\WafRules.default.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <AvaloniaResource Include="Assets\Glm\**\*" />
+    <AvaloniaResource Include="Assets\Geo\world_geo.bin" />
+    <AvaloniaResource Include="Assets\Geo\country_borders.bin" />
   </ItemGroup>
 </Project>

@@ -2,10 +2,9 @@ namespace ClientAvalonia.Controls;
 
 /// <summary>
 /// Simplified continent outlines as flat [lat, lon, lat, lon, ...] arrays in
-/// degrees. Each landmass is traced from one isthmus around its full coast back
-/// to the starting point so the polygon closes along the coast (no fake inland
-/// chord). Resolution ~1-3° — enough to read as Earth at launcher scale while
-/// strokes stay hairline-crisp. Small islands (Japan/UK/Indonesia) are skipped.
+/// degrees. Retained as an offline baking tool input only — the runtime globe
+/// renders the baked equirectangular texture on the GPU and carries **zero**
+/// references to this data (see tactical-globe-opengl-migration-2026-08-16.md).
 /// </summary>
 public static class ContinentOutlines
 {

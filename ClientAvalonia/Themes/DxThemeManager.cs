@@ -92,9 +92,13 @@ public static class DxThemeManager
         _ = (ResourceDictionary)AvaloniaXamlLoader.Load(
             new Uri(BaseUri + "DxCampaignTacticalStyles.axaml"));
 
-        // Bake the globe albedo (AI map or procedural) + warm GLM art plates
-        // on this background thread so the first campaign frame never stalls.
+        // Bake the globe albedo (vector bake / AI map / procedural) + warm GLM
+        // art plates on this background thread so the first campaign frame
+        // never stalls. The border library stays cold while
+        // GlobeBorderLibrary.CountryBordersEnabled is false.
         Controls.GlobeTextureBaker.WarmUp();
+        if (Controls.GlobeBorderLibrary.CountryBordersEnabled)
+            Controls.GlobeBorderLibrary.WarmUp();
         Assets.GlmAssets.WarmUp();
     }
 

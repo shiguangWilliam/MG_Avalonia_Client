@@ -187,6 +187,10 @@ namespace ClientCore
             AccentColor = new StringSetting(iniFile, VISUAL, "AccentColor", string.Empty);
             UiAnimationsEnabled = new BoolSetting(iniFile, VISUAL, "UiAnimationsEnabled", true);
             GlobeAutoRotateEnabled = new BoolSetting(iniFile, VISUAL, "GlobeAutoRotateEnabled", true);
+            GlobeStyle = new StringSetting(iniFile, VISUAL, "GlobeStyle", "Vector");
+            GlobeFocusEnabled = new BoolSetting(iniFile, VISUAL, "GlobeFocusEnabled", true);
+            GlobeBorderHighlightEnabled = new BoolSetting(iniFile, VISUAL, "GlobeBorderHighlightEnabled", true);
+            GlobeCityHoloEnabled = new BoolSetting(iniFile, VISUAL, "GlobeCityHoloEnabled", true);
 
             LoadFavoriteMaps(iniFile);
         }
@@ -212,6 +216,10 @@ namespace ClientCore
         public StringSetting AccentColor { get; private set; }
         public BoolSetting UiAnimationsEnabled { get; private set; }
         public BoolSetting GlobeAutoRotateEnabled { get; private set; }
+        public StringSetting GlobeStyle { get; private set; }
+        public BoolSetting GlobeFocusEnabled { get; private set; }
+        public BoolSetting GlobeBorderHighlightEnabled { get; private set; }
+        public BoolSetting GlobeCityHoloEnabled { get; private set; }
         public StringSetting Translation { get; private set; }
         public string TranslationFolderPath => SafePath.CombineDirectoryPath(
             ClientConfiguration.Instance.TranslationsFolderPath, Translation);
