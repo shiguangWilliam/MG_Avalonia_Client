@@ -7,6 +7,7 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
+using ClientAvalonia.Themes;
 using ClientCore;
 using ClientCore.Settings;
 using Rampastring.Tools;
@@ -466,6 +467,8 @@ public static class GameDataBindingApplier
                     ? null
                     : (m.Enabled ? enabledBrush : disabledBrush),
                 ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
+                GlobeLatitude = m.GlobeLatitude,
+                GlobeLongitude = m.GlobeLongitude,
             }).ToList();
 
             lbCampaignList.SetCatalogListItems(listItems);
@@ -575,6 +578,9 @@ public static class GameDataBindingApplier
     /// </summary>
     private static void EnsureCampaignControlSizes(UiNodeViewModel root)
     {
+        // Unconditional (as on main): Classic campaign buttons use the themed
+        // 14pt template whose 23px INI height clips the label; Tactical buttons
+        // get their size re-derived from generated textures later anyway.
         foreach (string id in new[] { "GDI", "Nod", "ThirdSide", "FourthSide" })
         {
             UiNodeViewModel? tab = FindVm(root, id);

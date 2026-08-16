@@ -9,71 +9,131 @@
 
   <UserControl.Styles>
     <Style Selector="TextBlock.tactical-column-title">
-      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontSize" Value="11" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="LetterSpacing" Value="3" />
       <Setter Property="Foreground" Value="{DynamicResource DxTextMutedBrush}" />
     </Style>
+    <!-- Floating glass panels: translucent dark fill + hairline border + soft
+         drop shadow so they read as HUD glass hovering over the globe. -->
     <Style Selector="Border.tactical-panel">
       <Setter Property="BorderBrush" Value="{DynamicResource DxLineBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="{DynamicResource DxSurface1Brush}" />
-      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Background" Value="{DynamicResource DxCampaignSurfaceGradient}" />
+      <Setter Property="Padding" Value="10,10" />
+      <Setter Property="BoxShadow" Value="0 8 24 0 #66000000" />
+    </Style>
+    <Style Selector="Border.accent-rail">
+      <Setter Property="Width" Value="2" />
+      <Setter Property="Background" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
   </UserControl.Styles>
 
+  <!-- Globe-dominant composition: the sphere fills the frame behind everything;
+       side panels float over its edges so the earth owns the visual center. -->
   <Panel>
-  <!-- Three-column tactical console: list / globe / briefing. Each column is a
-       real Grid column so the globe can never be covered by its neighbours. -->
-  <Grid ColumnDefinitions="330,*,390" Margin="16,14,16,12" MinWidth="940">
 
-    <!-- Left column: faction tabs on top, campaign list below -->
-    <DockPanel Grid.Column="0" Margin="0,0,14,0">
-      <TextBlock DockPanel.Dock="Top"
-                 Text="CAMPAIGN"
-                 Classes="tactical-column-title"
-                 Margin="2,0,0,8" />
-      <StackPanel x:Name="SideTabs"
-                  DockPanel.Dock="Top"
-                  Orientation="Horizontal"
-                  Spacing="6"
-                  Margin="0,0,0,10" />
-      <Border Classes="tactical-panel">
-        <ContentControl x:Name="ListHost" Margin="6" />
-      </Border>
-    </DockPanel>
+    <!-- Starfield plate behind the globe (Tactical art). -->
+    <Image x:Name="StarfieldPlate"
+           Stretch="UniformToFill"
+           Opacity="0.55"
+           IsHitTestVisible="False"
+           HorizontalAlignment="Stretch"
+           VerticalAlignment="Stretch" />
 
-    <!-- Middle column: tactical globe, dedicated column, never covered -->
+    <!-- ============ Globe layer (full-frame backdrop) ============ -->
     <ctrl:DxCampaignGlobeHost x:Name="GlobeHost"
-                              Grid.Column="1"
-                              MinWidth="220"
                               HorizontalAlignment="Stretch"
                               VerticalAlignment="Stretch"
                               OverlayRoot="{Binding}" />
 
-    <!-- Right column: briefing (top) + difficulty + actions (bottom) -->
-    <Grid Grid.Column="2" RowDefinitions="*,Auto" Margin="14,0,0,0">
-      <DockPanel Grid.Row="0">
-        <TextBlock DockPanel.Dock="Top"
-                   Text="BRIEFING"
-                   Classes="tactical-column-title"
-                   Margin="2,0,0,8" />
-        <Border Classes="tactical-panel">
-          <ContentControl x:Name="BriefingHost" Margin="6" />
-        </Border>
-      </DockPanel>
-      <StackPanel Grid.Row="1" Spacing="10" Margin="0,12,0,0">
-        <ContentControl x:Name="DifficultyHeaderHost" />
-        <ContentControl x:Name="DifficultyHost" />
+    <!-- ============ Side panels ============ -->
+    <Grid ColumnDefinitions="Auto,*,Auto"
+          HorizontalAlignment="Stretch"
+          VerticalAlignment="Stretch">
+
+      <!-- Left column: faction tabs + mission list -->
+      <Border x:Name="LeftPanel"
+              Grid.Column="0"
+              Classes="tactical-panel"
+              Width="300"
+              Margin="18,18,0,18"
+              VerticalAlignment="Stretch"
+              HorizontalAlignment="Left">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,10">
+            <TextBlock Text="CAMPAIGN"
+                       Classes="tactical-column-title" />
+            <StackPanel x:Name="SideTabs"
+                        Orientation="Horizontal"
+                        Spacing="6" />
+          </StackPanel>
+          <Border BorderThickness="0,1,0,0"
+                  BorderBrush="{DynamicResource DxLineMutedBrush}"
+                  VerticalAlignment="Stretch">
+            <ContentControl x:Name="ListHost" Margin="0,8,0,0" />
+          </Border>
+        </DockPanel>
+      </Border>
+      <!-- Accent rail on the globe-facing (right) edge of the left panel -->
+      <Border Classes="accent-rail"
+              Grid.Column="0"
+              HorizontalAlignment="Right"
+              Margin="0,18,0,18" />
+
+      <!-- Center column reserved for the globe (columns clamp it visually) -->
+      <Border Grid.Column="1" Background="Transparent" IsHitTestVisible="False" />
+
+      <!-- Right column: briefing + difficulty + actions -->
+      <Border x:Name="RightPanel"
+              Grid.Column="2"
+              Classes="tactical-panel"
+              Width="340"
+              Margin="0,18,18,18"
+              VerticalAlignment="Stretch"
+              HorizontalAlignment="Right">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top"
+                     Text="BRIEFING"
+                     Classes="tactical-column-title"
+                     Margin="0,0,0,10" />
+          <ContentControl x:Name="BriefingHost" VerticalAlignment="Stretch" />
+        </DockPanel>
+      </Border>
+      <!-- Accent rail on the globe-facing (left) edge of the right panel -->
+      <Border Classes="accent-rail"
+              Grid.Column="2"
+              HorizontalAlignment="Left"
+              Margin="0,18,0,18" />
+    </Grid>
+
+    <!-- Bottom action bar spans the full width beneath the globe horizon -->
+    <Border Classes="tactical-panel"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="0,0,0,16"
+            Padding="14,10"
+            CornerRadius="0">
+      <StackPanel Orientation="Horizontal" Spacing="18">
+        <ContentControl x:Name="DifficultyHeaderHost" VerticalAlignment="Center" />
+        <Border Width="1"
+                Height="16"
+                Background="{DynamicResource DxLineMutedBrush}"
+                VerticalAlignment="Center" />
+        <ContentControl x:Name="DifficultyHost" VerticalAlignment="Center" />
+        <Border Width="1"
+                Height="16"
+                Background="{DynamicResource DxLineMutedBrush}"
+                VerticalAlignment="Center" />
         <StackPanel x:Name="ButtonsRow"
                     Orientation="Horizontal"
                     Spacing="8"
-                    HorizontalAlignment="Right" />
+                    VerticalAlignment="Center" />
       </StackPanel>
-    </Grid>
-  </Grid>
+    </Border>
 
-  <!-- Unmapped INI controls are kept alive (bindings keep working) but hidden. -->
-  <Panel x:Name="MiscHost" IsVisible="False" />
+    <!-- Unmapped INI controls are kept alive (bindings keep working) but hidden. -->
+    <Panel x:Name="MiscHost" IsVisible="False" />
   </Panel>
 </UserControl>

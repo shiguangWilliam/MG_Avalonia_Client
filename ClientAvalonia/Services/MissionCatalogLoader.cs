@@ -64,6 +64,9 @@ public static class MissionCatalogLoader
                     or ClientCore.Enums.ClientType.Ares);
             bool playerNormal = battleIni.GetBooleanValue(sectionName, "PlayerAlwaysOnNormalDifficulty", false);
 
+            double? globeLat = ReadCoordinate(battleIni, sectionName, "GlobeLatitude", -90.0, 90.0);
+            double? globeLon = ReadCoordinate(battleIni, sectionName, "GlobeLongitude", -180.0, 180.0);
+
             missions.Add(new MissionEntry
             {
                 SectionName = sectionName,
@@ -76,11 +79,23 @@ public static class MissionCatalogLoader
                 BuildOffAlly = buildOffAlly,
                 RequiredAddon = requiredAddon,
                 PlayerAlwaysOnNormalDifficulty = playerNormal,
+                GlobeLatitude = globeLat,
+                GlobeLongitude = globeLon,
             });
             index++;
         }
 
         Logger.Log($"MissionCatalogLoader: loaded {missions.Count} missions from {relativePath}.");
         return missions.Count > 0;
+    }
+
+    /// <summary>Reads an optional numeric coordinate key, clamped to its valid range.</summary>
+    private static double? ReadCoordinate(IniFile ini, string section, string key, double min, double max)
+    {
+        string raw = ini.GetStringValue(section, key, string.Empty).Trim();
+        if (string.IsNullOrEmpty(raw) || !double.TryParse(raw, out double value))
+            return null;
+
+        return Math.Clamp(value, min, max);
     }
 }

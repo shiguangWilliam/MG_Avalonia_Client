@@ -5,6 +5,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using ClientCore;
 
@@ -39,10 +41,16 @@ public class TacticalGlobeView : Control
     private const double DragSensitivity = 0.32;
     private const double AutoRotateDegreesPerSecond = 2.4;
 
+    // Sphere render cache: re-rasterized only when the pose moves past the
+    // quantization step, so auto-rotate costs a few rebuilds per second.
+    private const int SphereRenderSize = 320;
+    private const double PoseQuantizationDegrees = 0.6;
+
     private readonly List<NodeMarker> _markers = new();
     private DispatcherTimer? _timer;
-    private IBrush? _landFill;
-    private IBrush? _landStroke;
+    private WriteableBitmap? _sphereBitmap;
+    private double _cachedYaw = double.NaN;
+    private double _cachedPitch = double.NaN;
     private IBrush? _lineBrush;
     private IBrush? _mutedLineBrush;
     private IBrush? _accentBrush;
@@ -167,10 +175,13 @@ public class TacticalGlobeView : Control
         double cy = size.Height / 2.0;
         double radius = Math.Min(cx, cy) * RadiusFactor * 2.0;
 
-        double yawRad = Yaw * Math.PI / 180.0;
-        double pitchRad = Pitch * Math.PI / 180.0;
-        double cosYaw = Math.Cos(yawRad);
-        double sinYaw = Math.Sin(yawRad);
+        // Quantize the pose once so the rasterized texture, vector coastlines
+        // and node markers all share one exact pose (and the bitmap rebuild
+        // rate stays bounded during drags/auto-rotate).
+        double qYaw = Math.Round(Yaw / PoseQuantizationDegrees) * PoseQuantizationDegrees;
+        double qPitch = Math.Round(Pitch / PoseQuantizationDegrees) * PoseQuantizationDegrees;
+        double yawRad = qYaw * Math.PI / 180.0;
+        double pitchRad = qPitch * Math.PI / 180.0;
         double cosPitch = Math.Cos(pitchRad);
         double sinPitch = Math.Sin(pitchRad);
 
@@ -193,22 +204,36 @@ public class TacticalGlobeView : Control
             return new Point(cx + x * radius * scale, cy - y1 * radius * scale);
         }
 
-        // ---- Sphere disc: limb-darkened surface ----
-        var disc = new EllipseGeometry(new Rect(cx - radius, cy - radius, radius * 2, radius * 2));
-        var surfaceBrush = new RadialGradientBrush
+        // ---- Sphere: texture-mapped surface with baked-in shading ----
+        WriteableBitmap? sphere = RenderSphereBitmap(yawRad, pitchRad);
+        if (sphere != null)
         {
-            Center = new RelativePoint(0.42, 0.38, RelativeUnit.Relative),
-            GradientStops =
+            double sr = radius * SilhouetteFactor;
+            context.DrawImage(
+                sphere,
+                new Rect(0, 0, sphere.PixelSize.Width, sphere.PixelSize.Height),
+                new Rect(cx - sr, cy - sr, sr * 2, sr * 2));
+        }
+        else
+        {
+            // Fallback while the albedo bakes: limb-darkened disc at silhouette size.
+            double fr = radius * SilhouetteFactor;
+            var disc = new EllipseGeometry(new Rect(cx - fr, cy - fr, fr * 2, fr * 2));
+            var surfaceBrush = new RadialGradientBrush
             {
-                new GradientStop(Color.FromRgb(0x11, 0x16, 0x1C), 0.0),
-                new GradientStop(Color.FromRgb(0x0B, 0x0E, 0x13), 0.62),
-                new GradientStop(Color.FromRgb(0x05, 0x07, 0x0A), 1.0),
-            },
-        };
-        context.DrawGeometry(surfaceBrush, null, disc);
+                Center = new RelativePoint(0.42, 0.38, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromRgb(0x11, 0x16, 0x1C), 0.0),
+                    new GradientStop(Color.FromRgb(0x0B, 0x0E, 0x13), 0.62),
+                    new GradientStop(Color.FromRgb(0x05, 0x07, 0x0A), 1.0),
+                },
+            };
+            context.DrawGeometry(surfaceBrush, null, disc);
+        }
 
-        // ---- Continents: clip polygon against the front hemisphere, then project ----
-        var landPen = new Pen(_landStroke ?? Brushes.SlateGray, 0.75, null, PenLineCap.Round, PenLineJoin.Round);
+        // ---- Continents: hairline coastline overlay (vector, theme-... stroke) ----
+        var landPen = new Pen(_mutedLineBrush ?? Brushes.SlateGray, 0.6, null, PenLineCap.Round, PenLineJoin.Round);
         foreach (double[] outline in ContinentOutlines.All)
         {
             List<(double X, double Y, double Z)>? front = ClipToHemisphere(outline, Dir);
@@ -218,12 +243,12 @@ public class TacticalGlobeView : Control
             var geo = new StreamGeometry();
             using (StreamGeometryContext gc = geo.Open())
             {
-                gc.BeginFigure(Project(front[0].X, front[0].Y, front[0].Z), true);
+                gc.BeginFigure(Project(front[0].X, front[0].Y, front[0].Z), false);
                 for (int i = 1; i < front.Count; i++)
                     gc.LineTo(Project(front[i].X, front[i].Y, front[i].Z));
             }
 
-            context.DrawGeometry(_landFill, landPen, geo);
+            context.DrawGeometry(null, landPen, geo);
         }
 
         // ---- Graticule (very subtle) ----
@@ -238,17 +263,20 @@ public class TacticalGlobeView : Control
         }
 
         // ---- Rim ----
-        context.DrawGeometry(
+        double rimRadius = radius * SilhouetteFactor;
+        context.DrawEllipse(
             null,
             new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.55), 1.0),
-            disc);
+            new Point(cx, cy),
+            rimRadius,
+            rimRadius);
         // Faint atmosphere ring just outside the rim.
         context.DrawEllipse(
             null,
             new Pen(ApplyOpacity(_accentBrush ?? Brushes.Cyan, 0.18), 3.0),
             new Point(cx, cy),
-            radius + 3.5,
-            radius + 3.5);
+            rimRadius + 3.5,
+            rimRadius + 3.5);
 
         // ---- Nodes ----
         RebuildMarkers();
@@ -303,6 +331,115 @@ public class TacticalGlobeView : Control
             }
         }
     }
+
+    /// <summary>
+    /// Rasterizes the textured sphere into a cached bitmap: per-pixel ray/sphere
+    /// intersection (exact inverse of Project), albedo sampling, N·L diffuse
+    /// from a fixed key light plus limb darkening. The bitmap spans the true
+    /// perspective silhouette (F/√(F²−1)) so vector overlays stay registered.
+    /// Rebuilt only when the pose changes past the quantization step.
+    /// </summary>
+    private WriteableBitmap? RenderSphereBitmap(double yawRad, double pitchRad)
+    {
+        uint[] albedo;
+        try
+        {
+            albedo = GlobeTextureBaker.Albedo;
+        }
+        catch
+        {
+            return null;
+        }
+
+        // Callers pass the quantized pose; rebuild only when it actually moves.
+        if (_sphereBitmap == null || yawRad != _cachedYaw || pitchRad != _cachedPitch)
+        {
+            const int n = SphereRenderSize;
+            _sphereBitmap ??= new WriteableBitmap(
+                new PixelSize(n, n), new Vector(96, 96), Avalonia.Platform.PixelFormat.Bgra8888);
+
+            double cosPitch = Math.Cos(pitchRad);
+            double sinPitch = Math.Sin(pitchRad);
+
+            // Perspective silhouette radius (unit sphere, camera at F).
+            double sMax = FocalFactor / Math.Sqrt(FocalFactor * FocalFactor - 1.0);
+            double sMaxSq = sMax * sMax;
+            double f2 = FocalFactor * FocalFactor;
+
+            // Key light slightly off-center for a defined terminator.
+            const double Lx = 0.45, Ly = 0.35, Lz = 0.82;
+
+            using (ILockedFramebuffer fb = _sphereBitmap.Lock())
+            {
+                unsafe
+                {
+                    uint* px = (uint*)fb.Address;
+                    for (int yy = 0; yy < n; yy++)
+                    {
+                        double v = (1.0 - 2.0 * yy / (n - 1.0)) * sMax; // +up
+                        for (int xx = 0; xx < n; xx++)
+                        {
+                            int o = yy * n + xx;
+                            double u = (2.0 * xx / (n - 1.0) - 1.0) * sMax; // +right
+                            double q = u * u + v * v;
+                            if (q >= sMaxSq)
+                            {
+                                px[o] = 0;
+                                continue;
+                            }
+
+                            // Ray from camera (0,0,F) through screen point (u,v,0)
+                            // with v = +up (bitmap top row ↔ camera +y):
+                            // λ²(u²+v²+F²) − 2F²λ + (F²−1) = 0 → near root.
+                            double a = q + f2;
+                            double disc = f2 * f2 - a * (f2 - 1.0);
+                            if (disc <= 0)
+                            {
+                                px[o] = 0;
+                                continue;
+                            }
+
+                            double lambda = (f2 - Math.Sqrt(disc)) / a;
+                            double sx = lambda * u;
+                            double sy = lambda * v;
+                            double sz = FocalFactor * (1.0 - lambda);
+
+                            // Camera → world: invert the pitch rotation.
+                            double wy = sy * cosPitch + sz * sinPitch;
+                            double wz = -sy * sinPitch + sz * cosPitch;
+                            double wx = sx;
+
+                            double lon = Math.Atan2(wx, wz) - yawRad;
+                            double lat = Math.Asin(Math.Clamp(wy, -1.0, 1.0));
+
+                            int texX = (int)((lon / (2 * Math.PI) + 0.5) * GlobeTextureBaker.Width);
+                            int texY = (int)((0.5 - lat / Math.PI) * GlobeTextureBaker.Height);
+                            texX = ((texX % GlobeTextureBaker.Width) + GlobeTextureBaker.Width) % GlobeTextureBaker.Width;
+                            texY = Math.Clamp(texY, 0, GlobeTextureBaker.Height - 1);
+                            uint src = albedo[texY * GlobeTextureBaker.Width + texX];
+
+                            // N·L on the surface normal (camera space), ambient + limb darkening.
+                            double ndl = Math.Max(0.0, sx * Lx + sy * Ly + sz * Lz);
+                            double lum = (0.20 + 0.95 * ndl) * (0.35 + 0.65 * sz);
+
+                            byte br = (byte)Math.Clamp((src & 0xFF) * lum, 0, 255);
+                            byte bg = (byte)Math.Clamp(((src >> 8) & 0xFF) * lum, 0, 255);
+                            byte bb = (byte)Math.Clamp(((src >> 16) & 0xFF) * lum, 0, 255);
+                            px[o] = (uint)(0xFFu << 24 | (uint)bb << 16 | (uint)bg << 8 | br);
+                        }
+                    }
+                }
+            }
+
+            _cachedYaw = yawRad;
+            _cachedPitch = pitchRad;
+        }
+
+        return _sphereBitmap;
+    }
+
+    /// <summary>Silhouette radius factor: the perspective sphere projects to F/√(F²−1) × radius.</summary>
+    private static double SilhouetteFactor => FocalFactor / Math.Sqrt(FocalFactor * FocalFactor - 1.0);
 
     private static void DrawCorner(DrawingContext ctx, Pen pen, Point c, double ox, double oy, double len, int sx, int sy)
     {
@@ -428,14 +565,6 @@ public class TacticalGlobeView : Control
 
     private void ResolveBrushes()
     {
-        _landFill = this.TryFindResource("DxGlobeLandFillBrush", out object? fillObj) && fillObj is IBrush fill
-            ? fill
-            : new SolidColorBrush(Color.FromArgb(0x46, 0x8F, 0xB8, 0xCC));
-
-        _landStroke = this.TryFindResource("DxGlobeLandStrokeBrush", out object? strokeObj) && strokeObj is IBrush stroke
-            ? stroke
-            : new SolidColorBrush(Color.FromRgb(0x9E, 0xC4, 0xD8));
-
         _lineBrush = this.TryFindResource("DxLineBrightBrush", out object? lineObj) && lineObj is IBrush line
             ? line
             : Brushes.Silver;

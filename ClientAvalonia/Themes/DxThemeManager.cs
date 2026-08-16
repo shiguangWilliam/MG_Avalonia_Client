@@ -91,6 +91,11 @@ public static class DxThemeManager
 
         _ = (ResourceDictionary)AvaloniaXamlLoader.Load(
             new Uri(BaseUri + "DxCampaignTacticalStyles.axaml"));
+
+        // Bake the globe albedo (AI map or procedural) + warm GLM art plates
+        // on this background thread so the first campaign frame never stalls.
+        Controls.GlobeTextureBaker.WarmUp();
+        Assets.GlmAssets.WarmUp();
     }
 
     public static string NormalizeStyle(string style)
@@ -122,6 +127,24 @@ public static class DxThemeManager
     {
         if (resources is null)
             return;
+
+        // Direct app-level entries shadow the merged theme dictionary on every
+        // later read — without clearing them first, a style switch would keep
+        // deriving brushes from the PREVIOUS theme's accent (e.g. Classic orange
+        // leaking into Tactical). Remove the override set, then re-derive from
+        // whatever the freshly swapped theme declares.
+        string[] overrideKeys =
+        [
+            "DxAccentPrimaryBrush",
+            "DxAccentInverseBrush",
+            "DxAccentSoftBrush",
+            "DxAccentGlowBrush",
+            "DxAccentBrush",
+            "DxCampaignBorderGlowBrush",
+            "DxCampaignListSelectedBorderBrush",
+        ];
+        foreach (string key in overrideKeys)
+            resources.Remove(key);
 
         if (resources.TryGetResource("DxAccentPrimaryBrush", null, out object? primaryObj)
             && primaryObj is SolidColorBrush primary)

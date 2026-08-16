@@ -51,13 +51,11 @@
     </StackPanel>
   </DataTemplate>
 
-  <!-- Mission list: thin-line panel; stretches to fill its column in the
-       three-column layout (INI fixed size ignored in Tactical). -->
+  <!-- Mission list: content only — the floating glass panel in
+       DxCampaignTacticalLayout provides the chrome. -->
   <DataTemplate x:Key="DxCampaignTacticalListBox" DataType="vm:UiNodeViewModel">
-    <Border CornerRadius="0"
-            BorderBrush="{DynamicResource DxLineBrush}"
-            BorderThickness="1"
-            Background="{DynamicResource DxSurface1Brush}"
+    <Border Background="Transparent"
+            BorderThickness="0"
             IsVisible="{Binding IsVisible}"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
@@ -67,7 +65,7 @@
                IsEnabled="{Binding IsEnabled}"
                Background="Transparent"
                BorderThickness="0"
-               Padding="4,6"
+               Padding="2,4"
                HorizontalAlignment="Stretch"
                VerticalAlignment="Stretch">
         <ListBox.ItemTemplate>
@@ -149,13 +147,11 @@
     </Border>
   </DataTemplate>
 
-  <!-- Briefing: intelligence panel; small preview frame retained; stretches
-       to fill its column (INI fixed size ignored in Tactical). -->
+  <!-- Briefing: content only — the floating glass panel provides the chrome;
+       small preview frame retained. -->
   <DataTemplate x:Key="DxCampaignTacticalBriefing" DataType="vm:UiNodeViewModel">
-    <Border CornerRadius="0"
-            BorderBrush="{DynamicResource DxLineBrush}"
-            BorderThickness="1"
-            Background="{DynamicResource DxSurface1Brush}"
+    <Border Background="Transparent"
+            BorderThickness="0"
             IsVisible="{Binding IsVisible}"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"

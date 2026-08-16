@@ -490,7 +490,12 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             try
             {
-                DxTransitions.ThemeSwap(this, () => Themes.DxThemeManager.Apply(targetStyle));
+                // The dictionary swap MUST complete before the UI tree is rebuilt:
+                // UiNodeViewModel.LoadImages picks textures based on IsTactical at
+                // build time. ThemeSwap defers its callback by the fade-out duration,
+                // which used to reload the tree under the OLD style — the root cause
+                // of the Classic/Tactical styles appearing swapped after a switch.
+                Themes.DxThemeManager.Apply(targetStyle);
                 UserINISettings.Instance.VisualStyle.Value = targetStyle;
             }
             catch (Exception ex)

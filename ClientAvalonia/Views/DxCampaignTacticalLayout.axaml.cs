@@ -1,5 +1,8 @@
 using System;
 using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using ClientAvalonia.Assets;
 using ClientAvalonia.Rendering;
 
 namespace ClientAvalonia.Views;
@@ -7,7 +10,8 @@ namespace ClientAvalonia.Views;
 /// <summary>
 /// Tactical campaign three-column console. Reparents INI-defined child nodes by ID
 /// into dedicated columns so the globe gets a real middle column instead of being
-/// stacked behind the list/briefing columns.
+/// stacked behind the list/briefing columns. Applies GLM art plates (starfield
+/// backdrop + panel texture) when available.
 /// </summary>
 public partial class DxCampaignTacticalLayout : UserControl
 {
@@ -15,7 +19,33 @@ public partial class DxCampaignTacticalLayout : UserControl
     {
         InitializeComponent();
         DataContextChanged += (_, _) => DistributeChildren();
-        AttachedToVisualTree += (_, _) => DistributeChildren();
+        AttachedToVisualTree += (_, _) =>
+        {
+            ApplyArtPlates();
+            DistributeChildren();
+        };
+    }
+
+    private void ApplyArtPlates()
+    {
+        Bitmap? starfield = GlmAssets.Starfield;
+        if (starfield != null && StarfieldPlate != null)
+            StarfieldPlate.Source = starfield;
+
+        Bitmap? panel = GlmAssets.TacticalPanel;
+        if (panel == null)
+            return;
+
+        var brush = new ImageBrush(panel)
+        {
+            Stretch = Stretch.UniformToFill,
+            Opacity = 0.55,
+        };
+
+        if (LeftPanel != null)
+            LeftPanel.Background = brush;
+        if (RightPanel != null)
+            RightPanel.Background = brush;
     }
 
     public void DistributeChildren()
@@ -50,7 +80,6 @@ public partial class DxCampaignTacticalLayout : UserControl
                     break;
 
                 case "lblMissionDescriptionHeader":
-                    // Replaced by the built-in BRIEFING column title.
                     MiscHost.Children.Add(wrapped);
                     break;
 
@@ -67,7 +96,6 @@ public partial class DxCampaignTacticalLayout : UserControl
                 case "lblNormal":
                 case "lblHard":
                 case "lblDifficultyNames":
-                    // Tactical uses the built-in CASUAL/STANDARD/MENTAL segment.
                     MiscHost.Children.Add(wrapped);
                     break;
 
@@ -81,7 +109,6 @@ public partial class DxCampaignTacticalLayout : UserControl
                     break;
 
                 default:
-                    // Unknown INI controls stay alive (bindings keep working) but hidden.
                     MiscHost.Children.Add(wrapped);
                     break;
             }

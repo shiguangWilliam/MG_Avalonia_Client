@@ -47,6 +47,8 @@ public class DxNodeTemplateSelector : IDataTemplate
             };
         }
 
+        // Classic: identical routing to main — the texture-driven campaign chrome
+        // (texture backdrop + gradient shell), NOT the generic placeholder templates.
         return vm.Id.ToLowerInvariant() switch
         {
             "campaignselector" => "DxCampaignRoot",

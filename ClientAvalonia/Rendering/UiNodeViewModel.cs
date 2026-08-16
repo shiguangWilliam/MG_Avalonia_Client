@@ -686,7 +686,10 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     private void ApplyTacticalTextures()
     {
         bool isButton = IsButtonLike();
-        bool isWindowRoot = Node.Props.ContainsKey("DrawMode") || Node.Props.ContainsKey("BackgroundTexture");
+        bool isMainMenuRoot = string.Equals(Node.WindowName, "MainMenu", StringComparison.OrdinalIgnoreCase)
+            && Node.Parent is null;
+        bool isWindowRoot = !isMainMenuRoot
+            && (Node.Props.ContainsKey("DrawMode") || Node.Props.ContainsKey("BackgroundTexture"));
 
         if (isButton)
         {

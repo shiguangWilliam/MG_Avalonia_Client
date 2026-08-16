@@ -18,10 +18,10 @@
                Stretch="Uniform"
                IsHitTestVisible="False"
                IsVisible="{Binding CheckBoxClearImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
-        <Border BorderBrush="{DynamicResource DxLineBrush}"
+        <Border BorderBrush="{DynamicResource DxCheckBoxBorderBrush}"
                 BorderThickness="1"
-                Background="{DynamicResource DxSurface1Brush}"
-                CornerRadius="0"
+                Background="{DynamicResource DxCheckBoxBackgroundBrush}"
+                CornerRadius="{DynamicResource DxCheckBoxRadius}"
                 IsVisible="{Binding CheckBoxClearImage, Converter={x:Static ObjectConverters.IsNull}}" />
       </Panel>
       <Panel IsVisible="{Binding IsChecked}">
@@ -29,13 +29,13 @@
                Stretch="Uniform"
                IsHitTestVisible="False"
                IsVisible="{Binding CheckBoxCheckedImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
-        <Border BorderBrush="{DynamicResource DxLineBrush}"
+        <Border BorderBrush="{DynamicResource DxCheckBoxBorderBrush}"
                 BorderThickness="1"
-                Background="{DynamicResource DxSurface1Brush}"
-                CornerRadius="0"
+                Background="{DynamicResource DxCheckBoxBackgroundBrush}"
+                CornerRadius="{DynamicResource DxCheckBoxRadius}"
                 IsVisible="{Binding CheckBoxCheckedImage, Converter={x:Static ObjectConverters.IsNull}}">
           <TextBlock Text="✓"
-                     Foreground="{DynamicResource DxAccentPrimaryBrush}"
+                     Foreground="{DynamicResource DxCheckBoxCheckBrush}"
                      FontSize="14"
                      FontWeight="Bold"
                      HorizontalAlignment="Center"

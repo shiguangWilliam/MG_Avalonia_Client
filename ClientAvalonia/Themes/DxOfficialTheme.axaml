@@ -35,6 +35,17 @@
   <SolidColorBrush x:Key="DxComboBackgroundBrush" Color="#CC14100C" />
   <SolidColorBrush x:Key="DxComboBorderBrush" Color="#6B4E2E" />
 
+  <!-- Floating overlay chrome (Options / Campaign / Create Game shells) -->
+  <SolidColorBrush x:Key="DxOverlayChromeBackground" Color="#CC14100C" />
+  <SolidColorBrush x:Key="DxOverlayChromeBorder" Color="#55FF8C32" />
+  <CornerRadius x:Key="DxOverlayChromeRadius">12</CornerRadius>
+
+  <!-- Checkbox chrome (original Classic look when no PNG exists) -->
+  <SolidColorBrush x:Key="DxCheckBoxBorderBrush" Color="#FFA648" />
+  <SolidColorBrush x:Key="DxCheckBoxBackgroundBrush" Color="#14100C" />
+  <SolidColorBrush x:Key="DxCheckBoxCheckBrush" Color="#FFA648" />
+  <CornerRadius x:Key="DxCheckBoxRadius">2</CornerRadius>
+
   <!-- Campaign chrome -->
   <SolidColorBrush x:Key="DxCampaignSurfaceBrush" Color="#CC12100E" />
   <SolidColorBrush x:Key="DxCampaignSurfaceElevatedBrush" Color="#E0181614" />

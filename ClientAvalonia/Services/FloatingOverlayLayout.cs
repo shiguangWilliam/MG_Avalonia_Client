@@ -14,8 +14,8 @@ public static class FloatingOverlayLayout
             ["GameCreationWindow"] = (520, 580),
         };
 
-    /// <summary>Tactical campaign console target size (three columns + globe).</summary>
-    public static (int Width, int Height) TacticalCampaignSize => (960, 640);
+    /// <summary>Tactical campaign console target size (globe-dominant composition).</summary>
+    public static (int Width, int Height) TacticalCampaignSize => (1240, 660);
 
     public static bool IsOverlayWindow(string windowSectionName)
         => FallbackSizes.ContainsKey(windowSectionName)

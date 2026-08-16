@@ -65,12 +65,12 @@
           <Border x:Name="PART_OverlayPanel"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
-                  CornerRadius="12"
-                  BorderBrush="#55FF8C32"
+                  CornerRadius="{DynamicResource DxOverlayChromeRadius}"
+                  BorderBrush="{DynamicResource DxOverlayChromeBorder}"
                   BorderThickness="1"
                   BoxShadow="0 12 40 0 #90000000"
                   ClipToBounds="False"
-                  Background="#CC14100C">
+                  Background="{DynamicResource DxOverlayChromeBackground}">
             <Grid>
               <ContentControl x:Name="PART_OverlayView"
                               HorizontalAlignment="Stretch"

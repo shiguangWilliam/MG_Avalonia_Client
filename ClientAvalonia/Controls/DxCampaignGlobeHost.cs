@@ -89,7 +89,13 @@ public class DxCampaignGlobeHost : Panel
                 continue;
             }
 
-            (double lat, double lon) = HashToSphere(item.Text ?? $"m{index}");
+            // Real coordinates from Battle.ini (GlobeLatitude/GlobeLongitude) take
+            // priority; missions without coordinates fall back to a deterministic
+            // hash spread so the globe still shows every mission.
+            (double lat, double lon) = item.HasGlobePosition
+                ? (item.GlobeLatitude!.Value, item.GlobeLongitude!.Value)
+                : HashToSphere(item.Text ?? $"m{index}");
+
             nodes.Add(new TacticalGlobeView.GlobeNode(
                 item.Text ?? $"M-{index:000}",
                 lat,
