@@ -5,8 +5,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using ClientAvalonia.Core;
+using ClientAvalonia.Controls;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Domain.Resources;
 using ClientCore;
@@ -93,6 +95,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         };
 
         InitializeComponent();
+        UpdateSolarSystemBackdrop();
 
         _overlay = new OverlayHostController(
             _ctx,
@@ -100,7 +103,8 @@ public partial class MainWindow : Window, IUiNavigationHost
             PART_OverlayView,
             PART_OverlayRawView,
             PART_FloatingOverlay,
-            PART_RootView);
+            PART_RootView,
+            PART_OverlayBackdrop);
         _cncLobby = new CnCNetLobbyController(_ctx);
         _cncGameRoom = new CnCNetGameRoomController(_ctx);
         _lobbyMaps = new LobbyMapController(_ctx);
@@ -275,6 +279,12 @@ public partial class MainWindow : Window, IUiNavigationHost
             ApplyViewportSize(_ctx.MainEngine.Context.Width, _ctx.MainEngine.Context.Height);
             CurrentWindow = windowName;
 
+            // Shared 3D backdrop: move the camera to this panel's pose.
+            SolarSystemDirector.OnNavigateTo(windowName);
+
+            if (windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+                _campaign.ApplyCampaignOverlay(vm, CampaignSideFilter.All);
+
             try
             {
                 if (windowName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
@@ -300,9 +310,21 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
     }
 
-    public void OpenFloatingOverlay(string windowName) => _overlay.OpenFloatingOverlay(windowName);
+    public void OpenFloatingOverlay(string windowName)
+    {
+        // Start the earth-focus zoom before the campaign shell mounts so the
+        // first painted frame is already mid-zoom (UI fades in afterward).
+        SolarSystemDirector.OnOverlayOpened(windowName);
+        _overlay.OpenFloatingOverlay(windowName);
+    }
 
-    public void CloseFloatingOverlay() => _overlay.CloseFloatingOverlay();
+    public void CloseFloatingOverlay()
+    {
+        string? closing = _ctx.FloatingOverlayWindow;
+        _overlay.CloseFloatingOverlay();
+        if (!string.IsNullOrEmpty(closing))
+            SolarSystemDirector.OnOverlayClosed(closing, CurrentWindow);
+    }
 
     public void OpenGameCreationOverlay() => _overlay.OpenGameCreationOverlay();
 
@@ -316,7 +338,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void CloseOptionsOverlay() => CloseFloatingOverlay();
 
-    public void OpenCampaignOverlay() => OpenFloatingOverlay("CampaignSelector");
+    public void OpenCampaignOverlay() => NavigateTo("CampaignSelector");
 
     private void CloseFloatingOverlaySilently() => CloseFloatingOverlay();
 
@@ -530,7 +552,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         PART_ThemeLoadingHost.IsVisible = false;
-        UpdateGenesisBackdrop();
+        UpdateSolarSystemBackdrop();
     }
 
     private void ReloadMainWindowUnderNewStyle()
@@ -692,7 +714,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private void UpdateTopBar()
     {
-        UpdateGenesisBackdrop();
+        UpdateSolarSystemBackdrop();
         bool show = ShouldShowTopBar();
         if (!show)
         {
@@ -718,15 +740,48 @@ public partial class MainWindow : Window, IUiNavigationHost
     }
 
     /// <summary>
-    /// Genesis dynamic backdrop: only in Tactical visual style, and only behind the
-    /// main menu so lobbies keep their INI-driven backgrounds.
+    /// Shared 3D solar-system backdrop: visible in Tactical style behind every
+    /// window (panels sample the same scene continuously). Honors the
+    /// SolarSystemEnabled user setting.
     /// </summary>
-    private void UpdateGenesisBackdrop()
+    private void UpdateSolarSystemBackdrop()
     {
-        bool visible = Themes.DxThemeManager.IsTactical
-            && CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase);
-        if (PART_GenesisBackdrop.IsVisible != visible)
-            PART_GenesisBackdrop.IsVisible = visible;
+        bool enabled = SolarSystemEnabled;
+        bool visible = Themes.DxThemeManager.IsTactical && enabled;
+        if (PART_SolarSystemBackdrop.IsVisible != visible)
+            PART_SolarSystemBackdrop.IsVisible = visible;
+
+        // Let the GL starfield own the chrome fill when active; keep #111 as
+        // Classic / disabled fallback so empty GL never flashes white.
+        if (PART_ClientChrome != null)
+            PART_ClientChrome.Background = visible
+                ? Brushes.Transparent
+                : new SolidColorBrush(Color.FromRgb(0x11, 0x11, 0x11));
+
+        if (visible)
+        {
+            SolarSystemDirector.Attach(PART_SolarSystemBackdrop);
+            PART_SolarSystemBackdrop.RenderOnce();
+        }
+        else
+        {
+            SolarSystemDirector.Detach();
+        }
+    }
+
+    private static bool SolarSystemEnabled
+    {
+        get
+        {
+            try
+            {
+                return ClientCore.UserINISettings.Instance.SolarSystemEnabled.Value;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
     }
 
     public void OpenPrivateMessagingOverlay(string? focusNick = null)
@@ -886,7 +941,10 @@ public partial class MainWindow : Window, IUiNavigationHost
         if (_ctx.ActiveRoot != null && CurrentWindow.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
             _lobbyMaps.ApplyLobbyData(_ctx.ActiveRoot, CurrentWindow);
 
-        if (_ctx.OverlayRoot != null
+        if (_ctx.ActiveRoot != null
+            && CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+            _campaign.ApplyCampaignOverlay(_ctx.ActiveRoot);
+        else if (_ctx.OverlayRoot != null
             && _ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
             _campaign.ApplyCampaignOverlay(_ctx.OverlayRoot);
     }

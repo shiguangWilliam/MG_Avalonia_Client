@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Controls;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Behaviors;
 using ClientAvalonia.IniUi.Binding;
@@ -11,6 +12,7 @@ using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Overlays;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
+using ClientAvalonia.Themes;
 using Rampastring.Tools;
 
 namespace ClientAvalonia.Views.Controllers;
@@ -23,6 +25,7 @@ internal sealed class OverlayHostController
     private readonly ContentControl _overlayRawView;
     private readonly Grid _floatingOverlay;
     private readonly Control _rootView;
+    private readonly Border _overlayBackdrop;
 
     public OverlayHostController(
         MainWindowContext ctx,
@@ -30,7 +33,8 @@ internal sealed class OverlayHostController
         ContentControl overlayView,
         ContentControl overlayRawView,
         Grid floatingOverlay,
-        Control rootView)
+        Control rootView,
+        Border overlayBackdrop)
     {
         _ctx = ctx;
         _overlayPanel = overlayPanel;
@@ -38,6 +42,7 @@ internal sealed class OverlayHostController
         _overlayRawView = overlayRawView;
         _floatingOverlay = floatingOverlay;
         _rootView = rootView;
+        _overlayBackdrop = overlayBackdrop;
     }
 
     public bool IsOpen => _floatingOverlay.IsVisible;
@@ -67,6 +72,41 @@ internal sealed class OverlayHostController
         {
             (int width, int height) = FloatingOverlayLayout.ResolveOverlaySize(iniPath, sectionName);
 
+            bool seamlessCampaign = windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+                && SolarSystemDirector.IsActive
+                && DxThemeManager.IsTactical;
+
+            if (seamlessCampaign)
+            {
+                // Full-bleed transparent shell so the shared 3D Earth is the
+                // only marble; UI panels float over the zoom.
+                ApplyCampaignSolarChrome();
+                width = Math.Max(width, (int)Math.Round(Math.Max(_floatingOverlay.Bounds.Width, 1)));
+                height = Math.Max(height, (int)Math.Round(Math.Max(_floatingOverlay.Bounds.Height, 1)));
+                if (_floatingOverlay.Bounds.Width >= 100 && _floatingOverlay.Bounds.Height >= 100)
+                {
+                    width = (int)Math.Round(_floatingOverlay.Bounds.Width);
+                    height = (int)Math.Round(_floatingOverlay.Bounds.Height);
+                }
+
+                _overlayPanel.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
+                _overlayPanel.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch;
+                _overlayPanel.Width = double.NaN;
+                _overlayPanel.Height = double.NaN;
+                _overlayView.Width = double.NaN;
+                _overlayView.Height = double.NaN;
+            }
+            else
+            {
+                ResetOverlayPanelChrome();
+                _overlayPanel.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+                _overlayPanel.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+                _overlayPanel.Width = width;
+                _overlayPanel.Height = height;
+                _overlayView.Width = width;
+                _overlayView.Height = height;
+            }
+
             _ctx.OverlayBehaviors.Clear();
             FloatingOverlayBehaviors.RegisterForOverlay(
                 _ctx.OverlayBehaviors,
@@ -85,10 +125,14 @@ internal sealed class OverlayHostController
                 _ctx.ResolveIniActionCatalog());
             _ctx.BindingSession.ApplyToTree(_ctx.OverlayRoot, windowName);
 
-            _overlayPanel.Width = width;
-            _overlayPanel.Height = height;
-            _overlayView.Width = width;
-            _overlayView.Height = height;
+            if (!seamlessCampaign)
+            {
+                _overlayPanel.Width = width;
+                _overlayPanel.Height = height;
+                _overlayView.Width = width;
+                _overlayView.Height = height;
+            }
+
             _overlayRawView.IsVisible = false;
             _overlayRawView.Content = null;
             _overlayView.IsVisible = true;
@@ -97,6 +141,10 @@ internal sealed class OverlayHostController
             _floatingOverlay.IsHitTestVisible = true;
             _rootView.IsHitTestVisible = false;
             _ctx.FloatingOverlayWindow = windowName;
+
+            // Campaign: lighten the scrim so the 3D earth-focus backdrop shows
+            // through; other overlays keep the default dimming.
+            ApplyOverlayScrim(windowName);
 
             if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
             {
@@ -321,9 +369,27 @@ internal sealed class OverlayHostController
     public void ResetOverlayPanelChrome()
     {
         _overlayPanel.Padding = new Thickness(0);
+        _overlayPanel.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+        _overlayPanel.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
         _overlayPanel.Background = new SolidColorBrush(Color.FromArgb(204, 20, 16, 12));
         _overlayPanel.BorderBrush = new SolidColorBrush(Color.FromArgb(85, 255, 140, 50));
         _overlayPanel.BorderThickness = new Thickness(1);
+        _overlayPanel.CornerRadius = new CornerRadius(2);
+        _overlayPanel.BoxShadow = BoxShadows.Parse("0 12 40 0 #90000000");
+    }
+
+    /// <summary>
+    /// Transparent full-bleed chrome for the solar-system campaign enter so
+    /// only the shared 3D Earth is visible behind HUD glass.
+    /// </summary>
+    private void ApplyCampaignSolarChrome()
+    {
+        _overlayPanel.Padding = new Thickness(0);
+        _overlayPanel.Background = Brushes.Transparent;
+        _overlayPanel.BorderBrush = Brushes.Transparent;
+        _overlayPanel.BorderThickness = new Thickness(0);
+        _overlayPanel.CornerRadius = new CornerRadius(0);
+        _overlayPanel.BoxShadow = default;
     }
 
     public void CloseFloatingOverlayCore(bool restoreIniOverlayView)
@@ -340,5 +406,21 @@ internal sealed class OverlayHostController
         _ctx.OverlayEngine = null;
         _ctx.OverlayBehaviors.Clear();
         _ctx.FloatingOverlayWindow = null;
+        ResetOverlayPanelChrome();
+        ApplyOverlayScrim(null);
+    }
+
+    private void ApplyOverlayScrim(string? windowName)
+    {
+        if (_overlayBackdrop is null)
+            return;
+
+        // Campaign overlay rides on the shared 3D earth-focus camera; keep the
+        // scrim faint so the planet stays visible behind the panel.
+        var campaignOverlay = windowName is not null
+            && (windowName.Contains("Campaign", StringComparison.OrdinalIgnoreCase)
+                || windowName.Contains("Land", StringComparison.OrdinalIgnoreCase));
+        var alpha = campaignOverlay && SolarSystemDirector.IsActive ? 0x30 : 0xB0;
+        _overlayBackdrop.Background = new SolidColorBrush(Color.FromArgb((byte)alpha, 0x00, 0x00, 0x10));
     }
 }

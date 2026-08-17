@@ -30,6 +30,8 @@ public static class UiBehaviorCatalog
                 OptionsWindowBehaviors.Register(registry, host);
                 break;
             case "CampaignSelector":
+                CampaignOverlayBehaviors.Register(registry, host);
+                break;
             case "StatisticsWindow":
             case "ExtrasWindow":
                 StubWindowBehaviors.Register(registry, host, windowName);

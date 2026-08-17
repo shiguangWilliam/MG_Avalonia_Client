@@ -20,7 +20,9 @@
            HorizontalAlignment="Stretch"
            VerticalAlignment="Stretch"
            ClipToBounds="True">
-      <Border Background="{DynamicResource DxSurface0Brush}" IsHitTestVisible="False" />
+      <!-- Transparent shell: the shared 3D solar-system backdrop (earth focus)
+           shows through; the campaign camera zooms onto the scene Earth. -->
+      <Border Background="Transparent" IsHitTestVisible="False" />
       <Border Height="1"
               VerticalAlignment="Top"
               Margin="12,10,12,0"

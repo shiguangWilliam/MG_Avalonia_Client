@@ -89,6 +89,52 @@ public class TacticalGlobeView : Panel
     /// <summary>True while the F1 focus animation is running.</summary>
     public bool IsFocusing => _focusAnimating;
 
+    /// <summary>
+    /// Bridge mode: the shared solar-system backdrop owns the Earth marble
+    /// (single GIS/pose source). Local GL sphere is hidden; overlay keeps
+    /// graticule/markers and mirrors yaw/pitch from the scene.
+    /// </summary>
+    public bool BridgeFromSolarSystem
+    {
+        get => _bridgeFromSolarSystem;
+        set
+        {
+            if (_bridgeFromSolarSystem == value)
+                return;
+
+            _bridgeFromSolarSystem = value;
+            _gl.IsVisible = !value;
+            if (value)
+            {
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch;
+            }
+
+            InvalidatePose();
+            InvalidateMeasure();
+        }
+    }
+
+    private bool _bridgeFromSolarSystem;
+    private double _bridgeAnchorOpacity = 1.0;
+
+    /// <summary>
+    /// When bridged, mission markers fade in with the campaign enter
+    /// choreography (0 = hidden, 1 = full).
+    /// </summary>
+    public double BridgeAnchorOpacity
+    {
+        get => _bridgeAnchorOpacity;
+        set
+        {
+            double v = Math.Clamp(value, 0.0, 1.0);
+            if (Math.Abs(_bridgeAnchorOpacity - v) < 1e-4)
+                return;
+            _bridgeAnchorOpacity = v;
+            _overlay.InvalidateVisual();
+        }
+    }
+
     public TacticalGlobeView()
     {
         ClipToBounds = true;
@@ -194,6 +240,21 @@ public class TacticalGlobeView : Panel
         if (node is null || !FocusEnabled)
             return;
 
+        if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
+        {
+            // Camera orbits to face the mission; Earth Kepler spin is unchanged.
+            SolarSystemDirector.FocusMission(node.LatitudeDegrees, node.LongitudeDegrees);
+            if (CityHoloEnabled && !node.Locked)
+            {
+                _holoPending = true;
+                _holoNodeIndex = index;
+                _holoElapsed = 0;
+                _holoAlpha = 0;
+            }
+
+            return;
+        }
+
         // Both real INI coordinates and hash-fallback spread are valid targets.
         BeginFocus(node.LatitudeDegrees, node.LongitudeDegrees);
         if (CityHoloEnabled && !node.Locked)
@@ -215,6 +276,12 @@ public class TacticalGlobeView : Panel
             return;
 
         GlobeNode target = Nodes[index];
+        if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
+        {
+            SolarSystemDirector.FocusMission(target.LatitudeDegrees, target.LongitudeDegrees);
+            return;
+        }
+
         BeginFocus(target.LatitudeDegrees, target.LongitudeDegrees);
     }
 
@@ -330,6 +397,15 @@ public class TacticalGlobeView : Panel
             if (_dragging)
                 return;
 
+            // Bridge: anchors project via shared VP; camera orbit is driven by
+            // Director (drag / mission lock). Local yaw no longer owns Earth.
+            if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
+            {
+                _overlay.InvalidateVisual();
+                StepHolo(dt);
+                return;
+            }
+
             if (_focusAnimating)
             {
                 StepFocus(dt);
@@ -373,6 +449,18 @@ public class TacticalGlobeView : Panel
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        // Bridge mode fills the campaign overlay so 3D-projected anchors can
+        // land anywhere the backdrop Earth appears inside the panel.
+        if (_bridgeFromSolarSystem)
+        {
+            double w = double.IsInfinity(availableSize.Width) ? 800.0 : availableSize.Width;
+            double h = double.IsInfinity(availableSize.Height) ? 600.0 : availableSize.Height;
+            var fill = new Size(Math.Max(1, w), Math.Max(1, h));
+            _gl.Measure(fill);
+            _overlay.Measure(fill);
+            return fill;
+        }
+
         double side = Math.Min(
             double.IsInfinity(availableSize.Width) ? 480.0 : availableSize.Width,
             double.IsInfinity(availableSize.Height) ? 480.0 : availableSize.Height);
@@ -444,6 +532,7 @@ public class TacticalGlobeView : Panel
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+
         _dragging = true;
         _inertiaYaw = 0;
         _focusAnimating = false; // F1: manual input interrupts the animation.
@@ -469,6 +558,16 @@ public class TacticalGlobeView : Panel
         _inertiaYaw = dx * DragSensitivity;
         _lastPointer = pos;
 
+        if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
+        {
+            // Inverse camera orbit: dragging right feels like spinning the globe left.
+            SolarSystemDirector.NudgeCameraOrbit(-dx * DragSensitivity, dy * DragSensitivity * 0.55);
+            SolarSystemDirector.SetCameraOrbitInertia(-_inertiaYaw, dy * DragSensitivity * 0.55);
+            _overlay.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
         Yaw += dx * DragSensitivity;
         Pitch = Math.Clamp(Pitch - dy * DragSensitivity * 0.6, -40.0, 40.0);
         InvalidatePose();
@@ -491,6 +590,10 @@ public class TacticalGlobeView : Panel
             int hit = HitTest(pos);
             if (hit >= 0)
                 NodeClicked?.Invoke(this, hit);
+        }
+        else if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
+        {
+            SolarSystemDirector.SetCameraOrbitInertia(-_inertiaYaw, 0);
         }
 
         e.Handled = true;
@@ -607,8 +710,9 @@ public class TacticalGlobeView : Panel
         // Keep the GL sphere in sync with this pose every overlay pass.
         _gl.Pose = (Yaw, Pitch);
 
-        // Fallback disc while the GL context initializes (or after failure).
-        if (!_gl.HasRendered)
+        // Fallback disc only while the local GL initializes and we are NOT
+        // bridged to the shared solar-system Earth (that marble is the source).
+        if (!_bridgeFromSolarSystem && !_gl.HasRendered)
         {
             double fr = radius * SilhouetteFactor;
             var disc = new EllipseGeometry(new Rect(cx - fr, cy - fr, fr * 2, fr * 2));
@@ -625,55 +729,83 @@ public class TacticalGlobeView : Panel
             context.DrawGeometry(surfaceBrush, null, disc);
         }
 
-        // ---- Graticule (very subtle) ----
-        var gridPen = new Pen(_mutedLineBrush ?? Brushes.Gray, 0.6);
-        var gridPenBright = new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.35), 0.7);
-        for (int m = 0; m < Meridians; m++)
-            DrawGreatCircleArc(context, m * 360.0 / Meridians, Dir, Project, m == 0 ? gridPenBright : gridPen);
-        for (int p = 1; p < Parallels; p++)
+        // Bridge: no local rim / graticule / atmosphere — those read as a
+        // second sphere sitting on top of the shared 3D Earth.
+        if (!_bridgeFromSolarSystem)
         {
-            double lat = -90.0 + p * (180.0 / Parallels);
-            DrawParallel(context, lat, Dir, Project, p == Parallels / 2 ? gridPenBright : gridPen);
-        }
+            // ---- Graticule (very subtle) ----
+            var gridPen = new Pen(_mutedLineBrush ?? Brushes.Gray, 0.6);
+            var gridPenBright = new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.35), 0.7);
+            for (int m = 0; m < Meridians; m++)
+                DrawGreatCircleArc(context, m * 360.0 / Meridians, Dir, Project, m == 0 ? gridPenBright : gridPen);
+            for (int p = 1; p < Parallels; p++)
+            {
+                double lat = -90.0 + p * (180.0 / Parallels);
+                DrawParallel(context, lat, Dir, Project, p == Parallels / 2 ? gridPenBright : gridPen);
+            }
 
-        // ---- Rim ----
-        double rimRadius = radius * SilhouetteFactor;
-        context.DrawEllipse(
-            null,
-            new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.55), 1.0),
-            new Point(cx, cy),
-            rimRadius,
-            rimRadius);
-        // Faint atmosphere ring just outside the rim.
-        context.DrawEllipse(
-            null,
-            new Pen(ApplyOpacity(_accentBrush ?? Brushes.Cyan, 0.18), 3.0),
-            new Point(cx, cy),
-            rimRadius + 3.5,
-            rimRadius + 3.5);
+            // ---- Rim ----
+            double rimRadius = radius * SilhouetteFactor;
+            context.DrawEllipse(
+                null,
+                new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.55), 1.0),
+                new Point(cx, cy),
+                rimRadius,
+                rimRadius);
+            // Faint atmosphere ring just outside the rim.
+            context.DrawEllipse(
+                null,
+                new Pen(ApplyOpacity(_accentBrush ?? Brushes.Cyan, 0.18), 3.0),
+                new Point(cx, cy),
+                rimRadius + 3.5,
+                rimRadius + 3.5);
+        }
 
         // ---- F3 nodes ----
         RebuildMarkers();
         Point selectedPoint = default;
         bool hasSelection = false;
+        double bridgeAlpha = _bridgeFromSolarSystem ? _bridgeAnchorOpacity : 1.0;
+        if (bridgeAlpha < 0.02)
+            return;
+
         for (int i = 0; i < _markers.Count; i++)
         {
             NodeMarker marker = _markers[i];
-            (double x, double y1, double z1) = Dir(marker.Node.LatitudeDegrees, marker.Node.LongitudeDegrees);
-            bool front = z1 > 0;
-            Point sp = Project(x, y1, z1);
+            bool front;
+            Point sp;
+            double depthScale;
+
+            if (_bridgeFromSolarSystem
+                && SolarSystemDirector.TryProjectEarthLatLon(
+                    marker.Node.LatitudeDegrees,
+                    marker.Node.LongitudeDegrees,
+                    this,
+                    out sp,
+                    out front))
+            {
+                depthScale = front ? 1.0 : 0.6;
+            }
+            else
+            {
+                (double x, double y1, double z1) = Dir(marker.Node.LatitudeDegrees, marker.Node.LongitudeDegrees);
+                front = z1 > 0;
+                sp = Project(x, y1, z1);
+                depthScale = front ? 0.75 + 0.25 * z1 : 0.6;
+            }
+
             marker.Position = sp;
             marker.IsFront = front;
 
             // Depth scaling keeps far-side markers from dominating.
-            marker.Scale = front ? 0.75 + 0.25 * z1 : 0.6;
+            marker.Scale = depthScale;
 
             bool selected = i == SelectedNodeIndex;
             IBrush brush = marker.Node.Locked
-                ? ApplyOpacity(_mutedLineBrush ?? Brushes.Gray, 0.7)
+                ? ApplyOpacity(_mutedLineBrush ?? Brushes.Gray, 0.7 * bridgeAlpha)
                 : selected || marker.IsHovered
-                    ? _accentInverseBrush ?? Brushes.OrangeRed
-                    : _accentBrush ?? Brushes.Cyan;
+                    ? ApplyOpacity(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha)
+                    : ApplyOpacity(_accentBrush ?? Brushes.Cyan, bridgeAlpha);
 
             if (!front)
                 brush = ApplyOpacity(brush, 0.30);
@@ -711,7 +843,7 @@ public class TacticalGlobeView : Panel
                     // Breathing bracket reticle (1.6s cycle).
                     double phase = (Environment.TickCount64 % 1600) / 1600.0;
                     double b = s + 4.0 + Math.Sin(phase * 2.0 * Math.PI) * 0.8;
-                    var pen = new Pen(_accentInverseBrush ?? Brushes.OrangeRed, 1.0);
+                    var pen = new Pen(ApplyOpacity(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha), 1.0);
                     const double t = 3.2;
                     DrawCorner(context, pen, sp, -b, -b, t, 1, 1);
                     DrawCorner(context, pen, sp, b, -b, t, -1, 1);
@@ -726,7 +858,7 @@ public class TacticalGlobeView : Panel
                         FlowDirection.LeftToRight,
                         typeface,
                         11,
-                        _accentInverseBrush ?? Brushes.OrangeRed);
+                        ApplyOpacity(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha));
                     context.DrawText(formatted, new Point(sp.X + b + 6, sp.Y - formatted.Height / 2));
                 }
             }
@@ -741,14 +873,14 @@ public class TacticalGlobeView : Panel
                     FlowDirection.LeftToRight,
                     typeface,
                     11,
-                    _lineBrush ?? Brushes.Silver);
+                    ApplyOpacity(_lineBrush ?? Brushes.Silver, bridgeAlpha));
                 double ty = sp.Y - formatted.Height - 10;
                 context.DrawText(formatted, new Point(sp.X - formatted.Width / 2, ty));
             }
         }
 
         // ---- F4A city holo board ----
-        if (_holoActive && _holoAlpha > 0 && hasSelection)
+        if (_holoActive && _holoAlpha > 0 && hasSelection && bridgeAlpha > 0.4)
         {
             DrawCityHoloBoard(context, size, selectedPoint, SelectedNodeIndex);
         }

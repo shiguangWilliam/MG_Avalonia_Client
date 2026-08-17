@@ -86,7 +86,11 @@ public static class TacticalAssetFactory
         return bmp;
     }
 
-    /// <summary>Dark cold-surface window chrome texture with scan lines and an accent rail.</summary>
+    /// <summary>
+    /// Dark cold-surface window chrome texture with scan lines and an accent rail.
+    /// Alpha 0xD8 (84%) lets the shared 3D solar-system backdrop show through
+    /// behind INI window roots while keeping text contrast.
+    /// </summary>
     public static Bitmap CreateWindowChrome(int width, int height)
     {
         width = Math.Max(1, width);
@@ -101,9 +105,9 @@ public static class TacticalAssetFactory
             EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
             GradientStops =
             {
-                new GradientStop(Color.FromRgb(0x08, 0x0A, 0x0E), 0),
-                new GradientStop(Color.FromRgb(0x0D, 0x11, 0x16), 0.5),
-                new GradientStop(Color.FromRgb(0x07, 0x09, 0x0D), 1),
+                new GradientStop(Color.FromArgb(0xD8, 0x08, 0x0A, 0x0E), 0),
+                new GradientStop(Color.FromArgb(0xD8, 0x0D, 0x11, 0x16), 0.5),
+                new GradientStop(Color.FromArgb(0xD8, 0x07, 0x09, 0x0D), 1),
             },
         };
         ctx.DrawRectangle(baseBrush, null, new Rect(0, 0, width, height));

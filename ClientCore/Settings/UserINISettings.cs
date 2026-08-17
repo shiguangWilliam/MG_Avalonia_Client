@@ -191,6 +191,7 @@ namespace ClientCore
             GlobeFocusEnabled = new BoolSetting(iniFile, VISUAL, "GlobeFocusEnabled", true);
             GlobeBorderHighlightEnabled = new BoolSetting(iniFile, VISUAL, "GlobeBorderHighlightEnabled", true);
             GlobeCityHoloEnabled = new BoolSetting(iniFile, VISUAL, "GlobeCityHoloEnabled", true);
+            SolarSystemEnabled = new BoolSetting(iniFile, VISUAL, "SolarSystemEnabled", true);
 
             LoadFavoriteMaps(iniFile);
         }
@@ -220,6 +221,7 @@ namespace ClientCore
         public BoolSetting GlobeFocusEnabled { get; private set; }
         public BoolSetting GlobeBorderHighlightEnabled { get; private set; }
         public BoolSetting GlobeCityHoloEnabled { get; private set; }
+        public BoolSetting SolarSystemEnabled { get; private set; }
         public StringSetting Translation { get; private set; }
         public string TranslationFolderPath => SafePath.CombineDirectoryPath(
             ClientConfiguration.Instance.TranslationsFolderPath, Translation);

@@ -476,7 +476,9 @@ public static class GameDataBindingApplier
             lbCampaignList.SetCatalogListItems(listItems);
             int firstSelectable = FindFirstSelectableMissionIndex(missions);
             session.LastSelectableCampaignIndex = firstSelectable;
-            lbCampaignList.SelectedIndex = firstSelectable >= 0 ? firstSelectable : 0;
+            // Enter with no selection so the camera does not auto-focus a mission
+            // (avoids a high-speed framing jump on top of the zoom-in).
+            lbCampaignList.SelectedIndex = -1;
             WireCampaignSelection(
                 lbCampaignList,
                 FindVm(root, "tbMissionDescription"),
@@ -634,6 +636,15 @@ public static class GameDataBindingApplier
         void UpdateDescription()
         {
             int index = listVm.SelectedIndex;
+            if (index < 0)
+            {
+                descriptionVm.SetMissionBriefing(MissionBriefingParsed.Empty, statusHint: null);
+                descriptionVm.SetPreviewImage(null);
+                if (launchButton != null)
+                    launchButton.IsEnabled = false;
+                return;
+            }
+
             MissionEntry? mission = session.GetSelectedMission(index);
             if (mission != null && mission.IsHeader)
             {
@@ -712,6 +723,66 @@ public static class GameDataBindingApplier
         }
 
         return missions.Count > 0 ? 0 : -1;
+    }
+
+    /// <summary>
+    /// Tactical main-menu button labels: MainMenu.ini ships texture-only buttons with
+    /// empty Text=, so Fluent nav chrome needs C#-assigned Chinese labels. Classic keeps
+    /// PNG chrome and is untouched.
+    /// </summary>
+    public static void ApplyMainMenu(UiNodeViewModel root)
+    {
+        if (!DxThemeManager.IsTactical)
+            return;
+
+        SetButtonLabel(root, "btnNewCampaign", "战役", "Client:Main:ButtonNewCampaign");
+        SetButtonLabel(root, "btnLoadGame", "载入游戏", "Client:Main:ButtonLoadGame");
+        SetButtonLabel(root, "btnCnCNet", "CnCNet", "Client:Main:CnCNetLobby");
+        SetButtonLabel(root, "btnLan", "局域网", "Client:Main:LANGameLobby");
+        SetButtonLabel(root, "btnSkirmish", "遭遇战", "Client:Main:FilterSkirmish");
+        SetButtonLabel(root, "btnOptions", "选项", "Client:Main:OptionsF12");
+        SetButtonLabel(root, "btnExit", "退出", "Client:ClientGClient:ButtonQuitGame");
+        SetButtonLabel(root, "btnStatistics", "统计", "Client:Main:Statistics");
+        SetButtonLabel(root, "btnCredits", "制作人员", "Client:Main:Credits");
+        // Translation.ini maps MapEditor to "地图截屏器" (legacy DX label); keep a
+        // clearer nav label for the Tactical console.
+        SetButtonLabel(root, "btnMapEditor", "地图编辑器", "Client:Main:TacticalMapEditor");
+
+        // Compact footer chips — strip the longer "统计数据" form.
+        UiNodeViewModel? stats = FindVm(root, "btnStatistics");
+        if (stats != null && stats.Text is { } statsText && statsText.StartsWith("统计", StringComparison.Ordinal))
+        {
+            stats.SetDisplayText("统计");
+            stats.RefreshLayout();
+        }
+    }
+
+    private static void SetButtonLabel(UiNodeViewModel root, string id, string fallback, string l10nKey)
+    {
+        UiNodeViewModel? btn = FindVm(root, id);
+        if (btn == null)
+            return;
+
+        string label = fallback.L10N(l10nKey);
+        // Trim hotkey / mode suffixes for compact nav chrome.
+        if (id.Equals("btnOptions", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnLan", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnExit", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnCnCNet", StringComparison.OrdinalIgnoreCase))
+        {
+            int paren = label.IndexOf('(');
+            if (paren > 0)
+                label = label[..paren].Trim();
+            if (label.EndsWith("大厅", StringComparison.Ordinal))
+                label = label[..^2].Trim();
+            if (label.EndsWith("模式", StringComparison.Ordinal))
+                label = label[..^2].Trim();
+            if (label.Equals("退出游戏", StringComparison.Ordinal))
+                label = "退出";
+        }
+
+        btn.SetDisplayText(label);
+        btn.RefreshLayout();
     }
 
     private static UiNodeViewModel? FindVm(UiNodeViewModel root, string id)

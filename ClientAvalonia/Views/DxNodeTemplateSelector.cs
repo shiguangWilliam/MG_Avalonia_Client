@@ -27,11 +27,27 @@ public class DxNodeTemplateSelector : IDataTemplate
 
     public bool Match(object? data) => data is UiNodeViewModel;
 
-    /// <summary>Maps campaign control ids to dedicated chrome templates (INI unchanged).</summary>
+    /// <summary>Maps campaign / main-menu control ids to dedicated chrome templates (INI unchanged).</summary>
     private static string ResolveTemplateKey(UiNodeViewModel vm)
     {
         if (DxThemeManager.IsTactical)
         {
+            if (IsMainMenu(vm))
+            {
+                return vm.Id.ToLowerInvariant() switch
+                {
+                    "mainmenu" => "DxMainMenuTacticalRoot",
+                    "btnnewcampaign" => "DxMainMenuTacticalNavPrimary",
+                    "btnloadgame" or "btncncnet" or "btnlan" or "btnskirmish"
+                        or "btnoptions" or "btnexit" => "DxMainMenuTacticalNav",
+                    "btnstatistics" or "btncredits" or "btnmapeditor" => "DxMainMenuTacticalLink",
+                    "lblversion" or "lblupdatestatus" => "DxMainMenuTacticalStatusLink",
+                    "lblcncnetstatus" or "lblcncnetplayercount" or "txtversion"
+                        => "DxMainMenuTacticalStatus",
+                    _ => vm.TemplateKey,
+                };
+            }
+
             return vm.Id.ToLowerInvariant() switch
             {
                 "campaignselector" => "DxCampaignTacticalRoot",
@@ -64,4 +80,7 @@ public class DxNodeTemplateSelector : IDataTemplate
             _ => vm.TemplateKey,
         };
     }
+
+    private static bool IsMainMenu(UiNodeViewModel vm)
+        => string.Equals(vm.Node.WindowName, "MainMenu", StringComparison.OrdinalIgnoreCase);
 }

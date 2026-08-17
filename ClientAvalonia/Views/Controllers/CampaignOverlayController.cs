@@ -21,12 +21,26 @@ internal sealed class CampaignOverlayController
         GameDataBindingApplier.ApplyCampaignOverlay(root, _ctx.GameResources, _ctx.LobbySession, resources, sideFilter);
     }
 
+    /// <summary>Active campaign tree: root panel or legacy floating overlay.</summary>
+    public UiNodeViewModel? ResolveCampaignRoot()
+    {
+        if (_ctx.CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+            && _ctx.ActiveRoot != null)
+            return _ctx.ActiveRoot;
+
+        if (_ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+            return _ctx.OverlayRoot;
+
+        return null;
+    }
+
     public void FilterCampaignBySide(CampaignSideFilter sideFilter)
     {
-        if (_ctx.OverlayRoot == null)
+        UiNodeViewModel? root = ResolveCampaignRoot();
+        if (root == null)
             return;
 
-        ApplyCampaignOverlay(_ctx.OverlayRoot, sideFilter);
+        ApplyCampaignOverlay(root, sideFilter);
         string label = sideFilter switch
         {
             CampaignSideFilter.Allied => "同盟国联军",
@@ -37,9 +51,9 @@ internal sealed class CampaignOverlayController
         _ctx.ShowStatus($"Campaign filter: {label} ({_ctx.LobbySession.VisibleMissions.Count} missions)");
     }
 
-    public static int ResolveCampaignDifficulty(UiNodeViewModel overlayRoot)
+    public static int ResolveCampaignDifficulty(UiNodeViewModel campaignRoot)
     {
-        UiNodeViewModel? trackbar = MainWindowContext.FindVm(overlayRoot, "trbDifficultySelector");
+        UiNodeViewModel? trackbar = MainWindowContext.FindVm(campaignRoot, "trbDifficultySelector");
         if (trackbar != null && trackbar.SelectedIndex >= 0)
             return Math.Clamp(trackbar.SelectedIndex, 0, 2);
 

@@ -13,16 +13,21 @@
                FontSize="11"
                VerticalAlignment="Center"
                Opacity="0.85" />
-    <Border Background="#111" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Border x:Name="PART_ClientChrome"
+                Background="#111"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
       <Grid HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch">
-        <ctrl:GenesisBackdropView x:Name="PART_GenesisBackdrop"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  IsVisible="False"
-                                  IsHitTestVisible="False"
-                                  ZIndex="-1" />
-        <ContentControl x:Name="PART_RootView">
+        <ctrl:SolarSystemBackdropView x:Name="PART_SolarSystemBackdrop"
+                                      HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch"
+                                      IsVisible="False"
+                                      IsHitTestVisible="False"
+                                      ZIndex="0" />
+        <ContentControl x:Name="PART_RootView"
+                        Background="Transparent"
+                        ZIndex="1">
           <ContentControl.ContentTemplate>
             <views:DxNodeTemplateSelector />
           </ContentControl.ContentTemplate>

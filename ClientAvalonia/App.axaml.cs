@@ -23,6 +23,8 @@ public class App : Application
         Resources.MergedDictionaries.Add(
             (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxCampaignTacticalStyles.axaml")));
         Resources.MergedDictionaries.Add(
+            (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxMainMenuTacticalStyles.axaml")));
+        Resources.MergedDictionaries.Add(
             (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxOfficialTheme.axaml")));
 
         // Visual style layer (Classic keeps DxOfficialTheme; Tactical swaps the last dictionary).

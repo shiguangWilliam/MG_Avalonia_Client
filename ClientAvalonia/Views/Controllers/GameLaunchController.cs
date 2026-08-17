@@ -97,14 +97,19 @@ internal sealed class GameLaunchController
 
     public bool TryLaunchCampaign(out string message)
     {
-        if (_ctx.OverlayRoot == null
-            || _ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) != true)
+        UiNodeViewModel? campaignRoot = null;
+        if (_ctx.CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+            campaignRoot = _ctx.ActiveRoot;
+        else if (_ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+            campaignRoot = _ctx.OverlayRoot;
+
+        if (campaignRoot == null)
         {
-            message = "Campaign overlay is not open.";
+            message = "Campaign panel is not open.";
             return false;
         }
 
-        UiNodeViewModel? lbCampaignList = MainWindowContext.FindVm(_ctx.OverlayRoot, "lbCampaignList");
+        UiNodeViewModel? lbCampaignList = MainWindowContext.FindVm(campaignRoot, "lbCampaignList");
         MissionEntry? mission = _ctx.LobbySession.GetSelectedMission(lbCampaignList?.SelectedIndex ?? 0);
         if (mission == null || mission.IsHeader || string.IsNullOrWhiteSpace(mission.Scenario))
         {
@@ -118,7 +123,7 @@ internal sealed class GameLaunchController
             return false;
         }
 
-        int difficulty = CampaignOverlayController.ResolveCampaignDifficulty(_ctx.OverlayRoot);
+        int difficulty = CampaignOverlayController.ResolveCampaignDifficulty(campaignRoot);
         UserINISettings.Instance.Difficulty.Value = difficulty;
 
         bool launched = _ctx.GameLaunch.TryLaunchCampaign(
@@ -127,7 +132,7 @@ internal sealed class GameLaunchController
             {
                 Mission = mission,
                 DifficultyIndex = difficulty,
-                OverlayRoot = _ctx.OverlayRoot,
+                OverlayRoot = campaignRoot,
             },
             out message,
             _ctx.GetOwnerWindow());

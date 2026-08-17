@@ -34,10 +34,13 @@
        side panels float over its edges so the earth owns the visual center. -->
   <Panel>
 
-    <!-- Starfield plate behind the globe (Tactical art). -->
+    <!-- Starfield plate behind the globe — hidden when the shared 3D solar
+         system is active (the GL backdrop already renders a real starfield;
+         stacking the PNG plate would double-draw and add noise). -->
     <Image x:Name="StarfieldPlate"
            Stretch="UniformToFill"
            Opacity="0.55"
+           IsVisible="False"
            IsHitTestVisible="False"
            HorizontalAlignment="Stretch"
            VerticalAlignment="Stretch" />
@@ -49,7 +52,8 @@
                               OverlayRoot="{Binding}" />
 
     <!-- ============ Side panels ============ -->
-    <Grid ColumnDefinitions="Auto,*,Auto"
+    <Grid x:Name="HudGrid"
+          ColumnDefinitions="Auto,*,Auto"
           HorizontalAlignment="Stretch"
           VerticalAlignment="Stretch">
 
@@ -126,7 +130,8 @@
     </Grid>
 
     <!-- Bottom action bar spans the full width beneath the globe horizon -->
-    <Border Classes="tactical-panel"
+    <Border x:Name="ActionBar"
+            Classes="tactical-panel"
             HorizontalAlignment="Center"
             VerticalAlignment="Bottom"
             Margin="0,0,0,16"

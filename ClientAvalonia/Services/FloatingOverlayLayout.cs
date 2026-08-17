@@ -1,5 +1,4 @@
 using ClientAvalonia.IniUi.Loading;
-using ClientAvalonia.Themes;
 
 namespace ClientAvalonia.Services;
 
@@ -10,7 +9,6 @@ public static class FloatingOverlayLayout
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["OptionsWindow"] = (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height),
-            ["CampaignSelector"] = (800, 600),
             ["GameCreationWindow"] = (520, 580),
         };
 
@@ -21,6 +19,13 @@ public static class FloatingOverlayLayout
         => FallbackSizes.ContainsKey(windowSectionName)
            || windowSectionName.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Campaign is a root panel navigation target (not a floating overlay).
+    /// Kept here only as a size hint for legacy callers.
+    /// </summary>
+    public static bool IsCampaignWindow(string windowSectionName)
+        => windowSectionName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase);
+
     public static (int Width, int Height) ResolveOverlaySize(string iniPath, string windowSectionName)
     {
         // Options chrome (tabs + footer Save/Cancel) is laid out against fixed constants.
@@ -30,13 +35,6 @@ public static class FloatingOverlayLayout
 
         if (ClientEnvironment.ReadWindowSize(iniPath, windowSectionName) is { } fromIni)
         {
-            // Tactical campaign console is wider than the INI shell; scale it up.
-            if (windowSectionName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
-                && DxThemeManager.IsTactical)
-            {
-                return TacticalCampaignSize;
-            }
-
             return fromIni;
         }
 

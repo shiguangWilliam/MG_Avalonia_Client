@@ -27,10 +27,19 @@ public class DxCampaignGlobeHost : Panel
     public DxCampaignGlobeHost()
     {
         Children.Add(_globe);
-        _globe.HorizontalAlignment = HorizontalAlignment.Center;
-        _globe.VerticalAlignment = VerticalAlignment.Center;
+        _globe.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _globe.VerticalAlignment = VerticalAlignment.Stretch;
         _globe.NodeClicked += OnGlobeNodeClicked;
+
+        // Shared 3D solar system: the backdrop renders the real Earth behind
+        // the overlay; this globe becomes an anchor overlay only. Evaluate on
+        // attach so we see the director after MainWindow has mounted it.
+        AttachedToVisualTree += (_, _) =>
+            _globe.BridgeFromSolarSystem = SolarSystemDirector.IsActive;
     }
+
+    public void SetAnchorRevealOpacity(double opacity)
+        => _globe.BridgeAnchorOpacity = opacity;
 
     public UiNodeViewModel? OverlayRoot
     {
@@ -136,6 +145,7 @@ public class DxCampaignGlobeHost : Panel
         }
 
         _globe.SelectedNodeIndex = -1;
+        SolarSystemDirector.ClearMissionLock();
     }
 
     private void OnGlobeNodeClicked(object? sender, int nodeIndex)

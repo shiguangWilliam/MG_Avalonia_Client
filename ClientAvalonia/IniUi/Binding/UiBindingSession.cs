@@ -30,6 +30,9 @@ public sealed class UiBindingSession
     {
         _settingEntries = SettingBindingApplier.Apply(root, _settings);
         StateBindingApplier.Apply(root, _state, windowName);
+
+        if (windowName.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
+            GameDataBindingApplier.ApplyMainMenu(root);
     }
 
     public void CommitSettings()

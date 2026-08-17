@@ -1,8 +1,10 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ClientAvalonia.Assets;
+using ClientAvalonia.Controls;
 using ClientAvalonia.Rendering;
 
 namespace ClientAvalonia.Views;
@@ -13,25 +15,106 @@ namespace ClientAvalonia.Views;
 /// stacked behind the list/briefing columns. Difficulty lives at the bottom of
 /// the briefing column; Launch/Cancel stay in the floating bottom action bar.
 /// Applies GLM art plates (starfield backdrop + panel texture) when available.
+/// With the shared solar-system backdrop active, enter choreography zooms Earth
+/// first, then fades panels and mission anchors in.
 /// </summary>
 public partial class DxCampaignTacticalLayout : UserControl
 {
+    private bool _orchestrating;
+
     public DxCampaignTacticalLayout()
     {
         InitializeComponent();
         DataContextChanged += (_, _) => DistributeChildren();
-        AttachedToVisualTree += (_, _) =>
+        AttachedToVisualTree += OnAttached;
+        DetachedFromVisualTree += OnDetached;
+    }
+
+    private void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        ApplyArtPlates();
+        DistributeChildren();
+        BeginEnterChoreographyIfNeeded();
+    }
+
+    private void OnDetached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (!_orchestrating)
+            return;
+
+        SolarSystemDirector.FrameAdvanced -= OnDirectorFrame;
+        _orchestrating = false;
+    }
+
+    private void BeginEnterChoreographyIfNeeded()
+    {
+        if (!SolarSystemDirector.IsActive || _orchestrating)
+            return;
+
+        _orchestrating = true;
+        ApplyRevealOpacities(SolarSystemDirector.PanelRevealOpacity, SolarSystemDirector.AnchorRevealOpacity);
+        SolarSystemDirector.FrameAdvanced += OnDirectorFrame;
+    }
+
+    private void OnDirectorFrame()
+    {
+        if (!_orchestrating)
+            return;
+
+        ApplyRevealOpacities(SolarSystemDirector.PanelRevealOpacity, SolarSystemDirector.AnchorRevealOpacity);
+
+        if (SolarSystemDirector.PanelRevealOpacity >= 1.0
+            && SolarSystemDirector.AnchorRevealOpacity >= 1.0)
         {
-            ApplyArtPlates();
-            DistributeChildren();
-        };
+            SolarSystemDirector.FrameAdvanced -= OnDirectorFrame;
+            _orchestrating = false;
+        }
+    }
+
+    private void ApplyRevealOpacities(double panelOpacity, double anchorOpacity)
+    {
+        bool panelsHit = panelOpacity > 0.05;
+        if (LeftPanel != null)
+        {
+            LeftPanel.Opacity = panelOpacity;
+            LeftPanel.IsHitTestVisible = panelsHit;
+        }
+
+        if (RightPanel != null)
+        {
+            RightPanel.Opacity = panelOpacity;
+            RightPanel.IsHitTestVisible = panelsHit;
+        }
+
+        if (ActionBar != null)
+        {
+            ActionBar.Opacity = panelOpacity;
+            ActionBar.IsHitTestVisible = panelsHit;
+        }
+
+        if (HudGrid != null)
+        {
+            foreach (Control cell in HudGrid.Children)
+            {
+                if (cell.Classes.Contains("accent-rail"))
+                    cell.Opacity = panelOpacity;
+            }
+        }
+
+        GlobeHost?.SetAnchorRevealOpacity(anchorOpacity);
     }
 
     private void ApplyArtPlates()
     {
+        // The shared 3D solar system supplies the starfield; the PNG plate is
+        // only a fallback when the backdrop is disabled.
+        bool sharedSceneActive = SolarSystemDirector.IsActive;
         Bitmap? starfield = GlmAssets.Starfield;
         if (starfield != null && StarfieldPlate != null)
+        {
             StarfieldPlate.Source = starfield;
+            StarfieldPlate.IsVisible = !sharedSceneActive;
+        }
 
         Bitmap? panel = GlmAssets.TacticalPanel;
         if (panel == null)

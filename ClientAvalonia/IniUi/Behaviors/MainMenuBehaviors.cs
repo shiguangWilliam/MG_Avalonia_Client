@@ -13,7 +13,11 @@ public static class MainMenuBehaviors
         registry.Register("btnOptions", _ => host.OpenOptionsOverlay());
         RegisterOpen(registry, host, "btnLan", "LANLobby");
         RegisterOpen(registry, host, "btnCnCNet", "CnCNetLobby");
-        registry.Register("btnNewCampaign", _ => host.OpenCampaignOverlay());
+        registry.Register("btnNewCampaign", _ =>
+        {
+            host.ShowStatus("Open: CampaignSelector (btnNewCampaign)");
+            host.NavigateTo("CampaignSelector");
+        });
         RegisterOpen(registry, host, "btnStatistics", "StatisticsWindow");
         RegisterOpen(registry, host, "btnExtras", "ExtrasWindow");
 
