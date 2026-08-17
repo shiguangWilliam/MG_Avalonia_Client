@@ -728,6 +728,20 @@ void main()
         float[] view = BuildCameraMatrix(aspect);
         float outerOpacity = (float)Math.Clamp(SolarSystemDirector.OuterSystemOpacity, 0.0, 1.0);
 
+        // Sun glow gain: tied to camera distance so the corona blooms in WITH
+        // the exit pull instead of popping at OuterSystemOpacity==1 while the
+        // camera is still at campaign close range (depth-off sun draw would
+        // smear a huge glow over the Earth at 2.25 earth-radii). Full strength
+        // exactly at menu mid-distance — matches the settled menu frame, so
+        // the exit settle blends into an identical glow.
+        double sunEarthR = SolarSystemScene.BodyRadius(_scene.Bodies[_scene.EarthIndex]);
+        (double sunEx, double sunEy, double sunEz) = _scene.EarthPosition;
+        double sunCamToEarth = Math.Sqrt(
+            (_cameraX - sunEx) * (_cameraX - sunEx)
+            + (_cameraY - sunEy) * (_cameraY - sunEy)
+            + (_cameraZ - sunEz) * (_cameraZ - sunEz));
+        float sunGain = (float)SolarSystemScene.SunGlowGain(sunCamToEarth / Math.Max(sunEarthR, 1e-6));
+
         if (outerOpacity > 0.02f)
         {
             // ---- Orbit lines: inner rings bright, outer rings faint (less empty disc) ----
@@ -802,7 +816,7 @@ void main()
         if (outerOpacity > 0.02f)
         {
             _disable?.Invoke(GL_DEPTH_TEST);
-            DrawSun(gl, view, outerOpacity);
+            DrawSun(gl, view, outerOpacity * sunGain);
             gl.Enable(GL_DEPTH_TEST);
         }
 

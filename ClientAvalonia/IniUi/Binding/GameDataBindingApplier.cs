@@ -421,20 +421,20 @@ public static class GameDataBindingApplier
 
     private static void ApplyChannelLobbyButtonLabels(UiNodeViewModel root)
     {
-        FindVm(root, "btnNewGame")?.SetDisplayText("Create Game");
-        FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game");
+        FindVm(root, "btnNewGame")?.SetDisplayText("Create Game".L10N("Client:Main:CreateGame"));
+        FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game".L10N("Client:Main:JoinGame"));
 
         UiNodeViewModel? btnMainMenu = FindVm(root, "btnMainMenu");
         UiNodeViewModel? btnLogout = FindVm(root, "btnLogout");
         if (btnMainMenu != null && btnMainMenu.IsVisible)
         {
-            btnMainMenu.SetDisplayText("Main Menu");
+            btnMainMenu.SetDisplayText("Main Menu".L10N("Client:Main:ButtonMainMenu"));
             if (btnLogout != null)
                 btnLogout.IsVisible = false;
         }
         else
         {
-            btnLogout?.SetDisplayText("Logout");
+            btnLogout?.SetDisplayText("Logout".L10N("Client:Main:ButtonLogout"));
         }
     }
 
@@ -467,7 +467,9 @@ public static class GameDataBindingApplier
                 ForegroundBrush = m.IsHeader
                     ? null
                     : (m.Enabled ? enabledBrush : disabledBrush),
-                ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
+                ToolTip = !m.IsHeader && !m.Enabled
+                    ? "未启用 — 无法开始此战役".L10N("Client:Main:MissionLockedToolTip")
+                    : null,
                 GlobeLatitude = m.GlobeLatitude,
                 GlobeLongitude = m.GlobeLongitude,
                 GlobeCountry = m.GlobeCountry,
@@ -497,94 +499,62 @@ public static class GameDataBindingApplier
 
     private static void ApplyCampaignActionButtonLabels(UiNodeViewModel root)
     {
-        // Primary chrome is orange; default IdleTexture button fg (#FFA648) vanishes on it.
+        // Only fill gaps: mods that set their own Text=/FontSize= in INI keep them.
+        // The color pairing is theme chrome (dark text on the orange primary,
+        // light text on the dark secondary) so it is applied as a style, not data.
         Color launchFg = Color.FromRgb(32, 22, 12);
         Color cancelFg = Color.FromRgb(242, 230, 216);
 
         UiNodeViewModel? launch = FindVm(root, "btnLaunch");
         if (launch != null)
         {
-            launch.SetDisplayText(PickLocalizedLabel(launch.Text, "开始", "Launch"));
+            if (string.IsNullOrWhiteSpace(launch.Text))
+                launch.SetDisplayText("开始".L10N("Client:Main:ButtonLaunch"));
             launch.SetForeground(launchFg);
-            launch.Node.Props["FontSize"] = 14;
+            SetFontSizeIfMissing(launch, 14);
             launch.RefreshLayout();
         }
 
         UiNodeViewModel? cancel = FindVm(root, "btnCancel");
         if (cancel != null)
         {
-            cancel.SetDisplayText(PickLocalizedLabel(cancel.Text, "返回", "Cancel"));
+            if (string.IsNullOrWhiteSpace(cancel.Text))
+                cancel.SetDisplayText("返回".L10N("Client:Main:ButtonCancel"));
             cancel.SetForeground(cancelFg);
-            cancel.Node.Props["FontSize"] = 14;
+            SetFontSizeIfMissing(cancel, 14);
             cancel.RefreshLayout();
         }
 
-        ApplySideTabLabel(root, "GDI", "同盟国联军", "Allied");
-        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Soviet");
-        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Ackville");
+        ApplySideTabLabel(root, "GDI", "同盟国联军", "Client:Main:SideAllied");
+        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Client:Main:SideSoviet");
+        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Client:Main:SideAckville");
     }
 
-    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zh, string en)
+    private static void SetFontSizeIfMissing(UiNodeViewModel vm, double size)
+    {
+        if (!vm.Node.Props.ContainsKey("FontSize"))
+            vm.Node.Props["FontSize"] = size;
+    }
+
+    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zhFallback, string l10nKey)
     {
         UiNodeViewModel? tab = FindVm(root, id);
         if (tab == null)
             return;
 
-        tab.SetDisplayText(PickLocalizedLabel(tab.Text, zh, en));
+        if (string.IsNullOrWhiteSpace(tab.Text))
+            tab.SetDisplayText(zhFallback.L10N(l10nKey));
         tab.RefreshLayout();
-    }
-
-    /// <summary>MG INI often stores <c>中文;English</c> bilingual labels.</summary>
-    private static string PickLocalizedLabel(string? raw, string chineseFallback, string englishFallback)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return chineseFallback;
-
-        int sep = raw.IndexOf(';');
-        if (sep < 0)
-            return raw.Trim();
-
-        string left = raw[..sep].Trim();
-        string right = raw[(sep + 1)..].Trim();
-        bool preferChinese = ContainsCjk(left) || !ContainsLatinWord(left);
-        if (preferChinese)
-            return string.IsNullOrEmpty(left) ? (string.IsNullOrEmpty(right) ? chineseFallback : right) : left;
-
-        return string.IsNullOrEmpty(right) ? (string.IsNullOrEmpty(left) ? englishFallback : left) : right;
-    }
-
-    private static bool ContainsCjk(string text)
-    {
-        foreach (char c in text)
-        {
-            if (c >= 0x4E00 && c <= 0x9FFF)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool ContainsLatinWord(string text)
-    {
-        foreach (char c in text)
-        {
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>
     /// MG CampaignSelector.ini omits Size for faction tabs / difficulty chrome; DX relied on
     /// missing button textures that never shipped. Give Avalonia themed fallbacks real bounds
-    /// so the option boxes stay visible without those assets.
+    /// so the option boxes stay visible without those assets. Only fills gaps — values the
+    /// mod declared in INI always win.
     /// </summary>
     private static void EnsureCampaignControlSizes(UiNodeViewModel root)
     {
-        // Unconditional (as on main): Classic campaign buttons use the themed
-        // 14pt template whose 23px INI height clips the label; Tactical buttons
-        // get their size re-derived from generated textures later anyway.
         foreach (string id in new[] { "GDI", "Nod", "ThirdSide", "FourthSide" })
         {
             UiNodeViewModel? tab = FindVm(root, id);
@@ -614,11 +584,13 @@ public static class GameDataBindingApplier
             if (button == null)
                 continue;
 
-            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
-            // clips the label completely when Avalonia Height is set explicitly.
             if (button.Width <= 1)
                 button.Node.Props["Width"] = 147d;
-            button.Node.Props["Height"] = 36d;
+            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
+            // clips the label completely when Avalonia Height is set explicitly. Only lift
+            // heights that came from the legacy default, never a mod-chosen larger value.
+            if (button.Height < 36d)
+                button.Node.Props["Height"] = 36d;
             button.RefreshLayout();
         }
     }
@@ -661,7 +633,7 @@ public static class GameDataBindingApplier
                 session.LastSelectableCampaignIndex = index;
 
             string? lockedHint = mission != null && !mission.IsHeader && !mission.Enabled
-                ? "该战役尚未开放或未启用，无法开始。"
+                ? "该战役尚未开放或未启用，无法开始。".L10N("Client:Main:MissionLockedHint")
                 : null;
 
             MissionBriefingParsed briefing = MissionBriefingParser.Parse(mission?.Description);

@@ -127,6 +127,9 @@ internal sealed class SolarSystemScene
     // Campaign exit: concentric guide-sphere path (radial → spherical arc →
     // radial). The arc's instantaneous velocity is tangent to the guide sphere,
     // so the eye never chords through Earth. Stored Earth-relative.
+    // The START stays frozen; the END is re-aimed at the live menu eye every
+    // tick (Kepler drift ~10° per exit) so t=1 lands on the current steady
+    // pose instead of a stale snapshot — orientation arrives with the path.
     private bool _exitPathActive;
     private double _exitU0x, _exitU0y, _exitU0z;
     private double _exitU3x, _exitU3y, _exitU3z;
@@ -134,6 +137,7 @@ internal sealed class SolarSystemScene
     private double _exitLenRadialIn, _exitLenArc, _exitLenRadialOut;
     private double _exitLook0x, _exitLook0y, _exitLook0z;
     private double _exitLook1x, _exitLook1y, _exitLook1z;
+    private double _exitStartRx, _exitStartRy, _exitStartRz;
 
     // Short settle after the guide path: blends the (possibly drifted) path end
     // into the live sun-relative menu eye so t=1 does not hard-cut.
@@ -166,6 +170,9 @@ internal sealed class SolarSystemScene
 
         for (int i = 0; i < Bodies.Length; i++)
             EvaluatePosition(Bodies[i], Time, out _orbitX[i], out _orbitY[i], out _orbitZ[i]);
+
+        if (_exitPathActive)
+            RetargetExitPathToLivePanelEye(_poseTo);
 
         if (_poseAnimating)
         {
@@ -248,9 +255,11 @@ internal sealed class SolarSystemScene
 
     /// <summary>
     /// Returns to the pose of the underlying window panel after the campaign closes.
-    /// Path: Earth-relative radial → guide-sphere arc → radial, then a short
-    /// settle blend into the live sun-relative menu eye (avoids a hard cut when
-    /// Kepler drift makes the planned path end diverge from the steady pose).
+    /// Path: Earth-relative radial → guide-sphere arc → radial. The end (eye and
+    /// look target) is re-aimed at the live steady panel pose every tick, so
+    /// Kepler drift during the ride is absorbed by the arc itself and the
+    /// orientation arrives WITH the path; the short settle afterwards only
+    /// smooths the last fraction of residual drift.
     /// </summary>
     public void EndEarthFocus(PanelKind underlying)
     {
@@ -262,30 +271,14 @@ internal sealed class SolarSystemScene
         double earthR = BodyRadius(Bodies[EarthIndex]);
 
         CameraState target = ResolvePose(PanelPose(underlying), earthR);
-        ComputeEarthCameraEyeAndLookAt(
-            target,
-            applyMenuPan: true,
-            out double endX, out double endY, out double endZ,
-            out double lookEndX, out double lookEndY, out double lookEndZ);
 
         double srx = startX - earthX, sry = startY - earthY, srz = startZ - earthZ;
-        double erx = endX - earthX, ery = endY - earthY, erz = endZ - earthZ;
 
-        PlanGuideSphereExit(
-            earthR * ExitGuideSphereEarthRadii,
-            earthR * ExitPathMinClearanceEarthRadii,
-            srx, sry, srz,
-            erx, ery, erz,
-            out _exitU0x, out _exitU0y, out _exitU0z,
-            out _exitU3x, out _exitU3y, out _exitU3z,
-            out _exitR0, out _exitR3, out _exitGuideR,
-            out _exitLenRadialIn, out _exitLenArc, out _exitLenRadialOut);
-
+        _exitStartRx = srx;
+        _exitStartRy = sry;
+        _exitStartRz = srz;
         _exitLook0x = 0; _exitLook0y = 0; _exitLook0z = 0;
-        _exitLook1x = lookEndX - earthX;
-        _exitLook1y = lookEndY - earthY;
-        _exitLook1z = lookEndZ - earthZ;
-        _exitPathActive = true;
+        RetargetExitPathToLivePanelEye(target);
 
         EncodeEarthRelativeEyeAsCamera(srx, sry, srz, out CameraState fromPose);
         _surfaceOrbitActive = false;
@@ -310,6 +303,39 @@ internal sealed class SolarSystemScene
         _exitPathActive = false;
         _exitSettleActive = false;
         _exitSettleElapsed = 0;
+    }
+
+    /// <summary>
+    /// Re-plans the exit path END against the live steady panel eye (start frozen).
+    /// Called at plan time and every tick while the path is active so Kepler
+    /// drift during the ~2s ride is absorbed by the arc itself — t=1 lands on
+    /// the current steady pose, orientation included, instead of a stale snapshot.
+    /// </summary>
+    private void RetargetExitPathToLivePanelEye(CameraState pose)
+    {
+        double earthR = BodyRadius(Bodies[EarthIndex]);
+        ComputeEarthCameraEyeAndLookAt(
+            pose,
+            applyMenuPan: true,
+            out double endX, out double endY, out double endZ,
+            out double lookEndX, out double lookEndY, out double lookEndZ);
+        (double earthX, double earthY, double earthZ) = EarthPosition;
+
+        double erx = endX - earthX, ery = endY - earthY, erz = endZ - earthZ;
+        PlanGuideSphereExit(
+            earthR * ExitGuideSphereEarthRadii,
+            earthR * ExitPathMinClearanceEarthRadii,
+            _exitStartRx, _exitStartRy, _exitStartRz,
+            erx, ery, erz,
+            out _exitU0x, out _exitU0y, out _exitU0z,
+            out _exitU3x, out _exitU3y, out _exitU3z,
+            out _exitR0, out _exitR3, out _exitGuideR,
+            out _exitLenRadialIn, out _exitLenArc, out _exitLenRadialOut);
+
+        _exitLook1x = lookEndX - earthX;
+        _exitLook1y = lookEndY - earthY;
+        _exitLook1z = lookEndZ - earthZ;
+        _exitPathActive = true;
     }
 
     private void BeginExitSettleFromGuideEnd()
@@ -687,6 +713,21 @@ internal sealed class SolarSystemScene
     /// <summary>Game-lobby mid-distance.</summary>
     public const double GameLobbyEarthDistanceEarthRadii = 6.15;
 
+    /// <summary>
+    /// Distance-coupled sun glow strength (0..1). The corona is invisible at
+    /// campaign close range (a depth-off sun draw would smear a giant glow
+    /// over the Earth at 2.25 radii) and reaches full strength exactly at menu
+    /// mid-distance — so the glow blooms in naturally with the exit camera
+    /// pull and the settle lands on an identical menu frame.
+    /// </summary>
+    public static double SunGlowGain(double cameraDistanceEarthRadii)
+    {
+        double near = EarthFocusDistanceEarthRadii;   // 2.25
+        double far = MenuEarthDistanceEarthRadii;     // 4.35
+        double t = Math.Clamp((cameraDistanceEarthRadii - near) / (far - near), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+
     /// <summary>Scene-unit camera distance for the campaign focus.</summary>
     public double EarthFocusDistanceUnits => EarthFocusDistanceEarthRadii * BodyRadius(Bodies[EarthIndex]);
 
@@ -832,7 +873,7 @@ internal sealed class SolarSystemScene
     /// <summary>Maps a window/overlay name to its panel pose.</summary>
     public static PanelKind PanelKindForWindow(string windowName) => windowName switch
     {
-        "CampaignSelector" => PanelKind.Campaign,
+        _ when Services.FloatingOverlayLayout.IsCampaignWindow(windowName) => PanelKind.Campaign,
         "CnCNetLobby" or "LANLobby" => PanelKind.Lobby,
         "CnCNetGameLobby" or "LANGameLobby" or "SkirmishLobby" or "SkirmishBattle" => PanelKind.GameLobby,
         _ => PanelKind.MainMenu,

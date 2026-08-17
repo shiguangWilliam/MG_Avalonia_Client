@@ -282,7 +282,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             // Shared 3D backdrop: move the camera to this panel's pose.
             SolarSystemDirector.OnNavigateTo(windowName);
 
-            if (windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+            if (FloatingOverlayLayout.IsCampaignWindow(windowName))
                 _campaign.ApplyCampaignOverlay(vm, CampaignSideFilter.All);
 
             try
@@ -311,20 +311,10 @@ public partial class MainWindow : Window, IUiNavigationHost
     }
 
     public void OpenFloatingOverlay(string windowName)
-    {
-        // Start the earth-focus zoom before the campaign shell mounts so the
-        // first painted frame is already mid-zoom (UI fades in afterward).
-        SolarSystemDirector.OnOverlayOpened(windowName);
-        _overlay.OpenFloatingOverlay(windowName);
-    }
+        => _overlay.OpenFloatingOverlay(windowName);
 
     public void CloseFloatingOverlay()
-    {
-        string? closing = _ctx.FloatingOverlayWindow;
-        _overlay.CloseFloatingOverlay();
-        if (!string.IsNullOrEmpty(closing))
-            SolarSystemDirector.OnOverlayClosed(closing, CurrentWindow);
-    }
+        => _overlay.CloseFloatingOverlay();
 
     public void OpenGameCreationOverlay() => _overlay.OpenGameCreationOverlay();
 
@@ -338,7 +328,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void CloseOptionsOverlay() => CloseFloatingOverlay();
 
-    public void OpenCampaignOverlay() => NavigateTo("CampaignSelector");
+    public void OpenCampaignOverlay() => NavigateTo(FloatingOverlayLayout.CampaignWindowName);
 
     private void CloseFloatingOverlaySilently() => CloseFloatingOverlay();
 
@@ -942,10 +932,11 @@ public partial class MainWindow : Window, IUiNavigationHost
             _lobbyMaps.ApplyLobbyData(_ctx.ActiveRoot, CurrentWindow);
 
         if (_ctx.ActiveRoot != null
-            && CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+            && FloatingOverlayLayout.IsCampaignWindow(CurrentWindow))
             _campaign.ApplyCampaignOverlay(_ctx.ActiveRoot);
         else if (_ctx.OverlayRoot != null
-            && _ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+            && _ctx.FloatingOverlayWindow is { } overlayWindow
+            && FloatingOverlayLayout.IsCampaignWindow(overlayWindow))
             _campaign.ApplyCampaignOverlay(_ctx.OverlayRoot);
     }
 

@@ -149,7 +149,7 @@ public sealed class ClientEnvironment
 
         // Campaign is a full-bleed root panel: keep the client resolution so the
         // shared Earth backdrop and HUD columns fill the same viewport as MainMenu.
-        if (windowSectionName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+        if (FloatingOverlayLayout.IsCampaignWindow(windowSectionName))
             return new LayoutContext(ClientRenderWidth, ClientRenderHeight, ParserConstantsLoader.LoadForGame(GameRoot));
 
         (int width, int height) = ReadWindowSize(iniPath, windowSectionName)

@@ -98,9 +98,10 @@ internal sealed class GameLaunchController
     public bool TryLaunchCampaign(out string message)
     {
         UiNodeViewModel? campaignRoot = null;
-        if (_ctx.CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+        if (FloatingOverlayLayout.IsCampaignWindow(_ctx.CurrentWindow))
             campaignRoot = _ctx.ActiveRoot;
-        else if (_ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+        else if (_ctx.FloatingOverlayWindow is { } overlayWindow
+            && FloatingOverlayLayout.IsCampaignWindow(overlayWindow))
             campaignRoot = _ctx.OverlayRoot;
 
         if (campaignRoot == null)

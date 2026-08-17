@@ -8,6 +8,12 @@ public static class UiBehaviorCatalog
         registry.Clear();
         CommonWindowBehaviors.Register(registry, host);
 
+        if (Services.FloatingOverlayLayout.IsCampaignWindow(windowName))
+        {
+            CampaignOverlayBehaviors.Register(registry, host);
+            return;
+        }
+
         switch (windowName)
         {
             case "MainMenu":
@@ -28,9 +34,6 @@ public static class UiBehaviorCatalog
                 break;
             case "OptionsWindow":
                 OptionsWindowBehaviors.Register(registry, host);
-                break;
-            case "CampaignSelector":
-                CampaignOverlayBehaviors.Register(registry, host);
                 break;
             case "StatisticsWindow":
             case "ExtrasWindow":

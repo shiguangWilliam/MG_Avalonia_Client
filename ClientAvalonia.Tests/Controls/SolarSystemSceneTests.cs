@@ -202,6 +202,31 @@ public sealed class SolarSystemSceneTests
         Assert.True(refineNear > 0.92f, $"campaign refine {refineNear}");
     }
 
+    [Fact]
+    public void SunGlowGain_Fades_With_Camera_Distance_And_Matches_Menu_At_Settle()
+    {
+        // Campaign close range: glow fully suppressed (no corona smeared over Earth).
+        Assert.Equal(0.0, SolarSystemScene.SunGlowGain(SolarSystemScene.EarthFocusDistanceEarthRadii), 6);
+
+        // Menu mid-distance: exactly full strength — the exit settle lands on
+        // the same glow as the stable menu frame.
+        Assert.Equal(1.0, SolarSystemScene.SunGlowGain(SolarSystemScene.MenuEarthDistanceEarthRadii), 6);
+
+        // Monotonic between the two anchors.
+        double prev = 0.0;
+        for (int i = 1; i <= 10; i++)
+        {
+            double radii = SolarSystemScene.EarthFocusDistanceEarthRadii
+                + (SolarSystemScene.MenuEarthDistanceEarthRadii - SolarSystemScene.EarthFocusDistanceEarthRadii) * i / 10.0;
+            double gain = SolarSystemScene.SunGlowGain(radii);
+            Assert.True(gain >= prev, $"gain not monotonic at {radii:F2}: {gain:F4} < {prev:F4}");
+            prev = gain;
+        }
+
+        // Beyond menu distance stays full (lobby / game lobby are farther).
+        Assert.Equal(1.0, SolarSystemScene.SunGlowGain(SolarSystemScene.GameLobbyEarthDistanceEarthRadii), 6);
+    }
+
     // ------------------------------------------------------------------
     // Camera state machine
     // ------------------------------------------------------------------
@@ -428,6 +453,78 @@ public sealed class SolarSystemSceneTests
         var b = new SolarSystemScene.CameraState(SolarSystemScene.CameraFocus.Sun, 350.0, 0.0, 10.0, 0, 0);
         var mid = SolarSystemScene.BlendCamera(a, b, 0.5);
         Assert.Equal(0.0, mid.YawDeg, 6);   // 10 → 350 crosses 0, not through 180
+    }
+
+    [Fact]
+    public void EndEarthFocus_Path_End_Converges_To_Live_Panel_Eye_Not_Stale_Snapshot()
+    {
+        // Twin scenes: identical Kepler state. Twin A sits steadily on the menu
+        // pose; twin B exits the campaign via the guide path. Because the path
+        // end is re-aimed every tick, B's final eye must land on A's CURRENT
+        // eye (live), not on the eye A had when B's path was planned (snapshot).
+        var steady = new SolarSystemScene();
+        var exiting = new SolarSystemScene();
+
+        exiting.BeginEarthFocus();
+        steady.Advance(10.0);            // keep the twins on the same Kepler clock
+        exiting.Advance(10.0);
+        exiting.NudgeSurfaceOrbit(140.0, 12.0);
+        exiting.EndEarthFocus(SolarSystemScene.PanelKind.MainMenu);
+
+        // The stale snapshot: what the menu eye was at plan time.
+        exiting.BuildViewProjection(1.6f, out double snapX, out double snapY, out double snapZ);
+
+        double dt = 1.0 / 60.0;
+        double lastDX = 0, lastDY = 0, lastDZ = 0;
+        var steps = new System.Collections.Generic.List<double>();
+        for (int i = 0; exiting.ExitPathActive; i++)
+        {
+            steady.Advance(dt);
+            exiting.Advance(dt);
+            exiting.BuildViewProjection(1.6f, out double exitX, out double exitY, out double exitZ);
+
+            if (i > 0)
+            {
+                steps.Add(Math.Sqrt(
+                    (exitX - lastDX) * (exitX - lastDX)
+                    + (exitY - lastDY) * (exitY - lastDY)
+                    + (exitZ - lastDZ) * (exitZ - lastDZ)));
+            }
+            lastDX = exitX; lastDY = exitY; lastDZ = exitZ;
+        }
+
+        // The snapshot eye has drifted away from where the ride actually ended:
+        // proves the twins really drifted (test premise holds).
+        steady.BuildViewProjection(1.6f, out double nowX, out double nowY, out double nowZ);
+        double snapshotDrift = Math.Sqrt(
+            (nowX - snapX) * (nowX - snapX)
+            + (nowY - snapY) * (nowY - snapY)
+            + (nowZ - snapZ) * (nowZ - snapZ));
+        double earthR0 = SolarSystemScene.BodyRadius(exiting.Bodies[exiting.EarthIndex]);
+        Assert.True(snapshotDrift > earthR0 * 0.01,
+            $"twins drifted only {snapshotDrift:F5}; test premise too weak");
+
+        // Ride continuity: per-frame travel decays smoothly through the easing
+        // peak — an isolated spike (a pop from retargeting) would tower over
+        // its neighbours. Compare the largest step against the 5th largest.
+        var sorted = new System.Collections.Generic.List<double>(steps);
+        sorted.Sort();
+        sorted.Reverse();
+        double top = sorted[0];
+        double fifth = sorted[Math.Min(4, sorted.Count - 1)];
+        Assert.True(top <= fifth * 1.5 + 1e-9,
+            $"ride has isolated jump: top {top:F4} vs 5th {fifth:F4}");
+
+        // After settle: B's eye equals the CURRENT live steady eye to sub-pixel
+        // tolerance — orientation arrived with the path, no post-arrival twist.
+        exiting.BuildViewProjection(1.6f, out double finalX, out double finalY, out double finalZ);
+        steady.BuildViewProjection(1.6f, out double liveNowX, out double liveNowY, out double liveNowZ);
+        double residual = Math.Sqrt(
+            (finalX - liveNowX) * (finalX - liveNowX)
+            + (finalY - liveNowY) * (finalY - liveNowY)
+            + (finalZ - liveNowZ) * (finalZ - liveNowZ));
+        double earthR = SolarSystemScene.BodyRadius(exiting.Bodies[exiting.EarthIndex]);
+        Assert.True(residual < earthR * 0.04, $"residual {residual:F4} vs earthR {earthR:F4}");
     }
 
     [Fact]

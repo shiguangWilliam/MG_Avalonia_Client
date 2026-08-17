@@ -5,6 +5,13 @@ namespace ClientAvalonia.Services;
 /// <summary>INI windows shown as centered floating panels over MainMenu (independent viewport size).</summary>
 public static class FloatingOverlayLayout
 {
+    /// <summary>
+    /// Logical name of the campaign window. Campaign is a root panel navigation
+    /// target by default; the floating-overlay path remains reachable as a mod
+    /// fallback via <c>$LeftClickAction=OpenFloatingOverlay</c>.
+    /// </summary>
+    public const string CampaignWindowName = "CampaignSelector";
+
     private static readonly Dictionary<string, (int Width, int Height)> FallbackSizes =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -12,19 +19,13 @@ public static class FloatingOverlayLayout
             ["GameCreationWindow"] = (520, 580),
         };
 
-    /// <summary>Tactical campaign console target size (globe-dominant composition).</summary>
-    public static (int Width, int Height) TacticalCampaignSize => (1240, 660);
-
     public static bool IsOverlayWindow(string windowSectionName)
         => FallbackSizes.ContainsKey(windowSectionName)
            || windowSectionName.Equals("GameCreationWindow", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Campaign is a root panel navigation target (not a floating overlay).
-    /// Kept here only as a size hint for legacy callers.
-    /// </summary>
+    /// <summary>Campaign window check (single source of truth for the logical name).</summary>
     public static bool IsCampaignWindow(string windowSectionName)
-        => windowSectionName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase);
+        => windowSectionName.Equals(CampaignWindowName, StringComparison.OrdinalIgnoreCase);
 
     public static (int Width, int Height) ResolveOverlaySize(string iniPath, string windowSectionName)
     {

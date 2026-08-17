@@ -10,9 +10,11 @@ public static class CampaignOverlayBehaviors
         registry.Register("btnCancel", _ =>
         {
             // Panel mode (root CampaignSelector): navigate back to MainMenu.
-            // Legacy overlay path still closes the floating shell.
+            // Legacy overlay path (mod-opened via $LeftClickAction) still closes
+            // the floating shell.
             if (host.IsFloatingOverlayOpen
-                && host.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+                && host.FloatingOverlayWindow is { } overlayWindow
+                && Services.FloatingOverlayLayout.IsCampaignWindow(overlayWindow))
             {
                 host.CloseFloatingOverlay();
                 host.ShowStatus("Campaign closed");

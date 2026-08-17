@@ -1,5 +1,6 @@
 using System;
 using Avalonia;
+using ClientAvalonia.Services;
 
 namespace ClientAvalonia.Controls;
 
@@ -88,7 +89,7 @@ public static class SolarSystemDirector
         if (_backdrop is null)
             return;
 
-        bool campaign = windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase);
+        bool campaign = FloatingOverlayLayout.IsCampaignWindow(windowName);
         if (campaign)
         {
             EnterCampaignPanel();
@@ -102,14 +103,6 @@ public static class SolarSystemDirector
             _backdrop.Gl.Scene.NavigateTo(SolarSystemScene.PanelKindForWindow(windowName));
             _backdrop.RenderOnce();
         }
-    }
-
-    public static void OnOverlayOpened(string windowName)
-    {
-    }
-
-    public static void OnOverlayClosed(string windowName, string currentWindow)
-    {
     }
 
     private static void EnterCampaignPanel()

@@ -72,7 +72,7 @@ internal sealed class OverlayHostController
         {
             (int width, int height) = FloatingOverlayLayout.ResolveOverlaySize(iniPath, sectionName);
 
-            bool seamlessCampaign = windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+            bool seamlessCampaign = FloatingOverlayLayout.IsCampaignWindow(windowName)
                 && SolarSystemDirector.IsActive
                 && DxThemeManager.IsTactical;
 
@@ -158,7 +158,7 @@ internal sealed class OverlayHostController
                 OptionsFooterChrome.ApplyToViewModel(_ctx.OverlayRoot);
             }
 
-            if (windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase))
+            if (FloatingOverlayLayout.IsCampaignWindow(windowName))
                 _ctx.ApplyCampaignOverlay(_ctx.OverlayRoot, CampaignSideFilter.All);
 
             _ctx.ShowStatus($"{windowName} overlay: {width}×{height}");

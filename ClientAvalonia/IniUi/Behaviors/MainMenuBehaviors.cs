@@ -16,7 +16,7 @@ public static class MainMenuBehaviors
         registry.Register("btnNewCampaign", _ =>
         {
             host.ShowStatus("Open: CampaignSelector (btnNewCampaign)");
-            host.NavigateTo("CampaignSelector");
+            host.NavigateTo(Services.FloatingOverlayLayout.CampaignWindowName);
         });
         RegisterOpen(registry, host, "btnStatistics", "StatisticsWindow");
         RegisterOpen(registry, host, "btnExtras", "ExtrasWindow");

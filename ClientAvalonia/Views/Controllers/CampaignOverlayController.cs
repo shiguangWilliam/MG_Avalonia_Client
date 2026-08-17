@@ -2,7 +2,9 @@ using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Services;
 using ClientCore;
+using ClientCore.Extensions;
 
 namespace ClientAvalonia.Views.Controllers;
 
@@ -24,11 +26,12 @@ internal sealed class CampaignOverlayController
     /// <summary>Active campaign tree: root panel or legacy floating overlay.</summary>
     public UiNodeViewModel? ResolveCampaignRoot()
     {
-        if (_ctx.CurrentWindow.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+        if (FloatingOverlayLayout.IsCampaignWindow(_ctx.CurrentWindow)
             && _ctx.ActiveRoot != null)
             return _ctx.ActiveRoot;
 
-        if (_ctx.FloatingOverlayWindow?.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase) == true)
+        if (_ctx.FloatingOverlayWindow is { } overlayWindow
+            && FloatingOverlayLayout.IsCampaignWindow(overlayWindow))
             return _ctx.OverlayRoot;
 
         return null;
@@ -43,10 +46,10 @@ internal sealed class CampaignOverlayController
         ApplyCampaignOverlay(root, sideFilter);
         string label = sideFilter switch
         {
-            CampaignSideFilter.Allied => "同盟国联军",
-            CampaignSideFilter.Soviet => "苏维埃联盟",
-            CampaignSideFilter.Ackville => "阿克维尔",
-            _ => "全部",
+            CampaignSideFilter.Allied => "同盟国联军".L10N("Client:Main:SideAllied"),
+            CampaignSideFilter.Soviet => "苏维埃联盟".L10N("Client:Main:SideSoviet"),
+            CampaignSideFilter.Ackville => "阿克维尔".L10N("Client:Main:SideAckville"),
+            _ => "全部".L10N("Client:Main:SideAll"),
         };
         _ctx.ShowStatus($"Campaign filter: {label} ({_ctx.LobbySession.VisibleMissions.Count} missions)");
     }
