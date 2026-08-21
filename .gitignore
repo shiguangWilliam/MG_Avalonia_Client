@@ -431,3 +431,6 @@ note/
 
 /Dist
 /Docs
+
+# Local MG test-zone Resources snapshot (binaries + themes, not versioned)
+Packaging/MG-Avalonia/Resources/

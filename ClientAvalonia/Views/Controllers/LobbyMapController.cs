@@ -33,7 +33,7 @@ internal sealed class LobbyMapController
             _ctx.LobbySession,
             resources,
             filterIndex,
-            _ctx.ResolveActiveGameSession()?.PlayerSlots ?? _ctx.SkirmishSession.PlayerSlots);
+            _ctx.ResolveActiveLobbySlots());
         _ctx.UpdateLaunchButtonState();
     }
 
@@ -71,7 +71,7 @@ internal sealed class LobbyMapController
             _ctx.LobbySession.VisibleMaps,
             index,
             resources,
-            _ctx.SkirmishSession.PlayerSlots,
+            _ctx.ResolveActiveLobbySlots(),
             canAssign,
             canSelectLocal);
         _ctx.UpdateLaunchButtonState();
@@ -191,7 +191,7 @@ internal sealed class LobbyMapController
             _ctx.LobbySession,
             resources,
             defaultFilter,
-            _ctx.ResolveActiveGameSession()?.PlayerSlots ?? _ctx.SkirmishSession.PlayerSlots);
+            _ctx.ResolveActiveLobbySlots());
 
         UiNodeViewModel? ddGameMode = MainWindowContext.FindVm(root, "ddGameMode");
         if (ddGameMode != null)
@@ -202,10 +202,10 @@ internal sealed class LobbyMapController
         {
             lbMapList.SelectionChanged += () =>
             {
-                if (MainWindowContext.IsSkirmishWindow(windowName))
+                MapEntry? newMap = _ctx.LobbySession.GetSelectedMap(lbMapList.SelectedIndex);
+                if (newMap != null)
                 {
-                    MapEntry? newMap = _ctx.LobbySession.GetSelectedMap(lbMapList.SelectedIndex);
-                    if (newMap != null)
+                    if (MainWindowContext.IsSkirmishWindow(windowName))
                     {
                         DefaultAiSlotPolicy.AutoFillToMapCapacity(
                             _ctx.SkirmishSession,
@@ -213,6 +213,11 @@ internal sealed class LobbyMapController
                             MainWindowContext.ResolvePlayerName(),
                             MainWindowContext.ResolveColorCatalog(),
                             LobbyCatalogService.Instance.AiNames);
+                    }
+                    else
+                    {
+                        // CnCNet/LAN: host resets AI slots per map capacity, humans preserved.
+                        _ctx.ResolveActiveGameSession()?.ResetSlotsForMap(newMap.MaxPlayers);
                     }
                 }
 
@@ -226,7 +231,7 @@ internal sealed class LobbyMapController
                     _ctx.LobbySession.VisibleMaps,
                     lbMapList.SelectedIndex,
                     resources,
-                    _ctx.SkirmishSession.PlayerSlots,
+                    _ctx.ResolveActiveLobbySlots(),
                     canAssign,
                     canSelectLocal);
 
@@ -482,7 +487,7 @@ internal sealed class LobbyMapController
         GameDataBindingApplier.RefreshMapStartMarkers(
             _ctx.ActiveRoot,
             GetCurrentLobbyMap(),
-            _ctx.SkirmishSession.PlayerSlots,
+            _ctx.ResolveActiveLobbySlots(),
             canAssign,
             canSelectLocal);
     }

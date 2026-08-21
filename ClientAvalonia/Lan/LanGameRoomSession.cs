@@ -84,16 +84,38 @@ public sealed class LanGameRoomSession : ILANGameSession
         if (!IsHost)
             return;
 
-        IReadOnlyList<string> aiNames = ResolveAiNames();
-        try
+        // Mirror CnCNet semantics: keep every human, drop AI so the host re-picks
+        // per the new map capacity. AutoFillToMapCapacity is skirmish-only
+        // (it wipes remote humans too).
+        int humanCount = _slots.Count(s => s.IsOccupied && !s.IsAi);
+        int maxSlots = Math.Clamp(maxPlayers, 1, LobbyPlayerSlot.MaxSlots);
+        if (humanCount > maxSlots)
+            humanCount = maxSlots;
+
+        // Compact humans to the front, then clear everything else (AI rows and overflow).
+        var preserved = new List<LobbyPlayerSlot>();
+        for (int i = 0; i < _slots.Length && preserved.Count < humanCount; i++)
         {
-            IMultiplayerColorCatalog colors = AppState.Colors;
-            DefaultAiSlotPolicy.AutoFillToMapCapacity(
-                this, maxPlayers, LocalPlayerName, colors, aiNames);
+            if (_slots[i].IsOccupied && !_slots[i].IsAi)
+                preserved.Add(_slots[i].Clone());
         }
-        catch (InvalidOperationException)
+
+        for (int i = 0; i < _slots.Length; i++)
+            ClearSlot(_slots[i]);
+
+        for (int i = 0; i < preserved.Count && i < _slots.Length; i++)
         {
-            ClearAndSeed(LocalPlayerName);
+            LobbyPlayerSlot kept = preserved[i];
+            LobbyPlayerSlot slot = _slots[i];
+            slot.Name = kept.Name;
+            slot.IsHumanLocal = kept.IsHumanLocal;
+            slot.IsAi = false;
+            slot.AiLevel = 0;
+            slot.SideIndex = kept.SideIndex;
+            slot.ColorIndex = kept.ColorIndex;
+            slot.TeamIndex = kept.TeamIndex;
+            slot.StartIndex = kept.StartIndex;
+            slot.Ready = kept.Ready;
         }
 
         BumpRevision();

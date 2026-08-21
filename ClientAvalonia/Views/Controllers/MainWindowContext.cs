@@ -105,6 +105,13 @@ internal sealed class MainWindowContext
         return CnCNet.ActiveGameRoom as IGameSession;
     }
 
+    /// <summary>
+    /// Slots of whatever lobby session owns the current window. Always yields the
+    /// skirmish array as a last resort so callers never need a hardcoded fallback.
+    /// </summary>
+    public IReadOnlyList<IPlayerSlot> ResolveActiveLobbySlots()
+        => ResolveActiveGameSession()?.PlayerSlots ?? SkirmishSession.PlayerSlots;
+
     public static bool IsLanGameLobbyWindow(string windowName)
         => windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase);

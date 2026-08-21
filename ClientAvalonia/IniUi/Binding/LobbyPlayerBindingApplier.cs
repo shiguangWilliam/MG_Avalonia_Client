@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ClientAvalonia.Domain;
@@ -14,6 +15,14 @@ namespace ClientAvalonia.IniUi.Binding;
 /// <summary>Builds runtime player slot dropdowns under PlayerOptionsPanel (aligned with GameLobbyBase.InitPlayerOptionDropdowns).</summary>
 public static class LobbyPlayerBindingApplier
 {
+    /// <summary>
+    /// Per-panel reentrancy shields. The slot dropdowns' event closures capture the shield
+    /// from the call that built the panel; later Apply() calls must resolve the SAME
+    /// instance or their SyncUiFromState guard is ineffective against UI→state writeback
+    /// (Items rebuild → ComboBox pushes -1 → SelectionChanged → slot cleared).
+    /// </summary>
+    private static readonly ConditionalWeakTable<UiNodeViewModel, FlagReentrancyShield> PanelShields = new();
+
     private const int DropDownHeight = 21;
     private const int DefaultLocationX = 25;
     private const int DefaultLocationY = 24;
@@ -81,7 +90,7 @@ public static class LobbyPlayerBindingApplier
         IReadOnlyList<string> aiNames = catalogs.AiNames;
         IReadOnlyList<LobbySideEntry> sideEntries = catalogs.SideEntries;
         IReadOnlyList<string> teamNames = catalogs.TeamNames;
-        var shield = new FlagReentrancyShield();
+        FlagReentrancyShield shield = PanelShields.GetValue(panel, static _ => new FlagReentrancyShield());
 
         if (panel.Node.Props.ContainsKey("LobbyPlayerSlotsBuilt"))
         {
@@ -404,6 +413,12 @@ public static class LobbyPlayerBindingApplier
         UiNodeViewModel? ddStart)
     {
         if (LobbyPlayerSlotUiRules.IsKickSelection(ddName) || LobbyPlayerSlotUiRules.IsBanSelection(ddName))
+            return null;
+
+        // Items are rebuilt during re-sync; ComboBox pushes SelectedIndex -1 through the
+        // TwoWay binding. Treat that transient state as "no edit" so a refresh can never
+        // clear an occupied slot (the historical player-ID loss after map switch).
+        if (ddName.SelectedIndex < 0)
             return null;
 
         LobbyPlayerRowKind rowKind = slots != null
