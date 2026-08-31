@@ -1,0 +1,99 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ============================================================
+       Tactical theme: black + thin-line + configurable accent.
+       DxAccentPrimaryBrush is overwritten at runtime by DxThemeManager
+       when the user configures a custom accent color; the values here
+       are the built-in defaults (cool cyan).
+       ============================================================ -->
+
+  <!-- Structural tokens: colder, lower-contrast steel surfaces -->
+  <SolidColorBrush x:Key="DxSurface0Brush" Color="#050709" />
+  <SolidColorBrush x:Key="DxSurface1Brush" Color="#0A0D11" />
+  <SolidColorBrush x:Key="DxSurfaceSelectedBrush" Color="#1A2028" />
+  <SolidColorBrush x:Key="DxLineBrush" Color="#3D454E" />
+  <SolidColorBrush x:Key="DxLineBrightBrush" Color="#9AA6B2" />
+  <SolidColorBrush x:Key="DxLineMutedBrush" Color="#232930" />
+
+  <!-- Globe: land reads as dark steel plate with pale hairline coasts -->
+  <SolidColorBrush x:Key="DxGlobeLandFillBrush" Color="#3D4E5C66" />
+  <SolidColorBrush x:Key="DxGlobeLandStrokeBrush" Color="#8FA8BC" />
+
+  <!-- Configurable accent (runtime-overridable) -->
+  <SolidColorBrush x:Key="DxAccentPrimaryBrush" Color="#2EE6C5" />
+  <!-- Derived: hue-inverted counterpart (red-ish for cyan default) -->
+  <SolidColorBrush x:Key="DxAccentInverseBrush" Color="#FF3B6B" />
+  <SolidColorBrush x:Key="DxAccentSoftBrush" Color="#7BEFD9" />
+  <SolidColorBrush x:Key="DxAccentGlowBrush" Color="#332EE6C5" />
+  <SolidColorBrush x:Key="DxAccentDangerBrush" Color="#FF3B3B" />
+
+  <!-- Text tokens -->
+  <SolidColorBrush x:Key="DxTextPrimaryBrush" Color="#E6EAEE" />
+  <SolidColorBrush x:Key="DxTextMutedBrush" Color="#6B7681" />
+
+  <!-- Textureless button fallback: matches TacticalAssetFactory output -->
+  <SolidColorBrush x:Key="DxFallbackButtonBackground" Color="#0B0E12" />
+  <SolidColorBrush x:Key="DxFallbackButtonBorder" Color="#2C333B" />
+  <CornerRadius x:Key="DxFallbackButtonRadius">0</CornerRadius>
+
+  <!-- Combo chrome -->
+  <SolidColorBrush x:Key="DxComboBackgroundBrush" Color="#F00A0D11" />
+  <SolidColorBrush x:Key="DxComboBorderBrush" Color="#3D454E" />
+
+  <!-- Floating overlay chrome (Options / Campaign / Create Game shells) -->
+  <SolidColorBrush x:Key="DxOverlayChromeBackground" Color="#F008090D" />
+  <SolidColorBrush x:Key="DxOverlayChromeBorder" Color="#552EE6C5" />
+  <CornerRadius x:Key="DxOverlayChromeRadius">2</CornerRadius>
+
+  <!-- Checkbox chrome: cold square, matches TacticalAssetFactory output -->
+  <SolidColorBrush x:Key="DxCheckBoxBorderBrush" Color="#2C333B" />
+  <SolidColorBrush x:Key="DxCheckBoxBackgroundBrush" Color="#0A0C10" />
+  <SolidColorBrush x:Key="DxCheckBoxCheckBrush" Color="#2EE6C5" />
+  <CornerRadius x:Key="DxCheckBoxRadius">0</CornerRadius>
+
+  <!-- ===== Compatibility layer: legacy DxCampaign* keys mapped to tokens =====
+       Classic templates keep working unchanged when Tactical tokens are active. -->
+
+  <SolidColorBrush x:Key="DxAccentBrush" Color="#2EE6C5" />
+  <SolidColorBrush x:Key="DxPanelOverlayBrush" Color="#80000000" />
+  <SolidColorBrush x:Key="DxCampaignSurfaceBrush" Color="#E6050608" />
+  <SolidColorBrush x:Key="DxCampaignSurfaceElevatedBrush" Color="#F00A0C10" />
+  <SolidColorBrush x:Key="DxCampaignBorderBrush" Color="#8A8A8A" />
+  <SolidColorBrush x:Key="DxCampaignBorderGlowBrush" Color="#552EE6C5" />
+  <SolidColorBrush x:Key="DxCampaignHeaderBrush" Color="#C8C8C8" />
+  <SolidColorBrush x:Key="DxCampaignListHoverBrush" Color="#331A1A1A" />
+  <SolidColorBrush x:Key="DxCampaignListSelectedBrush" Color="#66262626" />
+  <SolidColorBrush x:Key="DxCampaignListSelectedBorderBrush" Color="#2EE6C5" />
+
+  <SolidColorBrush x:Key="DxInputBackgroundBrush" Color="#E60A0C10" />
+  <SolidColorBrush x:Key="DxInputBorderBrush" Color="#5A5A5A" />
+  <SolidColorBrush x:Key="DxInputForegroundBrush" Color="#F2F2F2" />
+
+  <LinearGradientBrush x:Key="DxCampaignAccentGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#002EE6C5" Offset="0" />
+    <GradientStop Color="#CC2EE6C5" Offset="0.35" />
+    <GradientStop Color="#FF7BEFD9" Offset="0.5" />
+    <GradientStop Color="#CC2EE6C5" Offset="0.65" />
+    <GradientStop Color="#002EE6C5" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignSurfaceGradient" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Color="#F6050608" Offset="0" />
+    <GradientStop Color="#F80A0C10" Offset="0.55" />
+    <GradientStop Color="#FA050608" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignPrimaryButtonGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#FF2EE6C5" Offset="0" />
+    <GradientStop Color="#FF2EE6C5" Offset="0.5" />
+    <GradientStop Color="#FF25C9AC" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DxCampaignPrimaryButtonHoverGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+    <GradientStop Color="#FF7BEFD9" Offset="0" />
+    <GradientStop Color="#FF7BEFD9" Offset="0.5" />
+    <GradientStop Color="#FF2EE6C5" Offset="1" />
+  </LinearGradientBrush>
+
+</ResourceDictionary>

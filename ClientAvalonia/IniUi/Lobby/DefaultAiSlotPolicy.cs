@@ -57,7 +57,7 @@ public static class DefaultAiSlotPolicy
         for (int i = 1; i < maxPlayers; i++)
         {
             IPlayerSlot slot = slots[i];
-            slot.Name = names.Count > 0 ? names[0] : $"AI {i}";
+            slot.Name = names.Count > 0 ? names[(i - 1) % names.Count] : $"AI {i}";
             slot.IsAi = true;
             slot.IsHumanLocal = false;
             slot.AiLevel = 0;

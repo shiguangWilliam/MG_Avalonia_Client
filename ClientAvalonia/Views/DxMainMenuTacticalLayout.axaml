@@ -1,0 +1,213 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctrl="using:ClientAvalonia.Controls"
+             xmlns:vm="using:ClientAvalonia.Rendering"
+             x:Class="ClientAvalonia.Views.DxMainMenuTacticalLayout"
+             x:DataType="vm:UiNodeViewModel"
+             ClipToBounds="True"
+             Background="Transparent">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.console-brand">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="5" />
+      <Setter Property="Foreground" Value="{DynamicResource DxTextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.console-sub">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="2.5" />
+      <Setter Property="Foreground" Value="{DynamicResource DxTextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.console-zh">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI, sans-serif" />
+      <Setter Property="Foreground" Value="{DynamicResource DxTextMutedBrush}" />
+      <Setter Property="Opacity" Value="0.75" />
+    </Style>
+    <Style Selector="TextBlock.nav-index">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, monospace" />
+      <Setter Property="Foreground" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="Opacity" Value="0.45" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Width" Value="24" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+    </Style>
+    <Style Selector="Border.console-panel">
+      <Setter Property="BorderBrush" Value="{DynamicResource DxLineBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="#B0060A10" />
+      <Setter Property="Padding" Value="16,14" />
+      <Setter Property="BoxShadow" Value="0 12 32 0 #66000000" />
+    </Style>
+    <Style Selector="Border.console-panel-slim">
+      <Setter Property="BorderBrush" Value="{DynamicResource DxLineMutedBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="#9905080C" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="BoxShadow" Value="0 6 18 0 #44000000" />
+    </Style>
+    <Style Selector="Border.corner-mark">
+      <Setter Property="Width" Value="12" />
+      <Setter Property="Height" Value="12" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+      <Setter Property="Opacity" Value="0.65" />
+    </Style>
+    <Style Selector="Border.accent-rail">
+      <Setter Property="Width" Value="2" />
+      <Setter Property="Background" Value="{DynamicResource DxAccentPrimaryBrush}" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+    <Style Selector="Border.section-tick">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource DxAccentPrimaryBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Panel>
+
+    <!-- Top telemetry -->
+    <Border Classes="console-panel-slim"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top"
+            Margin="20,12,20,0">
+      <DockPanel LastChildFill="False">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Ellipse x:Name="LinkLamp"
+                     Width="7" Height="7"
+                     Fill="{DynamicResource DxAccentPrimaryBrush}"
+                     Opacity="0.9" />
+            <TextBlock Text="LINK"
+                       FontFamily="Cascadia Mono, Consolas, monospace"
+                       FontSize="10"
+                       FontWeight="SemiBold"
+                       LetterSpacing="1.5"
+                       Foreground="{DynamicResource DxTextMutedBrush}"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+          <Border Width="1" Height="12" Background="{DynamicResource DxLineMutedBrush}" Opacity="0.7" />
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="SYS"
+                       FontFamily="Cascadia Mono, Consolas, monospace"
+                       FontSize="10"
+                       LetterSpacing="1"
+                       Foreground="{DynamicResource DxTextMutedBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock x:Name="SysClock"
+                       Text="--:--:--"
+                       FontFamily="Cascadia Mono, Consolas, monospace"
+                       FontSize="11"
+                       Foreground="{DynamicResource DxTextPrimaryBrush}"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="TelemetryHost"
+                    DockPanel.Dock="Right"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Right" />
+      </DockPanel>
+    </Border>
+
+    <!-- Left command console -->
+    <Border x:Name="LeftPanel"
+            Classes="console-panel"
+            Width="292"
+            Margin="20,58,0,148"
+            VerticalAlignment="Stretch"
+            HorizontalAlignment="Left">
+      <Panel>
+        <Border Classes="corner-mark" HorizontalAlignment="Left" VerticalAlignment="Top"
+                BorderThickness="1,1,0,0" Margin="-1,-1,0,0" />
+        <Border Classes="corner-mark" HorizontalAlignment="Right" VerticalAlignment="Top"
+                BorderThickness="0,1,1,0" Margin="0,-1,-1,0" />
+        <Border Classes="corner-mark" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                BorderThickness="1,0,0,1" Margin="-1,0,0,-1" />
+        <Border Classes="corner-mark" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                BorderThickness="0,0,1,1" Margin="0,0,-1,-1" />
+
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,12">
+            <TextBlock Text="GENESIS" Classes="console-brand" />
+            <TextBlock Text="创世之刻" Classes="console-zh" Margin="0,2,0,0" />
+            <TextBlock Text="TACTICAL COMMAND CONSOLE" Classes="console-sub" Margin="0,6,0,0" />
+            <Border Height="1" Margin="0,10,0,2"
+                    Background="{DynamicResource DxLineMutedBrush}" />
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+              <Border Classes="section-tick" />
+              <TextBlock Text="NAVIGATION"
+                         Classes="console-sub"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="NavHost" Spacing="3" />
+        </DockPanel>
+      </Panel>
+    </Border>
+    <Border Classes="accent-rail"
+            HorizontalAlignment="Left"
+            Margin="310,58,0,148" />
+
+    <!-- Bottom-left terminal -->
+    <Border Classes="console-panel-slim"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Bottom"
+            Width="400"
+            Margin="20,0,0,16"
+            Padding="12,8">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+          <Border Classes="section-tick" />
+          <TextBlock Text="TERMINAL"
+                     Classes="console-sub"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+        <ctrl:ConsoleTerminalStrip x:Name="TerminalStrip"
+                                  HorizontalAlignment="Stretch"
+                                  MinHeight="72" />
+      </DockPanel>
+    </Border>
+
+    <!-- Bottom-center secondary links -->
+    <Border Classes="console-panel-slim"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="0,0,0,16"
+            Padding="10,8">
+      <StackPanel x:Name="FooterHost"
+                  Orientation="Horizontal"
+                  Spacing="8"
+                  VerticalAlignment="Center" />
+    </Border>
+
+    <!-- Bottom-right mini radar -->
+    <Border Classes="console-panel-slim"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Margin="0,0,20,16"
+            Padding="10,8"
+            Opacity="0.94">
+      <StackPanel Spacing="6" HorizontalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left">
+          <Border Classes="section-tick" />
+          <TextBlock Text="RADAR"
+                     Classes="console-sub"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+        <ctrl:TacticalRadarView Width="128" Height="128" />
+      </StackPanel>
+    </Border>
+
+    <Panel x:Name="MiscHost" IsVisible="False" />
+  </Panel>
+</UserControl>

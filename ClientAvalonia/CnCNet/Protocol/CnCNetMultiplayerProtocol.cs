@@ -3,6 +3,7 @@ using Rampastring.Tools;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet.Protocol;
 
@@ -192,12 +193,12 @@ public static class CnCNetMultiplayerProtocol
         }
 
         string[] players = parts[6].Split(',', StringSplitOptions.RemoveEmptyEntries);
-        string localGameId = ClientConfiguration.Instance.LocalGame;
+        string localGameId = AppState.Configuration.Legacy.LocalGame;
         bool incompatible = !string.IsNullOrWhiteSpace(sourceGameId)
             && sourceGameId.Equals(localGameId, StringComparison.OrdinalIgnoreCase)
-            && !parts[1].Equals(ProgramConstants.GAME_VERSION, StringComparison.OrdinalIgnoreCase);
+            && !parts[1].Equals(AppState.Environment.GameVersion, StringComparison.OrdinalIgnoreCase);
 
-        bool listingLocked = locked || (isLoadedGame && !players.Contains(ProgramConstants.PLAYERNAME));
+        bool listingLocked = locked || (isLoadedGame && !players.Contains(AppState.Environment.PlayerName));
 
         game = new CnCNetHostedGameSummary
         {
@@ -332,8 +333,8 @@ public static class CnCNetMultiplayerProtocol
         if (playerName.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return playerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase)
-               && localPlayerName.Equals(ProgramConstants.PLAYERNAME, StringComparison.OrdinalIgnoreCase);
+        return playerName.Equals(AppState.Environment.PlayerName, StringComparison.OrdinalIgnoreCase)
+               && localPlayerName.Equals(AppState.Environment.PlayerName, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>DX <c>NonHostLaunchGame</c>: port via <c>int.TryParse</c>; address may be <c>0.0.0.0</c>.</summary>
@@ -515,7 +516,7 @@ public static class CnCNetMultiplayerProtocol
         var sb = new System.Text.StringBuilder("GAME ");
         sb.Append(revision);
         sb.Append(';');
-        sb.Append(ProgramConstants.GAME_VERSION);
+        sb.Append(AppState.Environment.GameVersion);
         sb.Append(';');
         sb.Append(room.MaxPlayers);
         sb.Append(';');
@@ -551,7 +552,7 @@ public static class CnCNetMultiplayerProtocol
 
     private static string AiLevelToName(int aiLevel)
     {
-        IReadOnlyList<string> names = ProgramConstants.AI_PLAYER_NAMES;
+        IReadOnlyList<string> names = AppState.Environment.AiPlayerNames;
         if (aiLevel >= 0 && aiLevel < names.Count)
             return names[aiLevel];
 

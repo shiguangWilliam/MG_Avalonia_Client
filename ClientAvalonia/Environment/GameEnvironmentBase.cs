@@ -30,5 +30,10 @@ public abstract class GameEnvironmentBase : IGameEnvironment
     public virtual string ResourcesPath => Path.Combine(GamePath, "Resources");
 
     /// <inheritdoc />
-    public virtual string BaseResourcesPath => Path.Combine(ResourcesPath, "Base");
+    /// <remarks>
+    /// Matches <c>ProgramConstants.GetBaseResourcePath()</c> (<c>GamePath/Resources</c>).
+    /// MG and DX ship Renderers.ini / Compatibility under Resources\, not Resources\Base.
+    /// Theme assets use the theme search path; base shared files use this directory.
+    /// </remarks>
+    public virtual string BaseResourcesPath => ResourcesPath;
 }

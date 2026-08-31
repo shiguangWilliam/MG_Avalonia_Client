@@ -8,6 +8,44 @@
   <SolidColorBrush x:Key="DxTextPrimaryBrush" Color="#F2E6D8" />
   <SolidColorBrush x:Key="DxTextMutedBrush" Color="#B8AA9A" />
 
+  <!-- Structural tokens (Classic theme equivalents) -->
+  <SolidColorBrush x:Key="DxSurface0Brush" Color="#12100E" />
+  <SolidColorBrush x:Key="DxSurface1Brush" Color="#1A1614" />
+  <SolidColorBrush x:Key="DxSurfaceSelectedBrush" Color="#453018" />
+  <SolidColorBrush x:Key="DxLineBrush" Color="#6B4E2E" />
+  <SolidColorBrush x:Key="DxLineBrightBrush" Color="#A8845C" />
+  <SolidColorBrush x:Key="DxLineMutedBrush" Color="#4A3A28" />
+
+  <!-- Globe: warm parchment land for the Classic look -->
+  <SolidColorBrush x:Key="DxGlobeLandFillBrush" Color="#6650A04A" />
+  <SolidColorBrush x:Key="DxGlobeLandStrokeBrush" Color="#C8A870" />
+
+  <!-- Accent key used by tactical controls when running under Classic.
+       Kept equal to DxAccentBrush so runtime accent derivation is a no-op here. -->
+  <SolidColorBrush x:Key="DxAccentPrimaryBrush" Color="#FF8C32" />
+  <SolidColorBrush x:Key="DxAccentInverseBrush" Color="#FF8C32" />
+  <SolidColorBrush x:Key="DxAccentGlowBrush" Color="#33FF8C32" />
+
+  <!-- Textureless button fallback (original warm-wood look when no PNG exists) -->
+  <SolidColorBrush x:Key="DxFallbackButtonBackground" Color="#221C16" />
+  <SolidColorBrush x:Key="DxFallbackButtonBorder" Color="#5A4632" />
+  <CornerRadius x:Key="DxFallbackButtonRadius">6</CornerRadius>
+
+  <!-- Combo chrome -->
+  <SolidColorBrush x:Key="DxComboBackgroundBrush" Color="#CC14100C" />
+  <SolidColorBrush x:Key="DxComboBorderBrush" Color="#6B4E2E" />
+
+  <!-- Floating overlay chrome (Options / Campaign / Create Game shells) -->
+  <SolidColorBrush x:Key="DxOverlayChromeBackground" Color="#CC14100C" />
+  <SolidColorBrush x:Key="DxOverlayChromeBorder" Color="#55FF8C32" />
+  <CornerRadius x:Key="DxOverlayChromeRadius">12</CornerRadius>
+
+  <!-- Checkbox chrome (original Classic look when no PNG exists) -->
+  <SolidColorBrush x:Key="DxCheckBoxBorderBrush" Color="#FFA648" />
+  <SolidColorBrush x:Key="DxCheckBoxBackgroundBrush" Color="#14100C" />
+  <SolidColorBrush x:Key="DxCheckBoxCheckBrush" Color="#FFA648" />
+  <CornerRadius x:Key="DxCheckBoxRadius">2</CornerRadius>
+
   <!-- Campaign chrome -->
   <SolidColorBrush x:Key="DxCampaignSurfaceBrush" Color="#CC12100E" />
   <SolidColorBrush x:Key="DxCampaignSurfaceElevatedBrush" Color="#E0181614" />

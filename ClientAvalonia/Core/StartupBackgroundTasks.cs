@@ -5,6 +5,7 @@ using ClientAvalonia.CnCNet;
 using ClientCore;
 using ClientCore.Enums;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
@@ -33,10 +34,10 @@ internal static class StartupBackgroundTasks
 
     public static void ScheduleDebugFolderPrune()
     {
-        if (ClientConfiguration.Instance.ClientGameType != ClientType.Ares)
+        if (AppState.Configuration.Legacy.ClientGameType != ClientType.Ares)
             return;
 
-        Task.Run(() => PruneFiles(SafePath.GetDirectory(ProgramConstants.GamePath, "debug"), DateTime.Now.AddDays(-7)));
+        Task.Run(() => PruneFiles(SafePath.GetDirectory(AppState.Environment.GamePath, "debug"), DateTime.Now.AddDays(-7)));
     }
 
     private static void MigrateOldLogFiles()

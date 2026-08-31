@@ -60,12 +60,15 @@ ClientAvalonia 补丁包
 3. 确认出现:
      ClientAvalonia.exe
      Resources\DTA\CnCNetGameLobby.ini  等 INI
+     Resources\Translations\zh-CN\Translation.ini 等语言包
 4. 双击 ClientAvalonia.exe 启动（不要覆盖 Resources\ThemeMG\ 下已有 MG 主题 INI）
 
 本补丁包含的 INI
 ----------------
 仅复制 Resources\DTA\ 下 ClientAvalonia 联机/遭遇战大厅所需的窗口定义:
   $($LobbyIniFiles -join ', ')
+
+以及 Resources\Translations\（en / zh-CN / ru）客户端文案。
 
 不会覆盖
 --------
@@ -78,6 +81,7 @@ ClientAvalonia 补丁包
 ----
   - 创建游戏弹窗、颜色预览、CnCNet 频道/房间等功能依赖上述 DTA INI 作为回退。
   - 若 MG 主题缺少 CnCNetGameLobby.ini，解压后会自动补齐。
+  - Translations 会合并进游戏根 Resources\Translations（同名文件会被更新）。
   - 需要 Windows x64；首次运行可能稍慢（单文件解压缓存）。
 
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
@@ -117,6 +121,13 @@ foreach ($ini in $LobbyIniFiles) {
 
 if ($missing.Count -gt 0) {
   throw "Missing source INI(s): $($missing -join ', ')"
+}
+
+$TranslationsSrc = Join-Path $RepoRoot 'DXMainClient\Resources\Translations'
+if (Test-Path -LiteralPath $TranslationsSrc) {
+  $TranslationsDest = Join-Path $PatchDir 'Resources\Translations'
+  New-Item -ItemType Directory -Force -Path $TranslationsDest | Out-Null
+  Copy-Item -Path (Join-Path $TranslationsSrc '*') -Destination $TranslationsDest -Recurse -Force
 }
 
 $exeInfo = Get-Item -LiteralPath (Join-Path $PatchDir 'ClientAvalonia.exe')

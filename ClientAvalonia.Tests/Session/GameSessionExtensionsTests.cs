@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Services;
@@ -155,22 +156,16 @@ public sealed class GameSessionExtensionsTests
         session.FirstEmptySlotIndex().Should().Be(2);
     }
 
-    // ---- LobbyPlayerState 委托验证（向后兼容）----
-
     [Fact]
-    public void LobbyPlayerState_Properties_Delegate_To_Extensions()
+    public void SkirmishSession_Slots_Use_Extensions()
     {
-        var state = new LobbyPlayerState();
-        state.Slots[0] = Human("A");
-        state.Slots[1] = Ai("X");
+        var session = new SkirmishSession();
+        session.Slots[0] = Human("A");
+        session.Slots[1] = Ai("X");
 
-        state.HumanRowCount.Should().Be(1);
-        state.AiRowCount.Should().Be(1);
-        state.OccupiedRowCount.Should().Be(2);
-        state.OccupiedSlotCount.Should().Be(2);
-        state.HumanCount.Should().Be(1);
-        state.AiCount.Should().Be(1);
-        state.GetRowKind(2).Should().Be(LobbyPlayerRowKind.Open);
-        state.FirstEmptySlotIndex().Should().Be(2);
+        ((IReadOnlyList<IPlayerSlot>)session.Slots).HumanRowCount().Should().Be(1);
+        ((IReadOnlyList<IPlayerSlot>)session.Slots).AiRowCount().Should().Be(1);
+        session.GetRowKind(2).Should().Be(LobbyPlayerRowKind.Open);
+        session.FirstEmptySlotIndex().Should().Be(2);
     }
 }

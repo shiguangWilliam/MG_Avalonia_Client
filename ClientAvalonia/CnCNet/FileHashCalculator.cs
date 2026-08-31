@@ -1,11 +1,14 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using ClientAvalonia.GlobalState;
 
+using ClientAvalonia.Configuration;
+using ClientAvalonia.GlobalState.Environment;
 using ClientCore;
 using ClientCore.I18N;
 using ClientCore.Enums;
@@ -39,7 +42,7 @@ namespace ClientAvalonia.CnCNet;
 
         private static readonly IReadOnlyList<string> knownTextFileExtensions = [".txt", ".ini", ".json", ".xml"];
 
-        private string[] fileNamesToCheck = ClientConfiguration.Instance.ClientGameType switch
+        private string[] fileNamesToCheck = ResolveClientGameType() switch
         {
             ClientType.TS => new string[]
             {
@@ -105,45 +108,51 @@ namespace ClientAvalonia.CnCNet;
 
         public void CalculateHashes()
         {
+            // 一次性解析环境与配置接口；底层 Adapter 仍读 AppState.Configuration.Legacy。
+            IGameEnvironment env = EnvironmentServices.Resolve<IGameEnvironment>();
+            IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+            string gamePath = env.GamePath;
+            string baseResourcesPath = env.BaseResourcesPath;
+
             FileHashes fh = new()
             {
                 ClientDefinitionsHash = ResolveLauncherHash(
                     "ClientDefinitionsHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.CLIENT_DEFS))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, ClientConfiguration.CLIENT_DEFS))),
                 GameOptionsHash = ResolveLauncherHash(
                     "GameOptionsHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.BASE_RESOURCE_PATH, ClientConfiguration.GAME_OPTIONS))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(gamePath, ProgramConstants.BASE_RESOURCE_PATH, ClientConfiguration.GAME_OPTIONS))),
                 ClientDXHash = ResolveLauncherHash(
                     "ClientDXHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientdx.exe"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "clientdx.exe"))),
                 ClientXNAHash = ResolveLauncherHash(
                     "ClientXNAHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientxna.exe"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "clientxna.exe"))),
                 ClientOGLHash = ResolveLauncherHash(
                     "ClientOGLHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "clientogl.exe"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "clientogl.exe"))),
                 ClientDXNET8Hash = ResolveLauncherHash(
                     "ClientDXNET8Hash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "Windows", "clientdx.dll"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "BinariesNET8", "Windows", "clientdx.dll"))),
                 ClientXNANET8Hash = ResolveLauncherHash(
                     "ClientXNANET8Hash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "XNA", "clientxna.dll"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "BinariesNET8", "XNA", "clientxna.dll"))),
                 ClientOGLNET8Hash = ResolveLauncherHash(
                     "ClientOGLNET8Hash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "OpenGL", "clientogl.dll"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "BinariesNET8", "OpenGL", "clientogl.dll"))),
                 ClientUGLNET8Hash = ResolveLauncherHash(
                     "ClientUGLNET8Hash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "BinariesNET8", "UniversalGL", "clientogl.dll"))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, "BinariesNET8", "UniversalGL", "clientogl.dll"))),
                 GameExeHash = calculateGameExeHash
-                    ? CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.GetGameExecutableName()))
+                    ? CalculateSHA1ForFile(SafePath.CombineFilePath(gamePath, config.GetGameExecutableName()))
                     : string.Empty,
-                LauncherExeHash = CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.GameLauncherExecutableName)),
+                LauncherExeHash = CalculateSHA1ForFile(SafePath.CombineFilePath(gamePath, config.GameLauncherExecutableName)),
                 MPMapsHash = ResolveLauncherHash(
                     "MPMapsHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(gamePath, config.MPMapsIniPath))),
                 FHCConfigHash = ResolveLauncherHash(
                     "FHCConfigHash",
-                    CalculateSHA1ForFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME))),
+                    CalculateSHA1ForFile(SafePath.CombineFilePath(baseResourcesPath, CONFIGNAME))),
             };
 
             Logger.Log($"Hash for {ProgramConstants.BASE_RESOURCE_PATH}\\{ClientConfiguration.CLIENT_DEFS}: {fh.ClientDefinitionsHash}");
@@ -156,26 +165,26 @@ namespace ClientAvalonia.CnCNet;
             Logger.Log($"Hash for ClientXNA NET8: {fh.ClientXNANET8Hash}");
             Logger.Log($"Hash for ClientOGL NET8: {fh.ClientOGLNET8Hash}");
             Logger.Log($"Hash for ClientUGL NET8: {fh.ClientUGLNET8Hash}");
-            Logger.Log($"Hash for {ClientConfiguration.Instance.MPMapsIniPath}: {fh.MPMapsHash}");
+            Logger.Log($"Hash for {config.MPMapsIniPath}: {fh.MPMapsHash}");
 
             if (calculateGameExeHash)
-                Logger.Log($"Hash for {ClientConfiguration.Instance.GetGameExecutableName()}: {fh.GameExeHash}");
+                Logger.Log($"Hash for {config.GetGameExecutableName()}: {fh.GameExeHash}");
 
-            if (!string.IsNullOrEmpty(ClientConfiguration.Instance.GameLauncherExecutableName))
-                Logger.Log($"Hash for {ClientConfiguration.Instance.GameLauncherExecutableName}: {fh.LauncherExeHash}");
+            if (!string.IsNullOrEmpty(config.GameLauncherExecutableName))
+                Logger.Log($"Hash for {config.GameLauncherExecutableName}: {fh.LauncherExeHash}");
 
             foreach (string relativePath in fileNamesToCheck)
             {
-                string fullPath = SafePath.CombineFilePath(ProgramConstants.GamePath, relativePath);
+                string fullPath = SafePath.CombineFilePath(gamePath, relativePath);
                 string hash = fh.AddHashForFileIfExists(relativePath, fullPath);
                 if (!string.IsNullOrEmpty(hash))
                     Logger.Log($"Hash for {relativePath}: {hash}");
             }
 
-            List<DirectoryInfo> iniPaths = [SafePath.GetDirectory(ProgramConstants.GamePath, "INI", "Game Options")];
+            List<DirectoryInfo> iniPaths = [SafePath.GetDirectory(gamePath, "INI", "Game Options")];
 
-            if (ClientConfiguration.Instance.ClientGameType != ClientType.YR)
-                iniPaths.Add(SafePath.GetDirectory(ProgramConstants.GamePath, "INI", "Map Code"));
+            if (config.ClientGameType != ClientType.YR)
+                iniPaths.Add(SafePath.GetDirectory(gamePath, "INI", "Map Code"));
 
             foreach (DirectoryInfo path in iniPaths)
             {
@@ -195,12 +204,14 @@ namespace ClientAvalonia.CnCNet;
             }
 
             // Add the hashes for each checked file from the available translations
+            // 少量翻译相关字段未抽到 IGameConfiguration，通过 Adapter escape hatch 访问。
+            ClientConfiguration coreConfig = (config as ClientConfigurationAdapter)?.Legacy ?? AppState.Configuration.Legacy;
 
-            if (Directory.Exists(ClientConfiguration.Instance.TranslationsFolderPath))
+            if (Directory.Exists(coreConfig.TranslationsFolderPath))
             {
-                DirectoryInfo translationsFolderPath = SafePath.GetDirectory(ClientConfiguration.Instance.TranslationsFolderPath);
+                DirectoryInfo translationsFolderPath = SafePath.GetDirectory(coreConfig.TranslationsFolderPath);
 
-                List<TranslationGameFile> translationGameFiles = ClientConfiguration.Instance.TranslationGameFiles
+                List<TranslationGameFile> translationGameFiles = coreConfig.TranslationGameFiles
                     .Where(tgf => tgf.Checked).ToList();
 
                 foreach (DirectoryInfo translationFolder in translationsFolderPath.EnumerateDirectories())
@@ -240,7 +251,7 @@ namespace ClientAvalonia.CnCNet;
 
         private void ParseConfigFile()
         {
-            IniFile config = new IniFile(SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), CONFIGNAME));
+            IniFile config = new IniFile(SafePath.CombineFilePath(ResolveBaseResourcesPath(), CONFIGNAME));
             calculateGameExeHash = config.GetBooleanValue("Settings", "CalculateGameExeHash", true);
             useReferenceLauncherHashes = config.GetBooleanValue("Settings", "UseReferenceLauncherHashes", true);
 
@@ -274,6 +285,32 @@ namespace ClientAvalonia.CnCNet;
         }
 
         private static string NormalizePath(string path) => path.Replace('\\', '/');
+
+        private static ClientType ResolveClientGameType()
+        {
+            try
+            {
+                return EnvironmentServices.Resolve<IGameConfiguration>().ClientGameType;
+            }
+            catch (InvalidOperationException)
+            {
+                // TODO(phase-A): inject IGameConfiguration — 字段初始化器在 PreStartup 注册前运行
+                return AppState.Configuration.Legacy.ClientGameType;
+            }
+        }
+
+        private static string ResolveBaseResourcesPath()
+        {
+            try
+            {
+                return EnvironmentServices.Resolve<IGameEnvironment>().BaseResourcesPath;
+            }
+            catch (InvalidOperationException)
+            {
+                // TODO(phase-A): inject IGameEnvironment — 早于 PreStartup 注册
+                return AppState.Environment.BaseResourcesPath;
+            }
+        }
 
         private static string CalculateSHA1ForFile(string path)
         {
@@ -333,7 +370,8 @@ namespace ClientAvalonia.CnCNet;
 
             public string AddHashForFileIfExists(string relativePath, string filePath)
             {
-                Debug.Assert(!relativePath.StartsWith(ProgramConstants.GamePath), $"File path {relativePath} should be a relative path.");
+                // TODO(phase-A): inject IGameEnvironment — Debug assert 用 AppState.Environment.GamePath 仅作字符串前缀检查
+                Debug.Assert(!relativePath.StartsWith(AppState.Environment.GamePath), $"File path {relativePath} should be a relative path.");
 
                 string hash = CalculateSHA1ForFile(filePath);
                 if (!string.IsNullOrEmpty(hash))

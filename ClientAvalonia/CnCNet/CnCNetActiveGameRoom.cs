@@ -22,6 +22,9 @@ public sealed class CnCNetActiveGameRoom
 
     /// <summary>Host-side isCustomPassword; set at create, used for GAME/GSETTINGS broadcast only.</summary>
     public bool Passworded { get; set; }
+
+    /// <summary>DX CnCNetGameLoadingLobby: room is a saved-game continue.</summary>
+    public bool IsLoadedGame { get; set; }
 }
 
 /// <summary>Player slot in an active CnCNet game room (XNA PlayerInfo subset).</summary>
@@ -63,6 +66,6 @@ public sealed class CnCNetStartGameInfo
 
     public required bool IsHost { get; init; }
 
-    /// <summary>Per-human NAT ports from START / tunnel request (name â†?port).</summary>
+    /// <summary>Per-human NAT ports from START / tunnel request (name->port).</summary>
     public IReadOnlyDictionary<string, ushort> PlayerPorts { get; init; } = new Dictionary<string, ushort>();
 }

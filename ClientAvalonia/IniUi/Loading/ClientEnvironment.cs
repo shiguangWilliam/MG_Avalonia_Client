@@ -1,8 +1,9 @@
 // ClientEnvironment: game-root discovery, theme resolution, and asset/INI search paths.
 // The search path order in GetAssetSearchPaths / ResolveNamedIni is aligned with DX's
-// ProgramConstants.GetResourcePath(). Read ClientAvalonia/IniUi/README.md §ResourceResolver
+// AppState.Environment.ResourcesPath. Read ClientAvalonia/IniUi/README.md §ResourceResolver
 // before changing path order — map previews and side icons rely on GameRoot being a root.
 using ClientAvalonia.Core;
+using ClientAvalonia.GlobalState;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.Services;
 using ClientCore;
@@ -70,7 +71,7 @@ public sealed class ClientEnvironment
 
     private static ClientEnvironment DiscoverFromCore(string gameRoot)
     {
-        ClientConfiguration config = ClientConfiguration.Instance;
+        ClientConfiguration config = AppState.Configuration.Legacy;
         UserINISettings settings = UserINISettings.Instance;
 
         string themeFolder = settings.ThemeFolderPath.TrimEnd('/', '\\');
@@ -145,6 +146,11 @@ public sealed class ClientEnvironment
             (int overlayWidth, int overlayHeight) = FloatingOverlayLayout.ResolveOverlaySize(iniPath, windowSectionName);
             return new LayoutContext(overlayWidth, overlayHeight, ParserConstantsLoader.LoadForGame(GameRoot));
         }
+
+        // Campaign is a full-bleed root panel: keep the client resolution so the
+        // shared Earth backdrop and HUD columns fill the same viewport as MainMenu.
+        if (FloatingOverlayLayout.IsCampaignWindow(windowSectionName))
+            return new LayoutContext(ClientRenderWidth, ClientRenderHeight, ParserConstantsLoader.LoadForGame(GameRoot));
 
         (int width, int height) = ReadWindowSize(iniPath, windowSectionName)
             ?? (ClientRenderWidth, ClientRenderHeight);
@@ -222,7 +228,7 @@ public sealed class ClientEnvironment
     public IEnumerable<string> GetAssetSearchPaths()
     {
         if (ClientCoreBootstrap.IsInitialized)
-            yield return ProgramConstants.GetResourcePath();
+            yield return AppState.Environment.ResourcesPath;
 
         if (!string.IsNullOrEmpty(TranslationLocale))
         {
@@ -232,7 +238,7 @@ public sealed class ClientEnvironment
 
         yield return ThemeResourceDirectory;
         yield return ResourcesDirectory;
-        // XNA base resource directory (ProgramConstants.GetBaseResourcePath() == Resources/Base).
+        // Legacy DTA layouts may still ship shared files under Resources/Base.
         yield return Path.Combine(ResourcesDirectory, "Base");
         // Backward compat: published DTA resource bundles (pre-2.12 standard) ship under Resources/DTA/.
         yield return Path.Combine(ResourcesDirectory, "DTA");

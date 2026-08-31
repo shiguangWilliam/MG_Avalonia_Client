@@ -1,6 +1,7 @@
 using ClientAvalonia.Rendering;
 using ClientCore;
 using System.Diagnostics;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -12,12 +13,15 @@ public static class MainMenuBehaviors
         registry.Register("btnOptions", _ => host.OpenOptionsOverlay());
         RegisterOpen(registry, host, "btnLan", "LANLobby");
         RegisterOpen(registry, host, "btnCnCNet", "CnCNetLobby");
-        registry.Register("btnNewCampaign", _ => host.OpenCampaignOverlay());
+        registry.Register("btnNewCampaign", _ =>
+        {
+            host.ShowStatus("Open: CampaignSelector (btnNewCampaign)");
+            host.NavigateTo(Services.FloatingOverlayLayout.CampaignWindowName);
+        });
         RegisterOpen(registry, host, "btnStatistics", "StatisticsWindow");
         RegisterOpen(registry, host, "btnExtras", "ExtrasWindow");
 
-        registry.Register("btnLoadGame", vm =>
-            host.ShowStatus("Click: Load Game — not wired in Avalonia client yet"));
+        registry.Register("btnLoadGame", _ => host.OpenLoadGameOverlay());
         registry.Register("btnMapEditor", vm =>
             host.ShowStatus("Click: Map Editor — launches external tool in XNA client"));
         registry.Register("btnRankedMatch", vm =>
@@ -36,7 +40,7 @@ public static class MainMenuBehaviors
 
     private static void OpenChangelogUrl(IUiNavigationHost host)
     {
-        string url = ClientConfiguration.Instance.ChangelogURL ?? string.Empty;
+        string url = AppState.Configuration.Legacy.ChangelogURL ?? string.Empty;
         if (string.IsNullOrWhiteSpace(url))
         {
             host.ShowStatus("Changelog URL is not configured.");
@@ -59,5 +63,7 @@ public static class MainMenuBehaviors
         {
             host.ShowStatus($"Open: {windowName} ({controlId})");
             host.NavigateTo(windowName);
+            if (windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase))
+                AppState.Lan.StartLobby();
         });
 }

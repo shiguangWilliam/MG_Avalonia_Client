@@ -144,7 +144,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room ?please wait.";
+            message = "Already joining a game room - please wait.";
             return false;
         }
 
@@ -155,7 +155,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room ?please wait.";
+            message = "Already joining a game room - please wait.";
             return false;
         }
 
@@ -166,7 +166,7 @@ public sealed class CnCNetSessionService : IDisposable
     {
         if (_session.IsGameRoomJoinPending)
         {
-            message = "Already joining a game room ?please wait.";
+            message = "Already joining a game room - please wait.";
             return false;
         }
 
@@ -206,19 +206,6 @@ public sealed class CnCNetSessionService : IDisposable
     }
 
     public void SwitchToChannel(int channelIndex) => _session.SwitchToGame(channelIndex);
-
-    public void SyncGameRoomFromLobby(LobbyPlayerState state)
-    {
-        CnCNetGameRoomSession? gameRoom = _session.GameRoom;
-        if (gameRoom == null || !gameRoom.IsHost)
-            return;
-
-        string hostName = string.IsNullOrWhiteSpace(state.HostPlayerName)
-            ? LocalNick
-            : state.HostPlayerName;
-
-        gameRoom.SyncPlayersFromLobby(state, hostName);
-    }
 
     public bool TryLaunchHostedGame(out string message) => _session.TryLaunchHostedGame(out message);
 

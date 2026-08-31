@@ -5,6 +5,7 @@
 using ClientAvalonia.IniUi.Ast;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Schema;
+using ClientAvalonia.Services;
 
 namespace ClientAvalonia.IniUi.Loading;
 
@@ -196,7 +197,7 @@ public sealed class IniUiTreeBuilder
     /// materialize sections declared in the window's own INI file.
     /// </summary>
     private static bool RestrictOrphansToOverlayFile(string windowName)
-        => windowName.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+        => FloatingOverlayLayout.IsCampaignWindow(windowName)
            || windowName.Equals("PrivacyNotification", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("UpdateQueryWindow", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("ManualUpdateQueryWindow", StringComparison.OrdinalIgnoreCase);

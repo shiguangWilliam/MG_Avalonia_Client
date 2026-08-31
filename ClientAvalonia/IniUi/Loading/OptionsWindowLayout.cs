@@ -201,10 +201,16 @@ internal static class OptionsWindowLayout
         btn.Props["IsVisible"] = true;
         btn.Props["Width"] = 92.0;
         btn.Props["Height"] = 32.0;
+        btn.Props["ZIndex"] = 1000;
+        // ThemeMG ships button.png (not 92pxbtn.png) — Classic must bind these
+        // before UiNodeViewModel.LoadImages runs.
+        btn.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
+        btn.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
     }
 
     private static void PositionFooterButtons(UiNodeTree tree)
     {
+        // DX OptionsWindow: Save left (12), Cancel right (Width-104) — bottom corners.
         UiNode? btnSave = tree.Root.Children.FirstOrDefault(c =>
             c.Id.Equals("btnSave", StringComparison.OrdinalIgnoreCase));
         if (btnSave != null)
@@ -215,18 +221,25 @@ internal static class OptionsWindowLayout
             btnSave.Props["Text"] = OptionsFooterChrome.ResolveSaveText();
             btnSave.Props["Width"] = 92.0;
             btnSave.Props["Height"] = 32.0;
+            btnSave.Props["ZIndex"] = 1000;
+            btnSave.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
+            btnSave.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
         }
 
         UiNode? btnCancel = tree.Root.Children.FirstOrDefault(c =>
             c.Id.Equals("btnCancel", StringComparison.OrdinalIgnoreCase));
         if (btnCancel != null)
         {
+            // Cancel = panel bottom-RIGHT (not left).
             btnCancel.Props["CanvasLeft"] = (double)(DialogWidth - 104);
             btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 40);
             btnCancel.Props["IsVisible"] = true;
             btnCancel.Props["Text"] = OptionsFooterChrome.ResolveCancelText();
             btnCancel.Props["Width"] = 92.0;
             btnCancel.Props["Height"] = 32.0;
+            btnCancel.Props["ZIndex"] = 1000;
+            btnCancel.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
+            btnCancel.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
         }
     }
 
@@ -391,6 +404,8 @@ internal static class OptionsWindowLayout
             Id = id,
             ControlType = controlType,
             TemplateKey = templateKey,
+            // So DxNodeTemplateSelector does not treat Options btnCancel as Campaign chrome.
+            WindowName = "OptionsWindow",
         };
 
     private static object ColorFromArgb(byte a, byte r, byte g, byte b)
@@ -415,6 +430,7 @@ internal static class OptionsWindowLayout
             "chkDiscordIntegration", "chkPingUnofficialTunnels", "chkWriteInstallPathToRegistry",
             "chkSteamIntegration", "lblAllowPrivateMessagesFrom", "ddAllowPrivateMessagesFrom",
             "lblAllowPrivateMessagesFromHint",
+            "lblGameBroadcastInterval", "ddGameBroadcastInterval",
         })
             map[id] = "CnCNetOptionsPanel";
 

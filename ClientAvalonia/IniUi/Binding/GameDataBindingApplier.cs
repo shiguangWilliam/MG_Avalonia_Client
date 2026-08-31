@@ -7,7 +7,9 @@ using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
+using ClientAvalonia.Themes;
 using ClientCore;
+using ClientCore.Extensions;
 using ClientCore.Settings;
 using Rampastring.Tools;
 
@@ -21,7 +23,8 @@ public static class GameDataBindingApplier
         GameResourceCatalog catalog,
         LobbySessionState session,
         ResourceResolver resources,
-        int filterIndex = 1)
+        int filterIndex = 1,
+        IReadOnlyList<IPlayerSlot>? slots = null)
     {
         catalog.EnsureLoaded();
 
@@ -37,7 +40,13 @@ public static class GameDataBindingApplier
             session.FilterIndex = clamped;
         }
 
-        ApplyLobbyMapList(root, catalog, session, resources, ddGameMode?.SelectedIndex ?? filterIndex);
+        ApplyLobbyMapList(
+            root,
+            catalog,
+            session,
+            resources,
+            ddGameMode?.SelectedIndex ?? filterIndex,
+            slots);
     }
 
     public static void ApplyLobbyMapList(
@@ -45,7 +54,8 @@ public static class GameDataBindingApplier
         GameResourceCatalog catalog,
         LobbySessionState session,
         ResourceResolver resources,
-        int filterIndex)
+        int filterIndex,
+        IReadOnlyList<IPlayerSlot>? slots = null)
     {
         catalog.EnsureLoaded();
         session.FilterIndex = filterIndex;
@@ -65,8 +75,8 @@ public static class GameDataBindingApplier
         }
 
         ResolveStartInteractionFlags(
-            session.PlayerState.Mode,
-            session.PlayerState.AllowHostPlayerOptions,
+            session.UIMode,
+            session.AllowHostPlayerOptions,
             out bool canAssign,
             out bool canSelectLocal);
         UpdateMapSelectionDisplay(
@@ -74,14 +84,13 @@ public static class GameDataBindingApplier
             maps,
             selectedIndex,
             resources,
-            session.PlayerState.Slots,
+            slots,
             canAssign,
             canSelectLocal);
     }
 
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>，
-    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// Session-aware：直接吃 <see cref="LobbyPlayerMode"/> + <c>allowHostPlayerOptions</c>。
     /// </summary>
     public static void ResolveStartInteractionFlags(
         LobbyPlayerMode mode,
@@ -101,15 +110,8 @@ public static class GameDataBindingApplier
         canSelectLocal = true;
     }
 
-    public static void ResolveStartInteractionFlags(
-        LobbyPlayerState playerState,
-        out bool canAssign,
-        out bool canSelectLocal)
-        => ResolveStartInteractionFlags(playerState.Mode, playerState.AllowHostPlayerOptions, out canAssign, out canSelectLocal);
-
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
-    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// Session-aware：直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
     /// </summary>
     public static void UpdateMapSelectionDisplay(
         UiNodeViewModel root,
@@ -142,25 +144,8 @@ public static class GameDataBindingApplier
         }
     }
 
-    public static void UpdateMapSelectionDisplay(
-        UiNodeViewModel root,
-        IReadOnlyList<MapEntry> maps,
-        int selectedIndex,
-        ResourceResolver resources,
-        LobbyPlayerState? playerState = null,
-        bool canAssignStarts = false,
-        bool canSelectLocalStart = false)
-        => UpdateMapSelectionDisplay(
-            root,
-            maps,
-            selectedIndex,
-            resources,
-            playerState?.Slots,
-            canAssignStarts,
-            canSelectLocalStart);
-
     /// <summary>
-    /// Phase 4 P4-2：Session-aware 入口——刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
+    /// Session-aware：刷新 start markers，吃 <see cref="IReadOnlyList{IPlayerSlot}"/>。
     /// </summary>
     public static void RefreshMapStartMarkers(
         UiNodeViewModel root,
@@ -180,15 +165,6 @@ public static class GameDataBindingApplier
             canAssignStarts,
             canSelectLocalStart);
     }
-
-    /// <summary>Refresh start markers on an already-loaded map preview (slot changes).</summary>
-    public static void RefreshMapStartMarkers(
-        UiNodeViewModel root,
-        MapEntry? map,
-        LobbyPlayerState playerState,
-        bool canAssignStarts,
-        bool canSelectLocalStart)
-        => RefreshMapStartMarkers(root, map, playerState.Slots, canAssignStarts, canSelectLocalStart);
 
     public static void ApplyChannelLobby(UiNodeViewModel root, MultiplayerLobbyState state)
     {
@@ -445,20 +421,20 @@ public static class GameDataBindingApplier
 
     private static void ApplyChannelLobbyButtonLabels(UiNodeViewModel root)
     {
-        FindVm(root, "btnNewGame")?.SetDisplayText("Create Game");
-        FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game");
+        FindVm(root, "btnNewGame")?.SetDisplayText("Create Game".L10N("Client:Main:CreateGame"));
+        FindVm(root, "btnJoinGame")?.SetDisplayText("Join Game".L10N("Client:Main:JoinGame"));
 
         UiNodeViewModel? btnMainMenu = FindVm(root, "btnMainMenu");
         UiNodeViewModel? btnLogout = FindVm(root, "btnLogout");
         if (btnMainMenu != null && btnMainMenu.IsVisible)
         {
-            btnMainMenu.SetDisplayText("Main Menu");
+            btnMainMenu.SetDisplayText("Main Menu".L10N("Client:Main:ButtonMainMenu"));
             if (btnLogout != null)
                 btnLogout.IsVisible = false;
         }
         else
         {
-            btnLogout?.SetDisplayText("Logout");
+            btnLogout?.SetDisplayText("Logout".L10N("Client:Main:ButtonLogout"));
         }
     }
 
@@ -491,13 +467,20 @@ public static class GameDataBindingApplier
                 ForegroundBrush = m.IsHeader
                     ? null
                     : (m.Enabled ? enabledBrush : disabledBrush),
-                ToolTip = !m.IsHeader && !m.Enabled ? "未启用 — 无法开始此战役" : null,
+                ToolTip = !m.IsHeader && !m.Enabled
+                    ? "未启用 — 无法开始此战役".L10N("Client:Main:MissionLockedToolTip")
+                    : null,
+                GlobeLatitude = m.GlobeLatitude,
+                GlobeLongitude = m.GlobeLongitude,
+                GlobeCountry = m.GlobeCountry,
             }).ToList();
 
             lbCampaignList.SetCatalogListItems(listItems);
             int firstSelectable = FindFirstSelectableMissionIndex(missions);
             session.LastSelectableCampaignIndex = firstSelectable;
-            lbCampaignList.SelectedIndex = firstSelectable >= 0 ? firstSelectable : 0;
+            // Enter with no selection so the camera does not auto-focus a mission
+            // (avoids a high-speed framing jump on top of the zoom-in).
+            lbCampaignList.SelectedIndex = -1;
             WireCampaignSelection(
                 lbCampaignList,
                 FindVm(root, "tbMissionDescription"),
@@ -516,88 +499,59 @@ public static class GameDataBindingApplier
 
     private static void ApplyCampaignActionButtonLabels(UiNodeViewModel root)
     {
-        // Primary chrome is orange; default IdleTexture button fg (#FFA648) vanishes on it.
+        // Only fill gaps: mods that set their own Text=/FontSize= in INI keep them.
+        // The color pairing is theme chrome (dark text on the orange primary,
+        // light text on the dark secondary) so it is applied as a style, not data.
         Color launchFg = Color.FromRgb(32, 22, 12);
         Color cancelFg = Color.FromRgb(242, 230, 216);
 
         UiNodeViewModel? launch = FindVm(root, "btnLaunch");
         if (launch != null)
         {
-            launch.SetDisplayText(PickLocalizedLabel(launch.Text, "开始", "Launch"));
+            if (string.IsNullOrWhiteSpace(launch.Text))
+                launch.SetDisplayText("开始".L10N("Client:Main:ButtonLaunch"));
             launch.SetForeground(launchFg);
-            launch.Node.Props["FontSize"] = 14;
+            SetFontSizeIfMissing(launch, 14);
             launch.RefreshLayout();
         }
 
         UiNodeViewModel? cancel = FindVm(root, "btnCancel");
         if (cancel != null)
         {
-            cancel.SetDisplayText(PickLocalizedLabel(cancel.Text, "返回", "Cancel"));
+            if (string.IsNullOrWhiteSpace(cancel.Text))
+                cancel.SetDisplayText("返回".L10N("Client:Main:ButtonCancel"));
             cancel.SetForeground(cancelFg);
-            cancel.Node.Props["FontSize"] = 14;
+            SetFontSizeIfMissing(cancel, 14);
             cancel.RefreshLayout();
         }
 
-        ApplySideTabLabel(root, "GDI", "同盟国联军", "Allied");
-        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Soviet");
-        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Ackville");
+        ApplySideTabLabel(root, "GDI", "同盟国联军", "Client:Main:SideAllied");
+        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Client:Main:SideSoviet");
+        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Client:Main:SideAckville");
     }
 
-    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zh, string en)
+    private static void SetFontSizeIfMissing(UiNodeViewModel vm, double size)
+    {
+        if (!vm.Node.Props.ContainsKey("FontSize"))
+            vm.Node.Props["FontSize"] = size;
+    }
+
+    private static void ApplySideTabLabel(UiNodeViewModel root, string id, string zhFallback, string l10nKey)
     {
         UiNodeViewModel? tab = FindVm(root, id);
         if (tab == null)
             return;
 
-        tab.SetDisplayText(PickLocalizedLabel(tab.Text, zh, en));
+        if (string.IsNullOrWhiteSpace(tab.Text))
+            tab.SetDisplayText(zhFallback.L10N(l10nKey));
         tab.RefreshLayout();
-    }
-
-    /// <summary>MG INI often stores <c>中文;English</c> bilingual labels.</summary>
-    private static string PickLocalizedLabel(string? raw, string chineseFallback, string englishFallback)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return chineseFallback;
-
-        int sep = raw.IndexOf(';');
-        if (sep < 0)
-            return raw.Trim();
-
-        string left = raw[..sep].Trim();
-        string right = raw[(sep + 1)..].Trim();
-        bool preferChinese = ContainsCjk(left) || !ContainsLatinWord(left);
-        if (preferChinese)
-            return string.IsNullOrEmpty(left) ? (string.IsNullOrEmpty(right) ? chineseFallback : right) : left;
-
-        return string.IsNullOrEmpty(right) ? (string.IsNullOrEmpty(left) ? englishFallback : left) : right;
-    }
-
-    private static bool ContainsCjk(string text)
-    {
-        foreach (char c in text)
-        {
-            if (c >= 0x4E00 && c <= 0x9FFF)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool ContainsLatinWord(string text)
-    {
-        foreach (char c in text)
-        {
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>
     /// MG CampaignSelector.ini omits Size for faction tabs / difficulty chrome; DX relied on
     /// missing button textures that never shipped. Give Avalonia themed fallbacks real bounds
-    /// so the option boxes stay visible without those assets.
+    /// so the option boxes stay visible without those assets. Only fills gaps — values the
+    /// mod declared in INI always win.
     /// </summary>
     private static void EnsureCampaignControlSizes(UiNodeViewModel root)
     {
@@ -630,11 +584,13 @@ public static class GameDataBindingApplier
             if (button == null)
                 continue;
 
-            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
-            // clips the label completely when Avalonia Height is set explicitly.
             if (button.Width <= 1)
                 button.Node.Props["Width"] = 147d;
-            button.Node.Props["Height"] = 36d;
+            // Themed campaign buttons use 8px vertical padding + 14pt type; XNA's 23px height
+            // clips the label completely when Avalonia Height is set explicitly. Only lift
+            // heights that came from the legacy default, never a mod-chosen larger value.
+            if (button.Height < 36d)
+                button.Node.Props["Height"] = 36d;
             button.RefreshLayout();
         }
     }
@@ -652,6 +608,15 @@ public static class GameDataBindingApplier
         void UpdateDescription()
         {
             int index = listVm.SelectedIndex;
+            if (index < 0)
+            {
+                descriptionVm.SetMissionBriefing(MissionBriefingParsed.Empty, statusHint: null);
+                descriptionVm.SetPreviewImage(null);
+                if (launchButton != null)
+                    launchButton.IsEnabled = false;
+                return;
+            }
+
             MissionEntry? mission = session.GetSelectedMission(index);
             if (mission != null && mission.IsHeader)
             {
@@ -668,7 +633,7 @@ public static class GameDataBindingApplier
                 session.LastSelectableCampaignIndex = index;
 
             string? lockedHint = mission != null && !mission.IsHeader && !mission.Enabled
-                ? "该战役尚未开放或未启用，无法开始。"
+                ? "该战役尚未开放或未启用，无法开始。".L10N("Client:Main:MissionLockedHint")
                 : null;
 
             MissionBriefingParsed briefing = MissionBriefingParser.Parse(mission?.Description);
@@ -700,6 +665,16 @@ public static class GameDataBindingApplier
 
     private static void ApplyCampaignDifficulty(UiNodeViewModel root, ResourceResolver resources)
     {
+        // CampaignSelector.ini omits Text=; DX sets it in C#. Mirror that so the
+        // Tactical briefing-column difficulty dock has a visible header.
+        UiNodeViewModel? difficultyHeader = FindVm(root, "lblDifficultyLevel");
+        if (difficultyHeader != null && string.IsNullOrWhiteSpace(difficultyHeader.Text))
+        {
+            difficultyHeader.SetDisplayText(
+                "DIFFICULTY LEVEL".L10N("Client:Main:DifficultyLevel"));
+            difficultyHeader.RefreshLayout();
+        }
+
         UiNodeViewModel? trackbar = FindVm(root, "trbDifficultySelector");
         if (trackbar == null)
             return;
@@ -720,6 +695,66 @@ public static class GameDataBindingApplier
         }
 
         return missions.Count > 0 ? 0 : -1;
+    }
+
+    /// <summary>
+    /// Tactical main-menu button labels: MainMenu.ini ships texture-only buttons with
+    /// empty Text=, so Fluent nav chrome needs C#-assigned Chinese labels. Classic keeps
+    /// PNG chrome and is untouched.
+    /// </summary>
+    public static void ApplyMainMenu(UiNodeViewModel root)
+    {
+        if (!DxThemeManager.IsTactical)
+            return;
+
+        SetButtonLabel(root, "btnNewCampaign", "战役", "Client:Main:ButtonNewCampaign");
+        SetButtonLabel(root, "btnLoadGame", "载入游戏", "Client:Main:ButtonLoadGame");
+        SetButtonLabel(root, "btnCnCNet", "CnCNet", "Client:Main:CnCNetLobby");
+        SetButtonLabel(root, "btnLan", "局域网", "Client:Main:LANGameLobby");
+        SetButtonLabel(root, "btnSkirmish", "遭遇战", "Client:Main:FilterSkirmish");
+        SetButtonLabel(root, "btnOptions", "选项", "Client:Main:OptionsF12");
+        SetButtonLabel(root, "btnExit", "退出", "Client:ClientGClient:ButtonQuitGame");
+        SetButtonLabel(root, "btnStatistics", "统计", "Client:Main:Statistics");
+        SetButtonLabel(root, "btnCredits", "制作人员", "Client:Main:Credits");
+        // Translation.ini maps MapEditor to "地图截屏器" (legacy DX label); keep a
+        // clearer nav label for the Tactical console.
+        SetButtonLabel(root, "btnMapEditor", "地图编辑器", "Client:Main:TacticalMapEditor");
+
+        // Compact footer chips — strip the longer "统计数据" form.
+        UiNodeViewModel? stats = FindVm(root, "btnStatistics");
+        if (stats != null && stats.Text is { } statsText && statsText.StartsWith("统计", StringComparison.Ordinal))
+        {
+            stats.SetDisplayText("统计");
+            stats.RefreshLayout();
+        }
+    }
+
+    private static void SetButtonLabel(UiNodeViewModel root, string id, string fallback, string l10nKey)
+    {
+        UiNodeViewModel? btn = FindVm(root, id);
+        if (btn == null)
+            return;
+
+        string label = fallback.L10N(l10nKey);
+        // Trim hotkey / mode suffixes for compact nav chrome.
+        if (id.Equals("btnOptions", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnLan", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnExit", StringComparison.OrdinalIgnoreCase)
+            || id.Equals("btnCnCNet", StringComparison.OrdinalIgnoreCase))
+        {
+            int paren = label.IndexOf('(');
+            if (paren > 0)
+                label = label[..paren].Trim();
+            if (label.EndsWith("大厅", StringComparison.Ordinal))
+                label = label[..^2].Trim();
+            if (label.EndsWith("模式", StringComparison.Ordinal))
+                label = label[..^2].Trim();
+            if (label.Equals("退出游戏", StringComparison.Ordinal))
+                label = "退出";
+        }
+
+        btn.SetDisplayText(label);
+        btn.RefreshLayout();
     }
 
     private static UiNodeViewModel? FindVm(UiNodeViewModel root, string id)

@@ -2,6 +2,7 @@ using System.IO;
 using ClientCore;
 using ClientCore.PlatformShim;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Domain;
 
@@ -12,8 +13,8 @@ public static class FinalSunSettings
     {
         try
         {
-            string finalSunIniPath = ClientConfiguration.Instance.FinalSunIniPath;
-            var finalSunIniFile = new FileInfo(Path.Combine(ProgramConstants.GamePath, finalSunIniPath));
+            string finalSunIniPath = AppState.Configuration.Legacy.FinalSunIniPath;
+            var finalSunIniFile = new FileInfo(Path.Combine(AppState.Environment.GamePath, finalSunIniPath));
 
             Logger.Log("Checking for the existence of FinalSun.ini.");
             if (finalSunIniFile.Exists)
@@ -29,7 +30,7 @@ public static class FinalSunSettings
 
                 iniFile.SetStringValue("FinalSun", "Language", "English");
                 iniFile.SetStringValue("FinalSun", "FileSearchLikeTS", "yes");
-                iniFile.SetStringValue("TS", "Exe", SafePath.CombineDirectoryPath(ProgramConstants.GamePath));
+                iniFile.SetStringValue("TS", "Exe", SafePath.CombineDirectoryPath(AppState.Environment.GamePath));
                 iniFile.WriteIniFile();
                 return;
             }
@@ -45,7 +46,7 @@ public static class FinalSunSettings
             sw.WriteLine("FileSearchLikeTS=yes");
             sw.WriteLine("");
             sw.WriteLine("[TS]");
-            sw.WriteLine("Exe=" + SafePath.CombineDirectoryPath(ProgramConstants.GamePath));
+            sw.WriteLine("Exe=" + SafePath.CombineDirectoryPath(AppState.Environment.GamePath));
             sw.WriteLine("");
             sw.WriteLine("[UserInterface]");
             sw.WriteLine("EasyView=0");

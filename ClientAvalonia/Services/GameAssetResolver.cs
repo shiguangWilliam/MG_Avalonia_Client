@@ -3,7 +3,9 @@ using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.Rendering;
+using ClientAvalonia.Themes;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -193,10 +195,19 @@ public static class GameAssetResolver
             vm.SetButtonTextures(idle, hover);
             return;
         }
+
+        // MG ThemeMG provides button.png / button_c.png instead of 92pxbtn.png.
+        Bitmap? mgIdle = resources.LoadBitmap("button.png");
+        if (mgIdle != null)
+            vm.SetButtonTextures(mgIdle, resources.LoadBitmap("button_c.png"));
     }
 
     public static void ApplyCampaignSideIcons(UiNodeViewModel root, ResourceResolver resources)
     {
+        // Tactical replaces faction icons with text-only tabs.
+        if (Themes.DxThemeManager.IsTactical)
+            return;
+
         foreach (string controlId in new[] { "GDI", "Nod", "ThirdSide", "FourthSide" })
         {
             UiNodeViewModel? tab = FindVm(root, controlId);
@@ -213,6 +224,10 @@ public static class GameAssetResolver
 
     public static void ApplyCampaignActionButtonTextures(UiNodeViewModel root, ResourceResolver resources)
     {
+        // Tactical drops PNG button chrome entirely.
+        if (Themes.DxThemeManager.IsTactical)
+            return;
+
         foreach (UiNodeViewModel button in EnumerateNodes(root))
         {
             if (!IsActionButton(button))
@@ -284,7 +299,7 @@ public static class GameAssetResolver
         try
         {
             string full = Path.Combine(
-                ProgramConstants.GamePath,
+                AppState.Environment.GamePath,
                 gameRelativePath.Replace('/', Path.DirectorySeparatorChar));
             return File.Exists(full);
         }

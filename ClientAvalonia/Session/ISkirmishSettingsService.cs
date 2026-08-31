@@ -4,6 +4,7 @@ using System.Linq;
 using ClientAvalonia.Services;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Session;
 
@@ -16,7 +17,7 @@ namespace ClientAvalonia.Session;
 /// <item>原本 <c>LobbyPlayerState.TryLoadSkirmishSettings</c> / <c>SaveSkirmishSettings</c>
 /// 同时承担"读取文件 + 写状态到 Slots"两件事。</item>
 /// <item>提取到 Service 后，状态归 <c>LobbyPlayerState</c>，IO 归 Service。
-/// 这样 IO 路径可单测、可 mock（不用整盘 <c>ProgramConstants.GamePath</c>）。</item>
+/// 这样 IO 路径可单测、可 mock（不用整盘 <c>AppState.Environment.GamePath</c>）。</item>
 /// <item>Service 接收/返回强类型的 <c>SkirmishSettingsDto</c>，
 /// 不依赖 <c>LobbyPlayerSlot</c>，便于未来扩展字段。</item>
 /// </list>
@@ -38,6 +39,22 @@ public sealed class SkirmishSettingsDto
 {
     public SkirmishPlayerDto? Human { get; set; }
     public System.Collections.Generic.List<SkirmishPlayerDto> Ais { get; } = new();
+
+    /// <summary>
+    /// Game-option control values (id → "True/False" for checkboxes,
+    /// selected index for dropdowns). Mirrors DX SkirmishLobby [GameOptions].
+    /// </summary>
+    public System.Collections.Generic.Dictionary<string, string> GameOptions { get; } = new();
+
+    /// <summary>
+    /// Selected map SHA1 (DX SkirmishLobby SaveSettings: [Settings] Map=).
+    /// Drives the map-capacity clamp on restore — the restored map decides how
+    /// many saved AI rows are valid, not whichever map happens to sort first.
+    /// </summary>
+    public string MapSha1 { get; set; } = string.Empty;
+
+    /// <summary>Game-mode filter display name ([Settings] GameModeMapFilter).</summary>
+    public string GameModeMapFilter { get; set; } = string.Empty;
 
     public bool HasContent => Human != null || Ais.Count > 0;
 }
@@ -62,17 +79,17 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
 {
     public const string DefaultRelativePath = "Client/SkirmishSettings.ini";
 
-    /// <summary>绝对路径；若为 null 则基于 <see cref="ProgramConstants.GamePath"/> 计算。</summary>
+    /// <summary>绝对路径；若为 null 则基于 <see cref="AppState.Environment.GamePath"/> 计算。</summary>
     private readonly string? _absolutePath;
     private readonly string _relativePath;
 
-    /// <summary>构造：使用默认相对路径（基于 <see cref="ProgramConstants.GamePath"/>）。</summary>
+    /// <summary>构造：使用默认相对路径（基于 <see cref="AppState.Environment.GamePath"/>）。</summary>
     public SkirmishSettingsService() : this(relativePath: DefaultRelativePath, absolutePath: null) { }
 
     /// <summary>构造：自定义相对路径。</summary>
     public SkirmishSettingsService(string relativePath) : this(relativePath: relativePath, absolutePath: null) { }
 
-    /// <summary>构造：使用绝对路径（测试用，绕开 <see cref="ProgramConstants.GamePath"/>）。</summary>
+    /// <summary>构造：使用绝对路径（测试用，绕开 <see cref="AppState.Environment.GamePath"/>）。</summary>
     public SkirmishSettingsService(string absolutePath, bool absolute) : this(relativePath: DefaultRelativePath, absolutePath: absolutePath) { }
 
     private SkirmishSettingsService(string relativePath, string? absolutePath)
@@ -83,7 +100,7 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
 
     /// <inheritdoc />
     public string CurrentPath => _absolutePath
-        ?? SafePath.CombineFilePath(ProgramConstants.GamePath, _relativePath);
+        ?? SafePath.CombineFilePath(AppState.Environment.GamePath, _relativePath);
 
     /// <inheritdoc />
     public SkirmishSettingsDto? TryLoad()
@@ -116,6 +133,20 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
             }
         }
 
+        System.Collections.Generic.List<string>? gameOptionKeys = ini.GetSectionKeys("GameOptions");
+        if (gameOptionKeys != null)
+        {
+            foreach (string key in gameOptionKeys)
+            {
+                string value = ini.GetStringValue("GameOptions", key, string.Empty);
+                if (!string.IsNullOrEmpty(value))
+                    dto.GameOptions[key] = value;
+            }
+        }
+
+        dto.MapSha1 = ini.GetStringValue("Settings", "Map", string.Empty);
+        dto.GameModeMapFilter = ini.GetStringValue("Settings", "GameModeMapFilter", string.Empty);
+
         return dto.HasContent ? dto : null;
     }
 
@@ -133,6 +164,23 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
 
         for (int i = 0; i < dto.Ais.Count; i++)
             ini.SetStringValue("AIPlayers", i.ToString(), dto.Ais[i].ToString());
+
+        // DX SkirmishLobby.SaveSettings: game-option values go to [GameOptions].
+        // Drop stale keys from previous sessions by erasing the section first.
+        if (dto.GameOptions.Count > 0)
+        {
+            ini.EraseSectionKeys("GameOptions");
+            foreach (System.Collections.Generic.KeyValuePair<string, string> pair in dto.GameOptions)
+                ini.SetStringValue("GameOptions", pair.Key, pair.Value);
+        }
+
+        // DX SkirmishLobby.SaveSettings: [Settings] Map=<SHA1> + GameModeMapFilter
+        // so the next session restores the map selection (and clamps AI rows to
+        // THAT map's capacity, not whichever map sorts first).
+        if (!string.IsNullOrEmpty(dto.MapSha1))
+            ini.SetStringValue("Settings", "Map", dto.MapSha1);
+        if (!string.IsNullOrEmpty(dto.GameModeMapFilter))
+            ini.SetStringValue("Settings", "GameModeMapFilter", dto.GameModeMapFilter);
 
         ini.WriteIniFile();
     }

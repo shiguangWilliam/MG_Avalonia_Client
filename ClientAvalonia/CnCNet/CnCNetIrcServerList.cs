@@ -2,6 +2,7 @@ using ClientCore;
 using System;
 using System.Collections.Generic;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -10,7 +11,7 @@ public static class CnCNetIrcServerList
     public static IReadOnlyList<CnCNetIrcServer> Load()
     {
         var servers = new List<CnCNetIrcServer>();
-        foreach (string entry in ClientConfiguration.Instance.IRCServers)
+        foreach (string entry in AppState.Configuration.Legacy.IRCServers)
         {
             try
             {

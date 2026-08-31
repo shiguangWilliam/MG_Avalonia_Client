@@ -59,6 +59,10 @@ public interface IUiNavigationHost
 
     bool TryLaunchCnCNetGame(out string message);
 
+    bool TryLaunchLanGame(out string message);
+
+    void OpenLoadGameOverlay();
+
     void RefreshCnCNetGameListing();
 
     void RefreshCnCNetGameRoomPlayers();

@@ -29,6 +29,7 @@ public static class KnownOptionSettings
             ["chkAllowGameInvitesFromFriendsOnly"] = ("MultiPlayer", "AllowGameInvitesFromFriendsOnly"),
             ["chkDiscordIntegration"] = ("MultiPlayer", "DiscordIntegration"),
             ["chkPingUnofficialTunnels"] = ("MultiPlayer", "PingCustomTunnels"),
+            ["ddGameBroadcastInterval"] = ("MultiPlayer", "GameBroadcastIntervalSeconds"),
             ["chkWriteInstallPathToRegistry"] = ("Options", "WriteInstallationPathToRegistry"),
             ["ddAllowPrivateMessagesFrom"] = ("MultiPlayer", "AllowPrivateMessagesFromState"),
             ["chkStretchMovies"] = ("Video", "StretchMovies"),

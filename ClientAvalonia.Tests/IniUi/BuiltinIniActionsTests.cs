@@ -209,6 +209,8 @@ public sealed class BuiltinIniActionsTests
         public bool TryLaunchSkirmish(out string message) { LaunchSkirmishCalls++; message = LaunchMessage; return LaunchSkirmishResult; }
         public bool TryLaunchCampaign(out string message) { LaunchCampaignCalls++; message = LaunchMessage; return LaunchCampaignResult; }
         public bool TryLaunchCnCNetGame(out string message) { LaunchCnCNetGameCalls++; message = LaunchMessage; return LaunchCnCNetGameResult; }
+        public bool TryLaunchLanGame(out string message) { message = LaunchMessage; return false; }
+        public void OpenLoadGameOverlay() { }
         public void RefreshCnCNetGameListing() { }
         public void RefreshCnCNetGameRoomPlayers() { }
         public void TryJoinSelectedCnCNetGame() { }

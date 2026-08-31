@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Domain;
 
@@ -83,14 +84,14 @@ public class DirectDrawWrapper
 
     public void Apply()
     {
-        string ddrawDllSourcePath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), _ddrawDllPath);
-        string ddrawDllTargetPath = SafePath.CombineFilePath(ProgramConstants.GamePath, "ddraw.dll");
+        string ddrawDllTargetPath = SafePath.CombineFilePath(AppState.Environment.GamePath, "ddraw.dll");
 
         if (!string.IsNullOrEmpty(_ddrawDllPath))
         {
-            if (!File.Exists(ddrawDllSourcePath))
+            string? ddrawDllSourcePath = ResolveResourceFile(_ddrawDllPath);
+            if (ddrawDllSourcePath == null)
             {
-                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' DLL missing at {ddrawDllSourcePath}.");
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' DLL missing: {_ddrawDllPath}");
                 return;
             }
 
@@ -107,29 +108,73 @@ public class DirectDrawWrapper
 
         if (!string.IsNullOrEmpty(ConfigFileName)
             && !string.IsNullOrEmpty(_resConfigFileName)
-            && !SafePath.GetFile(ProgramConstants.GamePath, ConfigFileName).Exists)
+            && !SafePath.GetFile(AppState.Environment.GamePath, ConfigFileName).Exists)
         {
-            File.Copy(
-                SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), _resConfigFileName),
-                SafePath.CombineFilePath(ProgramConstants.GamePath, Path.GetFileName(ConfigFileName)));
+            string? configSource = ResolveResourceFile(_resConfigFileName);
+            if (configSource != null)
+            {
+                File.Copy(
+                    configSource,
+                    SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName)));
+            }
+            else
+            {
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' config missing: {_resConfigFileName}");
+            }
         }
 
         foreach (string file in _filesToCopy)
         {
+            string? source = ResolveResourceFile(file);
+            if (source == null)
+            {
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' additional file missing: {file}");
+                continue;
+            }
+
             File.Copy(
-                SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), file),
-                SafePath.CombineFilePath(ProgramConstants.GamePath, Path.GetFileName(file)),
+                source,
+                SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(file)),
                 true);
         }
+    }
+
+    /// <summary>
+    /// Resolve a Resources-relative path against base Resources, then legacy Resources\Base.
+    /// </summary>
+    private static string? ResolveResourceFile(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        foreach (string root in EnumerateResourceRoots())
+        {
+            string candidate = SafePath.CombineFilePath(root, relativePath);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateResourceRoots()
+    {
+        string baseResources = AppState.Environment.BaseResourcesPath;
+        string resources = AppState.Environment.ResourcesPath;
+
+        yield return baseResources;
+        if (!baseResources.Equals(resources, StringComparison.OrdinalIgnoreCase))
+            yield return resources;
+        yield return Path.Combine(resources, "Base");
     }
 
     public void Clean()
     {
         if (!string.IsNullOrEmpty(ConfigFileName))
-            SafePath.DeleteFileIfExists(ProgramConstants.GamePath, Path.GetFileName(ConfigFileName));
+            SafePath.DeleteFileIfExists(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName));
 
         foreach (string file in _filesToCopy)
-            SafePath.DeleteFileIfExists(ProgramConstants.GamePath, Path.GetFileName(file));
+            SafePath.DeleteFileIfExists(AppState.Environment.GamePath, Path.GetFileName(file));
     }
 
     public bool UsesCustomWindowedOption()

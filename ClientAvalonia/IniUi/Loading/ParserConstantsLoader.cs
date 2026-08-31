@@ -2,6 +2,7 @@ using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Layout;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Loading;
 
@@ -28,7 +29,7 @@ public static class ParserConstantsLoader
 
     private static void MergeFromCoreConfiguration(Dictionary<string, int> map)
     {
-        Rampastring.Tools.IniSection? section = ClientConfiguration.Instance.GetParserConstants();
+        Rampastring.Tools.IniSection? section = AppState.Configuration.Legacy.GetParserConstants();
         if (section == null)
             return;
 

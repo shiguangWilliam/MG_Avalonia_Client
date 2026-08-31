@@ -1,6 +1,8 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.GlobalState;
 using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Binding;
+using ClientAvalonia.Lan;
 using ClientAvalonia.Services;
 
 namespace ClientAvalonia.IniUi.Behaviors;
@@ -10,12 +12,42 @@ public static class MultiplayerLobbyBehaviors
 {
     public static void Register(BehaviorRegistry registry, IUiNavigationHost host, string windowName)
     {
-        string gameLobbyWindow = windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase)
-            ? "LANGameLobby"
-            : "CnCNetGameLobby";
+        bool isLan = windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase);
+        string gameLobbyWindow = isLan ? "LANGameLobby" : "CnCNetGameLobby";
 
         registry.Register("btnNewGame", _ =>
         {
+            if (isLan)
+            {
+                ILanSession lan = AppState.Lan;
+                lan.StartLobby();
+                if (lan.ActiveGameRoom != null)
+                {
+                    host.ShowStatus("Already in a LAN game room.");
+                    host.NavigateTo(gameLobbyWindow);
+                    return;
+                }
+
+                string? mapName = null;
+                string? modeName = null;
+                if (host.ActiveRoot != null)
+                {
+                    // Best-effort labels; room session still owns real map selection in lobby.
+                    mapName = "LAN Map";
+                    modeName = "Standard";
+                }
+
+                if (!lan.TryHostNewGame(mapName, modeName, out string message))
+                {
+                    host.ShowStatus(message);
+                    return;
+                }
+
+                host.ShowStatus(message);
+                host.NavigateTo(gameLobbyWindow);
+                return;
+            }
+
             if (!windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
             {
                 host.ShowStatus($"Creating game → {gameLobbyWindow}");
@@ -43,6 +75,28 @@ public static class MultiplayerLobbyBehaviors
 
         registry.Register("btnJoinGame", _ =>
         {
+            if (isLan)
+            {
+                ILanSession lan = AppState.Lan;
+                lan.StartLobby();
+                LanHostedGame? game = lan.GetSelectedOrFirstUnlocked();
+                if (game == null)
+                {
+                    host.ShowStatus("No LAN games found. Wait for a host broadcast, then join.");
+                    return;
+                }
+
+                if (!lan.TryJoinGame(game, out string message))
+                {
+                    host.ShowStatus(message);
+                    return;
+                }
+
+                host.ShowStatus(message);
+                host.NavigateTo(gameLobbyWindow);
+                return;
+            }
+
             if (!windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
             {
                 host.ShowStatus("Select a game from the list, then join.");
@@ -77,6 +131,12 @@ public static class MultiplayerLobbyBehaviors
                 host.CloseFloatingOverlay();
                 host.ShowStatus("Create game cancelled.");
                 return;
+            }
+
+            if (isLan)
+            {
+                AppState.Lan.LeaveActiveRoom();
+                AppState.Lan.StopLobby();
             }
 
             host.LogoutToMainMenu();

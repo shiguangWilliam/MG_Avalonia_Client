@@ -39,7 +39,7 @@ public interface IGameSession
     IMapResource? Map { get; set; }
 
     /// <summary>
-    /// 玩家槽位（最多 LobbyPlayerSlot.MaxSlots = 8）。
+    /// 玩家槽位（最多 LobbyPlayerSlot.MaxSlots = 9）。
     /// 对应 LobbyPlayerState.Slots。
     /// </summary>
     IReadOnlyList<IPlayerSlot> PlayerSlots { get; }

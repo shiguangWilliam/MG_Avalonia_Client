@@ -1,4 +1,5 @@
 using ClientAvalonia.CnCNet;
+using ClientAvalonia.Domain;
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using ClientAvalonia.Session;
 using FluentAssertions;
@@ -42,7 +43,7 @@ public sealed class CnCNetGameRoomSessionInterfaceTests
         game.SkillLevel.Should().Be(2);
         game.Passworded.Should().BeTrue();
         game.Tunnel.Should().BeSameAs(tunnel);
-        game.PlayerSlots.Should().HaveCount(8);
+        game.PlayerSlots.Should().HaveCount(LobbyPlayerSlot.MaxSlots);
         game.State.Should().Be(GameSessionState.Lobby);
     }
 }

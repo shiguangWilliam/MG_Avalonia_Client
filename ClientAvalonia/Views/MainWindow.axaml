@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="using:ClientAvalonia.Views"
+        xmlns:ctrl="using:ClientAvalonia.Controls"
         x:Class="ClientAvalonia.Views.MainWindow"
         Title="ClientAvalonia"
         CanResize="False">
@@ -12,10 +13,21 @@
                FontSize="11"
                VerticalAlignment="Center"
                Opacity="0.85" />
-    <Border Background="#111" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Border x:Name="PART_ClientChrome"
+                Background="#111"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
       <Grid HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch">
-        <ContentControl x:Name="PART_RootView">
+        <ctrl:SolarSystemBackdropView x:Name="PART_SolarSystemBackdrop"
+                                      HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch"
+                                      IsVisible="False"
+                                      IsHitTestVisible="False"
+                                      ZIndex="0" />
+        <ContentControl x:Name="PART_RootView"
+                        Background="Transparent"
+                        ZIndex="1">
           <ContentControl.ContentTemplate>
             <views:DxNodeTemplateSelector />
           </ContentControl.ContentTemplate>
@@ -33,6 +45,16 @@
                                     IsVisible="False"
                                     ZIndex="200" />
 
+        <!-- Tactical theme lazy-load splash -->
+        <Grid x:Name="PART_ThemeLoadingHost"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              IsVisible="False"
+              IsHitTestVisible="True"
+              ZIndex="150">
+          <ctrl:DxThemeLoadingOverlay x:Name="PART_ThemeLoading" />
+        </Grid>
+
         <!-- Floating INI panels (Options, Campaign, Create Game, …) -->
         <Grid x:Name="PART_FloatingOverlay"
               HorizontalAlignment="Stretch"
@@ -48,12 +70,12 @@
           <Border x:Name="PART_OverlayPanel"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
-                  CornerRadius="12"
-                  BorderBrush="#55FF8C32"
+                  CornerRadius="{DynamicResource DxOverlayChromeRadius}"
+                  BorderBrush="{DynamicResource DxOverlayChromeBorder}"
                   BorderThickness="1"
                   BoxShadow="0 12 40 0 #90000000"
                   ClipToBounds="False"
-                  Background="#CC14100C">
+                  Background="{DynamicResource DxOverlayChromeBackground}">
             <Grid>
               <ContentControl x:Name="PART_OverlayView"
                               HorizontalAlignment="Stretch"

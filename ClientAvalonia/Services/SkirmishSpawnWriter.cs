@@ -3,6 +3,7 @@ using ClientAvalonia.Rendering;
 using ClientAvalonia.Session;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -11,7 +12,7 @@ public static class SkirmishSpawnWriter
 {
     /// <summary>
     /// Phase 3 P3-2：Session-aware 主入口——吃 <see cref="IReadOnlyList{IPlayerSlot}"/> + sideCount，
-    /// 不再依赖 <see cref="LobbyPlayerState"/>。
+    /// 不再依赖 <c>LobbyPlayerState</c>。
     /// </summary>
     /// <param name="map">选中地图。</param>
     /// <param name="gameMode">选中游戏模式。</param>
@@ -34,23 +35,6 @@ public static class SkirmishSpawnWriter
         WriteSpawnMap(map, gameMode, lobbyRoot);
     }
 
-    /// <summary>
-    /// Legacy 入口（Phase 3 P3-2：标记为已过时）。
-    /// 仍接受 <see cref="LobbyPlayerState"/>，内部委托到 Session-aware 重载。
-    /// </summary>
-    [Obsolete("Phase 3 P3-2: 改用 Write(MapEntry, GameModeEntry, IReadOnlyList<IPlayerSlot>, int, ...)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public static void Write(
-        MapEntry map,
-        GameModeEntry gameMode,
-        LobbyPlayerState? players = null,
-        UiNodeViewModel? lobbyRoot = null,
-        int randomSeed = 0)
-    {
-        int sideCount = players?.SideNames.Count ?? 0;
-        IReadOnlyList<IPlayerSlot> slots = players?.Slots ?? Array.Empty<LobbyPlayerSlot>();
-        Write(map, gameMode, slots, sideCount, lobbyRoot, randomSeed);
-    }
-
     private static void WriteSpawnIni(
         MapEntry map,
         GameModeEntry gameMode,
@@ -59,7 +43,7 @@ public static class SkirmishSpawnWriter
         UiNodeViewModel? lobbyRoot,
         int randomSeed)
     {
-        FileInfo spawnerSettingsFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNER_SETTINGS);
+        FileInfo spawnerSettingsFile = SafePath.GetFile(AppState.Environment.GamePath, ProgramConstants.SPAWNER_SETTINGS);
         spawnerSettingsFile.Delete();
 
         Logger.Log("Writing spawn.ini");
@@ -70,7 +54,7 @@ public static class SkirmishSpawnWriter
         {
             humans.Add(new LobbyPlayerSlot
             {
-                Name = ProgramConstants.PLAYERNAME,
+                Name = AppState.Environment.PlayerName,
                 IsHumanLocal = true,
             });
         }
@@ -79,7 +63,7 @@ public static class SkirmishSpawnWriter
         {
             ais.Add(new LobbyPlayerSlot
             {
-                Name = ProgramConstants.AI_PLAYER_NAMES[0],
+                Name = AppState.Environment.AiPlayerNames[0],
                 IsAi = true,
                 AiLevel = 0,
                 SideIndex = 0,
@@ -94,7 +78,7 @@ public static class SkirmishSpawnWriter
         IReadOnlyList<LobbyPlayerHouseResolver.ResolvedHouse> houses =
             LobbyPlayerHouseResolver.Resolve((IReadOnlyList<IPlayerSlot>)allOccupied, randomSeed);
 
-        int localHumanIndex = humans.FindIndex(h => h.IsHumanLocal || h.Name == ProgramConstants.PLAYERNAME);
+        int localHumanIndex = humans.FindIndex(h => h.IsHumanLocal || h.Name == AppState.Environment.PlayerName);
         if (localHumanIndex < 0)
             localHumanIndex = 0;
 
@@ -103,7 +87,7 @@ public static class SkirmishSpawnWriter
 
         LobbyPlayerHouseResolver.ResolvedHouse localHouse = houses[localHumanIndex];
 
-        settings.SetStringValue("Name", ProgramConstants.PLAYERNAME);
+        settings.SetStringValue("Name", AppState.Environment.PlayerName);
         settings.SetStringValue("Scenario", ProgramConstants.SPAWNMAP_INI);
         settings.SetStringValue("UIGameMode", gameMode.UntranslatedUIName);
         settings.SetStringValue("UIMapName", map.UntranslatedName);
@@ -125,7 +109,7 @@ public static class SkirmishSpawnWriter
         for (int humanIndex = 0; humanIndex < humans.Count; humanIndex++)
         {
             LobbyPlayerSlot human = humans[humanIndex];
-            if (human.Name == ProgramConstants.PLAYERNAME)
+            if (human.Name == AppState.Environment.PlayerName)
                 continue;
 
             LobbyPlayerHouseResolver.ResolvedHouse house = houses[humanIndex];
@@ -137,13 +121,57 @@ public static class SkirmishSpawnWriter
             otherId++;
         }
 
+        // DX WriteSpawnIni: the spawner assigns players to MultiN houses in game-color
+        // order, so AI HouseCountries/HouseColors keys must follow that same mapping
+        // instead of the raw slot order (previous write used aiId + 2, which silently
+        // desynced AI sides/colors whenever the human's color sorted after an AI's).
+        List<MultiplayerColorCatalog.MultiplayerColorEntry> sortedColors =
+            MultiplayerColorCatalog.Load().OrderBy(mpc => mpc.GameColorIndex).ToList();
+
+        var multiCmbIndexes = new List<int>();
+        for (int cId = 0; cId < sortedColors.Count; cId++)
+        {
+            for (int pId = 0; pId < humans.Count; pId++)
+            {
+                if (houses[pId].GameColorIndex == sortedColors[cId].GameColorIndex)
+                    multiCmbIndexes.Add(pId);
+            }
+        }
+
         for (int aiId = 0; aiId < ais.Count; aiId++)
         {
             LobbyPlayerHouseResolver.ResolvedHouse house = houses[humans.Count + aiId];
-            string keyName = "Multi" + (aiId + 2);
+            string keyName = "Multi" + (multiCmbIndexes.Count + aiId + 1);
             spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(ais[aiId].AiLevel));
             spawnIni.SetIntValue("HouseCountries", keyName, house.InternalSideIndex);
             spawnIni.SetIntValue("HouseColors", keyName, house.GameColorIndex);
+        }
+
+        // Spectator houses flagged per MultiN (DX parity; the game only honors this form).
+        for (int multiId = 0; multiId < multiCmbIndexes.Count; multiId++)
+        {
+            if (houses[multiCmbIndexes[multiId]].IsSpectator)
+                spawnIni.SetBooleanValue("IsSpectator", "Multi" + (multiId + 1), true);
+        }
+
+        // Teams → MultiN_Alliances (DX AllianceHolder; previously missing entirely).
+        var startingWaypoints = houses.Select(h => h.StartingWaypoint).ToList();
+        SpawnAllianceWriter.WriteAlliances(humans, ais, multiCmbIndexes, startingWaypoints, spawnIni);
+
+        // Explicit start picks / spectator waypoints → [SpawnLocations] (DX parity;
+        // -1 leaves placement to the game's own logic).
+        for (int multiId = 0; multiId < multiCmbIndexes.Count; multiId++)
+        {
+            int startingWaypoint = houses[multiCmbIndexes[multiId]].StartingWaypoint;
+            if (startingWaypoint > -1)
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiId + 1), startingWaypoint);
+        }
+
+        for (int aiId = 0; aiId < ais.Count; aiId++)
+        {
+            int startingWaypoint = houses[humans.Count + aiId].StartingWaypoint;
+            if (startingWaypoint > -1)
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiCmbIndexes.Count + aiId + 1), startingWaypoint);
         }
 
         SpawnIniApplier.ApplySpawnDefaults(spawnIni);
@@ -176,14 +204,14 @@ public static class SkirmishSpawnWriter
 
     public static void WriteSpawnMap(MapEntry map, GameModeEntry gameMode, UiNodeViewModel? lobbyRoot)
     {
-        FileInfo spawnMapIniFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI);
+        FileInfo spawnMapIniFile = SafePath.GetFile(AppState.Environment.GamePath, ProgramConstants.SPAWNMAP_INI);
         spawnMapIniFile.Delete();
 
         Logger.Log("Writing map.");
 
         IniFile mapIni = MapCodeHelper.LoadMapIni(map);
 
-        var globalCodeIni = new IniFile(SafePath.CombineFilePath(ProgramConstants.GamePath, "INI", "Map Code", "GlobalCode.ini"));
+        var globalCodeIni = new IniFile(SafePath.CombineFilePath(AppState.Environment.GamePath, "INI", "Map Code", "GlobalCode.ini"));
         MapCodeHelper.ApplyMapCode(mapIni, MapCodeHelper.GetGameModeMapCodePath(gameMode), gameMode);
         MapCodeHelper.ApplyMapCode(mapIni, globalCodeIni);
         SpawnIniApplier.ApplyMapCodeControls(lobbyRoot, mapIni, gameMode);
@@ -197,7 +225,7 @@ public static class SkirmishSpawnWriter
 
     private static void ApplyForcedSpawnOptions(IniFile spawnIni)
     {
-        string gameOptionsPath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        string gameOptionsPath = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, ClientConfiguration.GAME_OPTIONS);
         if (!File.Exists(gameOptionsPath))
             return;
 

@@ -456,7 +456,12 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
         WafGameBroadcastFields g = e.Game!;
         int score = 0;
 
-        if (g.Revision.Equals("R8", StringComparison.OrdinalIgnoreCase)
+        // All hang-farm / GAME-protocol heuristics are opt-in via the rule pack.
+        // Default pack ships with protocol=[] because bots use stock CnCNet formats
+        // and revision/field-count fingerprints false-positive normal rooms.
+
+        if (_rules.ProtocolRule("proto.game.r8") != null
+            && g.Revision.Equals("R8", StringComparison.OrdinalIgnoreCase)
             && ApplyStrategyGate("proto.game.r8", ref forceDrop))
         {
             score += _rules.ProtocolScore("proto.game.r8", 40);
@@ -464,7 +469,8 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
             reasons.Add(_rules.ProtocolReason("proto.game.r8", "GAME 使用已弃用的 R8 协议（常见挂房机）"));
         }
 
-        if (g.FieldCount is not (11 or 13) && g.FieldCount > 0
+        if (_rules.ProtocolRule("proto.game.field_count") != null
+            && g.FieldCount is not (11 or 13) && g.FieldCount > 0
             && ApplyStrategyGate("proto.game.field_count", ref forceDrop))
         {
             score += _rules.ProtocolScore("proto.game.field_count", 50);
@@ -473,7 +479,8 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
         }
 
         string tunnel = g.TunnelEndpoint;
-        if (_rules.IsKnownHostBotTunnel(tunnel)
+        if (_rules.ProtocolRule("proto.tunnel.blacklist") != null
+            && _rules.IsKnownHostBotTunnel(tunnel)
             && ApplyStrategyGate("proto.tunnel.blacklist", ref forceDrop))
         {
             score += _rules.ProtocolScore("proto.tunnel.blacklist", 80);
@@ -482,7 +489,8 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
             suggest.Add("tunnel=" + tunnel);
         }
 
-        if (!string.IsNullOrEmpty(tunnel))
+        WafCompiledProtocolRule? shared = _rules.ProtocolRule("proto.tunnel.shared_hosts");
+        if (shared != null && !string.IsNullOrEmpty(tunnel))
         {
             string hostKey = e.SenderNick;
             if (!string.IsNullOrEmpty(hostKey))
@@ -498,36 +506,49 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
                     .Select(kv => kv.Key)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Count();
-                WafCompiledProtocolRule? shared = _rules.ProtocolRule("proto.tunnel.shared_hosts");
-                int threshold = shared?.Threshold ?? 3;
+                int threshold = shared.Threshold ?? 3;
                 if (distinctHosts >= threshold
                     && ApplyStrategyGate("proto.tunnel.shared_hosts", ref forceDrop))
                 {
-                    score += shared?.Score ?? 30;
+                    score += shared.Score;
                     matched.Add("proto.tunnel.shared_hosts");
-                    reasons.Add(shared?.Reason ?? "同一隧道短时出现多个「房主」");
+                    reasons.Add(string.IsNullOrWhiteSpace(shared.Reason)
+                        ? "同一隧道短时出现多个「房主」"
+                        : shared.Reason);
                     suggest.Add("tunnel=" + tunnel);
                 }
             }
         }
 
+        // Broadcast cadence alone is not a reliable hang-farm signal (normal GAME refresh
+        // is ~30s). Rate/burst scoring is opt-in via rules pack only — omit by default.
         WafCompiledProtocolRule? burstRule = _rules.ProtocolRule("proto.game.burst");
-        int burstMin = burstRule?.MinCount ?? 4;
-        int burstWindow = burstRule?.WindowSeconds ?? 20;
-        string rateKey = "game:" + (string.IsNullOrEmpty(g.ChannelName) ? e.SenderNick : g.ChannelName);
-        int bursts = NoteAndCount(rateKey, TimeSpan.FromSeconds(burstWindow));
-        if (bursts >= burstMin && ApplyStrategyGate("proto.game.burst", ref forceDrop))
+        if (burstRule != null)
         {
-            int per = burstRule?.PerBurst ?? burstRule?.Score ?? 15;
-            int cap = burstRule?.Cap ?? 60;
-            score += Math.Min(cap, per * bursts);
-            matched.Add("proto.game.burst");
-            reasons.Add(burstRule?.Reason ?? "房间广播刷新异常频繁");
-            if (!string.IsNullOrEmpty(g.ChannelName))
-                suggest.Add("room=" + g.ChannelName);
+            int burstMin = burstRule.MinCount ?? 12;
+            int burstWindow = burstRule.WindowSeconds ?? 10;
+            string rateKey = "game:" + (string.IsNullOrEmpty(g.ChannelName) ? e.SenderNick : g.ChannelName);
+            int bursts = NoteAndCount(rateKey, TimeSpan.FromSeconds(burstWindow));
+            if (bursts >= burstMin && ApplyStrategyGate("proto.game.burst", ref forceDrop))
+            {
+                int per = burstRule.PerBurst ?? burstRule.Score;
+                int cap = burstRule.Cap ?? 40;
+                int add = Math.Min(cap, per * bursts);
+                if (add > 0)
+                {
+                    score += add;
+                    matched.Add("proto.game.burst");
+                    reasons.Add(string.IsNullOrWhiteSpace(burstRule.Reason)
+                        ? "房间广播超高频刷屏（远超正常约30s间隔）"
+                        : burstRule.Reason);
+                    if (!string.IsNullOrEmpty(g.ChannelName))
+                        suggest.Add("room=" + g.ChannelName);
+                }
+            }
         }
 
-        if (LooksLikeSequentialFakePlayers(g.Players)
+        if (_rules.ProtocolRule("proto.game.fake_players") != null
+            && LooksLikeSequentialFakePlayers(g.Players)
             && ApplyStrategyGate("proto.game.fake_players", ref forceDrop))
         {
             score += _rules.ProtocolScore("proto.game.fake_players", 35);
@@ -535,23 +556,28 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
             reasons.Add(_rules.ProtocolReason("proto.game.fake_players", "玩家名单呈模板化假名"));
         }
 
-        string fingerprint = WafTemplateFingerprint.Compute(g);
-        if (!string.IsNullOrEmpty(fingerprint) && !string.IsNullOrWhiteSpace(e.SenderNick))
+        WafCompiledProtocolRule? tpl = _rules.ProtocolRule("proto.game.template_fingerprint");
+        if (tpl != null)
         {
-            TemplateNickBucket bucket = _templateNicks.GetOrAdd(
-                fingerprint,
-                _ => new TemplateNickBucket());
-            bucket.Touch(e.SenderNick);
-            WafCompiledProtocolRule? tpl = _rules.ProtocolRule("proto.game.template_fingerprint");
-            int tplThreshold = tpl?.Threshold ?? 2;
-            if (bucket.NickCount >= tplThreshold
-                && ApplyStrategyGate("proto.game.template_fingerprint", ref forceDrop))
+            string fingerprint = WafTemplateFingerprint.Compute(g);
+            if (!string.IsNullOrEmpty(fingerprint) && !string.IsNullOrWhiteSpace(e.SenderNick))
             {
-                score += tpl?.Score ?? 35;
-                matched.Add("proto.game.template_fingerprint");
-                reasons.Add(tpl?.Reason ?? "相同房间模板被不同昵称反复挂出");
-                suggest.Add("fingerprint=" + fingerprint);
-                suggest.Add("tunnel=" + tunnel);
+                TemplateNickBucket bucket = _templateNicks.GetOrAdd(
+                    fingerprint,
+                    _ => new TemplateNickBucket());
+                bucket.Touch(e.SenderNick);
+                int tplThreshold = tpl.Threshold ?? 2;
+                if (bucket.NickCount >= tplThreshold
+                    && ApplyStrategyGate("proto.game.template_fingerprint", ref forceDrop))
+                {
+                    score += tpl.Score;
+                    matched.Add("proto.game.template_fingerprint");
+                    reasons.Add(string.IsNullOrWhiteSpace(tpl.Reason)
+                        ? "相同房间模板被不同昵称反复挂出"
+                        : tpl.Reason);
+                    suggest.Add("fingerprint=" + fingerprint);
+                    suggest.Add("tunnel=" + tunnel);
+                }
             }
         }
 
@@ -569,22 +595,24 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
         List<string> suggest,
         ref bool forceDrop)
     {
-        if (!ApplyStrategyGate("proto.invite.flood", ref forceDrop))
+        WafCompiledProtocolRule? rule = _rules.ProtocolRule("proto.invite.flood");
+        if (rule == null || !ApplyStrategyGate("proto.invite.flood", ref forceDrop))
             return 0;
 
-        WafCompiledProtocolRule? rule = _rules.ProtocolRule("proto.invite.flood");
-        int min = rule?.MinCount ?? 3;
-        int window = rule?.WindowSeconds ?? 30;
+        int min = rule.MinCount ?? 3;
+        int window = rule.WindowSeconds ?? 30;
         string key = "invite:" + e.SenderNick;
         int n = NoteAndCount(key, TimeSpan.FromSeconds(window));
         if (n < min)
             return 0;
 
-        int baseScore = rule?.Score ?? 40;
-        int perExtra = rule?.PerExtra ?? 10;
-        int cap = rule?.Cap ?? 80;
+        int baseScore = rule.Score;
+        int perExtra = rule.PerExtra ?? 10;
+        int cap = rule.Cap ?? 80;
         matched.Add("proto.invite.flood");
-        reasons.Add(rule?.Reason ?? "短时大量游戏邀请（INVITE）");
+        reasons.Add(string.IsNullOrWhiteSpace(rule.Reason)
+            ? "短时大量游戏邀请（INVITE）"
+            : rule.Reason);
         suggest.Add("nick=" + e.SenderNick);
         return Math.Min(cap, baseScore + (n - min) * perExtra);
     }

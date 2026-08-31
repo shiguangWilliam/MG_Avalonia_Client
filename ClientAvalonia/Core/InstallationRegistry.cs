@@ -3,6 +3,7 @@ using Microsoft.Win32;
 using Rampastring.Tools;
 using System;
 using System.IO;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
@@ -25,7 +26,7 @@ public static class InstallationRegistry
 
     public static string RegistryKeyPath =>
         "SOFTWARE\\" + (ClientCoreBootstrap.IsInitialized
-            ? ClientConfiguration.Instance.InstallationPathRegKey
+            ? AppState.Configuration.Legacy.InstallationPathRegKey
             : MgRegistryKeyName);
 
     public static string MgRegistryKeyPath => "SOFTWARE\\" + MgRegistryKeyName;

@@ -1,6 +1,7 @@
 using ClientAvalonia.Core;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -74,7 +75,7 @@ public static class ClientLogService
             Logger.Log($"Game root: {Environment.CurrentDirectory}");
 
             if (ClientCoreBootstrap.IsInitialized)
-                Logger.Log($"LocalGame: {ClientConfiguration.Instance.LocalGame}");
+                Logger.Log($"LocalGame: {AppState.Configuration.Legacy.LocalGame}");
         }
         catch (Exception ex)
         {
@@ -87,7 +88,7 @@ public static class ClientLogService
     /// <summary>Legacy entry: prefers game-root log when GamePath already points at a valid install.</summary>
     public static void EnsureInitialized()
     {
-        if (InstallationRegistry.IsInstallPathValid(ProgramConstants.GamePath))
+        if (InstallationRegistry.IsInstallPathValid(AppState.Environment.GamePath))
             EnsureGameRootInitialized();
         else
             EnsureEarlyInitialized();

@@ -1,5 +1,6 @@
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Session;
 
@@ -100,7 +101,7 @@ public interface ICnCNetGameSession : ISkirmishSession
     /// 房间**初次创建**时调用：清空所有槽位，把本地玩家写到 slot[0]。
     /// 对应 XNA <c>CnCNetGameLobby.GameHost_StartGame</c> 进入大厅的初始化。
     /// </summary>
-    /// <param name="localPlayerName">本机玩家名（即 <c>ProgramConstants.PLAYERNAME</c>）。</param>
+    /// <param name="localPlayerName">本机玩家名（即 <c>AppState.Environment.PlayerName</c>）。</param>
     void InitHostSlots(string localPlayerName);
 
     /// <summary>

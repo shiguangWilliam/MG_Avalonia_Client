@@ -65,6 +65,9 @@ public sealed class CnCNetHostedGameSummary
 
     public string RiskSummary { get; set; } = string.Empty;
 
+    /// <summary>Resolved tunnel RTT for lobby display (-1 = unknown). Not part of GAME CTCP.</summary>
+    public int TunnelPingInMs { get; set; } = -1;
+
     public string DisplayLine
     {
         get
@@ -72,9 +75,13 @@ public sealed class CnCNetHostedGameSummary
             string baseLine = Locked
                 ? $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName} [locked]"
                 : $"{RoomName} ({PlayerCount}/{MaxPlayers}) - {HostName}";
+            string ping = TunnelPingInMs >= 0
+                ? $" · {TunnelPingInMs} ms"
+                : string.Empty;
+            string line = baseLine + ping;
             return RiskLevel >= WafSeverity.Warn
-                ? $"[风险] {baseLine}"
-                : baseLine;
+                ? $"[风险] {line}"
+                : line;
         }
     }
 }

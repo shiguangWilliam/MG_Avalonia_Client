@@ -8,6 +8,12 @@ public static class UiBehaviorCatalog
         registry.Clear();
         CommonWindowBehaviors.Register(registry, host);
 
+        if (Services.FloatingOverlayLayout.IsCampaignWindow(windowName))
+        {
+            CampaignOverlayBehaviors.Register(registry, host);
+            return;
+        }
+
         switch (windowName)
         {
             case "MainMenu":
@@ -21,12 +27,14 @@ public static class UiBehaviorCatalog
             case "MultiplayerGameLobby":
             case "CnCNetGameLobby":
             case "LANGameLobby":
+            case "CnCNetGameLoadingLobby":
+            case "LANGameLoadingLobby":
+            case "GameLoadingLobby":
                 LobbyBehaviors.Register(registry, host, windowName);
                 break;
             case "OptionsWindow":
                 OptionsWindowBehaviors.Register(registry, host);
                 break;
-            case "CampaignSelector":
             case "StatisticsWindow":
             case "ExtrasWindow":
                 StubWindowBehaviors.Register(registry, host, windowName);

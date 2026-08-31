@@ -2,6 +2,7 @@ using ClientCore;
 using System;
 using System.Threading;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -47,15 +48,15 @@ public sealed class CnCNetPlayerCountService : IDisposable
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(ClientConfiguration.Instance.CnCNetPlayerCountURL))
+            if (string.IsNullOrWhiteSpace(AppState.Configuration.Legacy.CnCNetPlayerCountURL))
                 return -1;
 
-            string? info = CnCNetHttp.DownloadString(ClientConfiguration.Instance.CnCNetPlayerCountURL, timeoutMilliseconds);
+            string? info = CnCNetHttp.DownloadString(AppState.Configuration.Legacy.CnCNetPlayerCountURL, timeoutMilliseconds);
             if (string.IsNullOrWhiteSpace(info))
                 return -1;
 
             info = info.Replace("{", string.Empty).Replace("}", string.Empty).Replace("\"", string.Empty);
-            string identifier = ClientConfiguration.Instance.CnCNetLiveStatusIdentifier;
+            string identifier = AppState.Configuration.Legacy.CnCNetLiveStatusIdentifier;
 
             foreach (string value in info.Split(','))
             {

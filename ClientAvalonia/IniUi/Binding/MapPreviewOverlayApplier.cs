@@ -6,6 +6,7 @@ using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Binding;
 
@@ -16,7 +17,7 @@ public static class MapPreviewOverlayApplier
 {
     /// <summary>
     /// Phase 4 P4-3：Session-aware 主入口——直接吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，
-    /// 不再硬依赖 <see cref="LobbyPlayerState"/>。行为与旧入口完全等价。
+    /// 不再硬依赖 <c>LobbyPlayerState</c>。行为与旧入口完全等价。
     /// </summary>
     public static void Apply(
         UiNodeViewModel previewBox,
@@ -39,7 +40,7 @@ public static class MapPreviewOverlayApplier
         int controlW = (int)Math.Max(1, previewBox.Width);
         int controlH = (int)Math.Max(1, previewBox.Height);
 
-        ClientConfiguration cfg = ClientConfiguration.Instance;
+        ClientConfiguration cfg = AppState.Configuration.Legacy;
         IReadOnlyList<(int X, int Y)> projected = StartingLocationProjector.ProjectAll(
             map.Waypoints,
             cfg.UseIsometricCells,
@@ -128,22 +129,10 @@ public static class MapPreviewOverlayApplier
         previewBox.MapPreviewEnforceMaxPlayers = map.EnforceMaxPlayers;
     }
 
-    /// <summary>
-    /// Legacy 入口（Phase 4 P4-3：标记为已过时）。新代码用 <see cref="Apply(UiNodeViewModel, MapEntry?, IReadOnlyList{IPlayerSlot}?, bool, bool)"/>。
-    /// </summary>
-    [Obsolete("Phase 4 P4-3: 改用 IReadOnlyList<IPlayerSlot> 重载。Phase 5 删除。")]
-    public static void Apply(
-        UiNodeViewModel previewBox,
-        MapEntry? map,
-        LobbyPlayerState? playerState,
-        bool canAssign,
-        bool canSelectLocal)
-        => Apply(previewBox, map, playerState?.Slots, canAssign, canSelectLocal);
-
     private static string FormatOccupant(IPlayerSlot slot)
     {
-        if (slot.TeamIndex > 0 && slot.TeamIndex <= ProgramConstants.TEAMS.Count)
-            return $"[{ProgramConstants.TEAMS[slot.TeamIndex - 1]}] {slot.Name}";
+        if (slot.TeamIndex > 0 && slot.TeamIndex <= AppState.Environment.TeamNames.Count)
+            return $"[{AppState.Environment.TeamNames[slot.TeamIndex - 1]}] {slot.Name}";
         return slot.Name;
     }
 }

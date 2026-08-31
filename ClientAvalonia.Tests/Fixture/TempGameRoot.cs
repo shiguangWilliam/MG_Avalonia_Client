@@ -68,8 +68,14 @@ internal sealed class TempGameRoot : IDisposable
             {
                 LocalGameValue = "mg",
                 GamePathValue = GameRoot,
-                PlayerNameValue = "TestPlayer",
+                // Live-bind so tests that mutate ProgramConstants.PLAYERNAME / GAME_VERSION
+                // remain visible through AppState.Environment after BindToProgramConstants.
+                PlayerNameValue = ProgramConstants.PLAYERNAME,
+                GameVersionValue = ProgramConstants.GAME_VERSION,
             });
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Register<
+            ClientAvalonia.Configuration.IGameConfiguration>(
+            () => new ClientAvalonia.Configuration.ClientConfigurationAdapter());
         ClientAvalonia.GlobalState.Environment.EnvironmentServices.Register<
             ClientAvalonia.Domain.Resources.IMultiplayerColorCatalog>(
             () => new FakeColorCatalog());

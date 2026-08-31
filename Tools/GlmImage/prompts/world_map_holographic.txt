@@ -1,0 +1,10 @@
+Subject lock (do not change subject): a geographic WORLD MAP showing Earth continents (North America, South America, Europe, Africa, Asia, Australia, Antarctica) as flat shapes.
+
+Format: equirectangular 2D map texture, rectangular, fills entire image, left=-180° longitude, right=+180°, top=north pole, bottom=south pole. NOT a human, NOT a portrait, NOT a robot, NOT a sphere, NOT a 3D globe render.
+
+Look: dark tactical HUD world map. Continents are soft flat translucent cyan silhouettes (solid glow fill, no internal detail) with brighter cyan rim along coastlines. Color cyan #2EE6C5 on charcoal black #050709. Optional faint square HUD grid in empty ocean only. Sparse unconnected city dots allowed.
+
+Forbidden: people, faces, cyborgs, robots, wireframe mesh, triangulation, plexus lines, any connecting lines between dots, country borders, political boundaries, topography, mountain relief, satellite photo, green land, brown desert, clouds, text, watermark, labels, perspective floor grid, tabletop projection stage under the map.
+
+Keywords: flat world map plate, continent silhouette, holographic glow rim, minimal HUD, seamless wrap texture, clean, vector-like soft fill, no internal borders
+

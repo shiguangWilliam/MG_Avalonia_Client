@@ -4,6 +4,7 @@ using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using ClientUpdater;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -48,17 +49,17 @@ public sealed class UiStateService : IUiStateService
 
     private string ReadGameVersion()
     {
-        if (ClientStartupService.IsUpdaterInitialized && !ClientConfiguration.Instance.ModMode)
+        if (ClientStartupService.IsUpdaterInitialized && !AppState.Configuration.Legacy.ModMode)
         {
             string version = Updater.GameVersion;
             if (!string.IsNullOrWhiteSpace(version) && !version.Equals("N/A", StringComparison.OrdinalIgnoreCase))
                 return "v." + version;
         }
 
-        if (!string.IsNullOrWhiteSpace(ProgramConstants.GAME_VERSION)
-            && !ProgramConstants.GAME_VERSION.Equals("Undefined", StringComparison.OrdinalIgnoreCase)
-            && !ProgramConstants.GAME_VERSION.Equals("N/A", StringComparison.OrdinalIgnoreCase))
-            return "v." + ProgramConstants.GAME_VERSION;
+        if (!string.IsNullOrWhiteSpace(AppState.Environment.GameVersion)
+            && !AppState.Environment.GameVersion.Equals("Undefined", StringComparison.OrdinalIgnoreCase)
+            && !AppState.Environment.GameVersion.Equals("N/A", StringComparison.OrdinalIgnoreCase))
+            return "v." + AppState.Environment.GameVersion;
 
         string versionFile = Path.Combine(_environment.GameRoot, "version");
         if (File.Exists(versionFile))

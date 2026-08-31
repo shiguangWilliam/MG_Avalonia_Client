@@ -3,14 +3,17 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Avalonia.Controls;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Core;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
 using ClientCore.Extensions;
 using ClientCore.INIProcessing;
 using ClientCore.Settings;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -49,8 +52,12 @@ public static class GameProcessLauncher
             return false;
         }
 
-        OSVersion osVersion = ClientConfiguration.Instance.GetOperatingSystemVersion();
-        string gameExecutableName = ClientConfiguration.Instance.GetGameExecutableName();
+        IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+        string gamePath = environment.GameRoot;
+        // GetOperatingSystemVersion / ExtraExeCommandLineParameters / UnixGameExecutableName 未抽接口
+        ClientConfiguration? coreConfig = (config as ClientConfigurationAdapter)?.Legacy;
+        OSVersion osVersion = coreConfig?.GetOperatingSystemVersion() ?? AppState.Configuration.Legacy.GetOperatingSystemVersion();
+        string gameExecutableName = config.GetGameExecutableName();
         if (string.IsNullOrWhiteSpace(gameExecutableName))
         {
             message = "Game executable is not configured (GameExecutableNames in ClientDefinitions.ini).";
@@ -60,17 +67,19 @@ public static class GameProcessLauncher
 
         ResolveLaunchExecutables(osVersion, gameExecutableName, out string launchExecutableName, out string additionalExecutableName);
 
-        string extraCommandLine = ClientConfiguration.Instance.ExtraExeCommandLineParameters?.Trim() ?? string.Empty;
+        string extraCommandLine = coreConfig?.ExtraExeCommandLineParameters?.Trim()
+                                  ?? AppState.Configuration.Legacy.ExtraExeCommandLineParameters?.Trim()
+                                  ?? string.Empty;
 
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "DTA.LOG");
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TI.LOG");
-        SafePath.DeleteFileIfExists(ProgramConstants.GamePath, "TS.LOG");
+        SafePath.DeleteFileIfExists(gamePath, "DTA.LOG");
+        SafePath.DeleteFileIfExists(gamePath, "TI.LOG");
+        SafePath.DeleteFileIfExists(gamePath, "TS.LOG");
 
         preparationElapsedMs = GameLaunchPreparation.PrepareForLaunch();
         GameProcessStarting?.Invoke();
 
         bool windowed = GameRendererBootstrap.Manager.GetEffectiveWindowedMode();
-        bool qresAvailable = File.Exists(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.QRES_EXECUTABLE));
+        bool qresAvailable = File.Exists(SafePath.CombineFilePath(gamePath, ProgramConstants.QRES_EXECUTABLE));
         bool useQres = GameLaunchPolicy.ShouldUseQres(
             GameLaunchPolicy.IsWindowsPlatform(),
             qresAvailable,
@@ -140,13 +149,17 @@ public static class GameProcessLauncher
 
         if (osVersion == OSVersion.UNIX)
         {
-            launchExecutableName = ClientConfiguration.Instance.UnixGameExecutableName;
+            // UnixGameExecutableName 未抽接口，escape hatch
+            IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+            launchExecutableName = (config as ClientConfigurationAdapter)?.Legacy?.UnixGameExecutableName
+                                  ?? AppState.Configuration.Legacy.UnixGameExecutableName;
             if (string.IsNullOrWhiteSpace(launchExecutableName))
                 launchExecutableName = gameExecutableName;
             return;
         }
 
-        string launcherExecutableName = ClientConfiguration.Instance.GameLauncherExecutableName?.Trim() ?? string.Empty;
+        IGameConfiguration cfg = EnvironmentServices.Resolve<IGameConfiguration>();
+        string launcherExecutableName = cfg.GameLauncherExecutableName?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(launcherExecutableName))
         {
             launchExecutableName = gameExecutableName;
@@ -170,7 +183,8 @@ public static class GameProcessLauncher
         if (!ValidateSyringeConfiguration(launchExecutableName, additionalExecutableName, arguments, errorOwner, out message))
             return null;
 
-        FileInfo gameFileInfo = SafePath.GetFile(ProgramConstants.GamePath, launchExecutableName);
+        string gamePath = EnvironmentServices.Resolve<IGameEnvironment>().GamePath;
+        FileInfo gameFileInfo = SafePath.GetFile(gamePath, launchExecutableName);
         if (!gameFileInfo.Exists)
         {
             message = $"Launch executable not found: {gameFileInfo.FullName}";
@@ -182,7 +196,7 @@ public static class GameProcessLauncher
         {
             FileName = gameFileInfo.FullName,
             Arguments = arguments,
-            WorkingDirectory = ProgramConstants.GamePath,
+            WorkingDirectory = gamePath,
             UseShellExecute = false,
         };
 
@@ -232,18 +246,19 @@ public static class GameProcessLauncher
         message = string.Empty;
         Logger.Log(windowed ? "Windowed mode is enabled - using QRes." : "Fullscreen launch - using QRes for 16-bit color depth.");
 
+        string gamePath = EnvironmentServices.Resolve<IGameEnvironment>().GamePath;
         string spawnArgs = BuildSpawnArguments(additionalExecutableName, extraCommandLine);
-        string target = QuoteArgument(SafePath.CombineFilePath(ProgramConstants.GamePath, launchExecutableName));
+        string target = QuoteArgument(SafePath.CombineFilePath(gamePath, launchExecutableName));
         string qresArgs = string.IsNullOrWhiteSpace(extraCommandLine)
             ? $"c=16 /R {target} {spawnArgs.Trim()}"
             : $"c=16 /R {target} {spawnArgs.Trim()}";
 
-        string qresPath = SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.QRES_EXECUTABLE);
+        string qresPath = SafePath.CombineFilePath(gamePath, ProgramConstants.QRES_EXECUTABLE);
         var startInfo = new ProcessStartInfo
         {
             FileName = ProgramConstants.QRES_EXECUTABLE,
             Arguments = qresArgs,
-            WorkingDirectory = ProgramConstants.GamePath,
+            WorkingDirectory = gamePath,
             UseShellExecute = false,
         };
 
@@ -298,7 +313,7 @@ public static class GameProcessLauncher
         out string message)
     {
         message = string.Empty;
-        string gameExecutableName = ClientConfiguration.Instance.GetGameExecutableName();
+        string gameExecutableName = AppState.Configuration.Legacy.GetGameExecutableName();
 
         if (IsSyringeLauncher(launchExecutableName) && string.IsNullOrWhiteSpace(additionalExecutableName))
         {

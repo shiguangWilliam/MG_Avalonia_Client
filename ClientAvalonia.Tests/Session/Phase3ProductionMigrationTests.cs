@@ -35,13 +35,11 @@ public sealed class Phase3ProductionMigrationTests
     }
 
     [Fact]
-    public void HouseHandicapFromAiLevel_Legacy_LobbyPlayerState_Still_Delegates()
+    public void HouseHandicapFromAiLevel_Is_Only_On_Resolver()
     {
-#pragma warning disable CS0618 // 验证 legacy 入口仍委托到新位置。
-        int legacyResult = LobbyPlayerState.HouseHandicapFromAiLevel(0);
-        int newResult = LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(0);
-        legacyResult.Should().Be(newResult);
-#pragma warning restore CS0618
+        // Phase 6：LobbyPlayerState.HouseHandicapFromAiLevel 已删除；唯一入口在 Resolver。
+        LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(0).Should().Be(2);
+        LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(2).Should().Be(0);
     }
 
     // ---- P3-1 LobbyPlayerHouseResolver.Resolve(IReadOnlyList<IPlayerSlot>, int) ----
@@ -110,8 +108,8 @@ public sealed class Phase3ProductionMigrationTests
             new LobbyPlayerSlot { Name = "Alice" },
             new LobbyPlayerSlot { Name = "EasyAI", IsAi = true },
         };
-        // 补齐 8 个槽位
-        var fullSlots = slots.Concat(Enumerable.Range(0, 6).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
+        // 补齐 MaxSlots 个槽位
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 2).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         LobbyPlayerSlotUiRules.GetUiRowKind(0, fullSlots, LobbyPlayerMode.Skirmish, allowHostPlayerOptions: true)
             .Should().Be(LobbyPlayerRowKind.Human);
@@ -124,33 +122,43 @@ public sealed class Phase3ProductionMigrationTests
     [Fact]
     public void GetUiRowKind_SessionOverload_HostMultiplayer_Open_After_Humans()
     {
-        // 关键差异：Host multiplayer 时 humans 后面永远是 Open（不是 Closed）。
+        // CnCNet override: humans 后面永远是 Open（不是 Closed）——主机与客机一致。
         var slots = new IPlayerSlot[]
         {
             new LobbyPlayerSlot { Name = "Alice" },
         };
-        var fullSlots = slots.Concat(Enumerable.Range(0, 7).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 1).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         LobbyPlayerSlotUiRules.GetUiRowKind(1, fullSlots, LobbyPlayerMode.Multiplayer, allowHostPlayerOptions: true)
             .Should().Be(LobbyPlayerRowKind.Open, "host multiplayer: rows after humans are Open");
+
+        for (int i = 1; i < fullSlots.Length; i++)
+        {
+            LobbyPlayerSlotUiRules.GetUiRowKind(i, fullSlots, LobbyPlayerMode.Multiplayer, allowHostPlayerOptions: false)
+                .Should().Be(LobbyPlayerRowKind.Open, $"joiner multiplayer: slot {i} must stay Open (no Closed cascade desync)");
+        }
     }
 
     [Fact]
-    public void GetUiRowKind_SessionOverload_Matches_Legacy_Overload()
+    public void GetUiRowKind_Multiplayer_Open_After_Humans_Is_Stable()
     {
-        // 等价性验证：新重载行为与 LobbyPlayerState 入口完全一致。
-        var state = new LobbyPlayerState();
-        state.Slots[0] = new LobbyPlayerSlot { Name = "Alice" };
-        state.Slots[1] = new LobbyPlayerSlot { Name = "EasyAI", IsAi = true };
-        state.Mode = LobbyPlayerMode.Multiplayer;
-        state.AllowHostPlayerOptions = true;
+        var slots = new IPlayerSlot[]
+        {
+            new LobbyPlayerSlot { Name = "Alice" },
+            new LobbyPlayerSlot { Name = "EasyAI", IsAi = true },
+        };
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 2).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         for (int i = 0; i < LobbyPlayerSlot.MaxSlots; i++)
         {
-            LobbyPlayerRowKind legacy = LobbyPlayerSlotUiRules.GetUiRowKind(i, state);
-            LobbyPlayerRowKind sessionAware = LobbyPlayerSlotUiRules.GetUiRowKind(
-                i, state.Slots, state.Mode, state.AllowHostPlayerOptions);
-            sessionAware.Should().Be(legacy, $"slot {i} 必须等价");
+            LobbyPlayerRowKind kind = LobbyPlayerSlotUiRules.GetUiRowKind(
+                i, fullSlots, LobbyPlayerMode.Multiplayer, allowHostPlayerOptions: true);
+            if (i == 0)
+                kind.Should().Be(LobbyPlayerRowKind.Human);
+            else if (i == 1)
+                kind.Should().Be(LobbyPlayerRowKind.Ai);
+            else
+                kind.Should().Be(LobbyPlayerRowKind.Open);
         }
     }
 

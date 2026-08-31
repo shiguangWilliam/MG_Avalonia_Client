@@ -26,6 +26,15 @@ public sealed class MissionEntry : IMissionResource
 
     public bool PlayerAlwaysOnNormalDifficulty { get; init; }
 
+    /// <summary>Latitude in degrees for the Tactical globe (-90..90). Null = unspecified.</summary>
+    public double? GlobeLatitude { get; init; }
+
+    /// <summary>Longitude in degrees for the Tactical globe (-180..180). Null = unspecified.</summary>
+    public double? GlobeLongitude { get; init; }
+
+    /// <summary>ISO 3166-1 alpha-2/3 code driving the F2 border highlight. Null/invalid = skip.</summary>
+    public string? GlobeCountry { get; init; }
+
     public bool IsHeader => string.IsNullOrWhiteSpace(Scenario);
 
     public long SizeBytes { get; init; }

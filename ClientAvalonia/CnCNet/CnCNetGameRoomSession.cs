@@ -1,7 +1,9 @@
 using ClientCore;
 using ClientAvalonia.CnCNet.Protocol;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Domain.Resources;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
 using System;
@@ -13,6 +15,7 @@ using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -34,12 +37,12 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     private CnCNetGameChannels? _channels;
     private bool _locked;
     private int _uniqueGameId;
-    private string _localNick = ProgramConstants.PLAYERNAME;
+    private string _localNick = AppState.Environment.PlayerName;
     private int _randomSeed;
     private bool _removeStartingLocations;
-    private int _frameSendRate = ClientConfiguration.Instance.DefaultFrameSendRate;
-    private int _maxAhead = ClientConfiguration.Instance.DefaultMaxAhead;
-    private int _protocolVersion = ClientConfiguration.Instance.DefaultProtocolVersion;
+    private int _frameSendRate = ResolveDefaultFrameSendRate();
+    private int _maxAhead = ResolveDefaultMaxAhead();
+    private int _protocolVersion = ResolveDefaultProtocolVersion();
     private bool _tunnelErrorMode;
     private bool _localJoined;
     private string? _pendingGameOptionsBody;
@@ -121,7 +124,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     public CnCNetGameRoomSession(CnCNetActiveGameRoom room)
     {
         Room = room;
-        HostName = room.IsHost ? ProgramConstants.PLAYERNAME : room.HostName;
+        HostName = room.IsHost ? AppState.Environment.PlayerName : room.HostName;
         SlotSink = new LobbyPlayerSlotSink(
             () => _playerSlots,
             () => BumpRevision());
@@ -206,7 +209,8 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     /// <inheritdoc />
     public void InitHostSlots(string localPlayerName)
     {
-        // 房间初次创建：清空所有槽位，slot[0] 写本地人。AI 槽由 ResetSlotsForMap 在切图时再填。
+        // 房间初次创建：清空所有槽位，slot[0] 写本地人。空槽保持 Open（UI override），
+        // 不走 DefaultAiSlotPolicy 自动填充；AI / 玩家由房主操作或 PO 同步。
         lock (_sync)
         {
             for (int i = 0; i < _playerSlots.Length; i++)
@@ -331,7 +335,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         if (!string.IsNullOrWhiteSpace(fallback))
             return fallback.Trim();
 
-        return ProgramConstants.PLAYERNAME;
+        return AppState.Environment.PlayerName;
     }
 
     /// <inheritdoc />
@@ -465,6 +469,10 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
 
     /// <inheritdoc />
     IGameOptionsState IGameSession.Options => _sessionOptions;
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
+        = new Dictionary<string, string>();
 
     /// <inheritdoc />
     public GameSessionState State
@@ -1146,70 +1154,6 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         _connection.KickFromChannel(Room.ChannelName, playerName);
     }
 
-    [Obsolete("Phase 3 P3-4: 改用 UpdateHuman(string, in SlotFieldUpdate) + session.BroadcastPlayerOptionsFromSlots。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public void UpdateHumanFromSlot(LobbyPlayerSlot slot)
-    {
-        if (!IsHost)
-            return;
-
-        lock (_sync)
-        {
-            CnCNetGameRoomPlayer? player = FindPlayerLocked(slot.Name);
-            if (player == null)
-                return;
-
-            player.SideId = slot.SideIndex;
-            player.ColorId = slot.ColorIndex;
-            player.TeamId = slot.TeamIndex;
-            player.StartingLocation = slot.StartIndex;
-        }
-    }
-
-    [Obsolete("Phase 3 P3-4: 改用 session.BroadcastPlayerOptionsFromSlots(string, IReadOnlyList<string>)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public void SyncPlayersFromLobby(LobbyPlayerState state, string hostName)
-    {
-        if (!IsHost)
-            return;
-
-        List<CnCNetGameRoomPlayer> entries;
-        lock (_sync)
-        {
-            entries = MultiplayerSlotLayout.BuildPoListFromState(state, hostName);
-            AppendChannelJoinersLocked(entries, hostName);
-
-            var readyByName = _players.Where(p => !p.IsAi)
-                .ToDictionary(p => p.Name, p => (p.Ready, p.AutoReady), StringComparer.OrdinalIgnoreCase);
-
-            foreach (CnCNetGameRoomPlayer entry in entries)
-            {
-                if (entry.IsAi)
-                {
-                    entry.Ready = true;
-                }
-                else if (readyByName.TryGetValue(entry.Name, out (bool Ready, bool AutoReady) existing))
-                {
-                    entry.Ready = existing.Ready;
-                    entry.AutoReady = existing.AutoReady;
-                }
-
-                if (entry.IsHost || (!entry.IsAi && entry.Name.Equals(_localNick, StringComparison.OrdinalIgnoreCase) && IsHost))
-                    entry.Ready = true;
-            }
-
-            if (PlayerListsEquivalent(_players, entries))
-                return;
-
-            // _playerSlots is the single source of truth for slot state.
-            // Apply the resolved PO DTO to slots, then rebuild _players from slots.
-            PlayerOptionsCodec.ApplyDto(entries, _playerSlots, _localNick);
-            SyncPlayersFromSlotsLocked(hostName, state.AiNames);
-
-            BroadcastPlayerOptionsLocked();
-        }
-
-        StateChanged?.Invoke();
-    }
-
     /// <summary>
     /// 把 <see cref="_playerSlots"/> 重新编码为 PO DTO 列表，覆盖 <see cref="_players"/>。
     /// 保留 NAT 分配的端口（端口不在槽位状态里，只存在于 _players / START 协议中）。
@@ -1490,7 +1434,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         message = string.Empty;
 
         if (!playerPorts.TryGetValue(_localNick, out ushort localPort)
-            && !playerPorts.TryGetValue(ProgramConstants.PLAYERNAME, out localPort))
+            && !playerPorts.TryGetValue(AppState.Environment.PlayerName, out localPort))
         {
             message = "Local player port was not assigned by the tunnel server.";
             return false;
@@ -1839,7 +1783,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
 
         if (skillChanged)
         {
-            string[] options = ClientConfiguration.Instance.SkillLevelOptions.Split(',');
+            string[] options = EnvironmentServices.Resolve<IGameConfiguration>().SkillLevelOptions.Split(',');
             string skillName = newSkillLevel >= 0 && newSkillLevel < options.Length
                 ? options[newSkillLevel]
                 : newSkillLevel.ToString();
@@ -1979,9 +1923,9 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
                 MapSha1 = _gameBroadcastListingMapSha1,
                 GameModeName = _gameBroadcastListingGameMode,
                 MapUntranslatedName = _gameBroadcastListingMapName,
-                FrameSendRate = ClientConfiguration.Instance.DefaultFrameSendRate,
-                MaxAhead = ClientConfiguration.Instance.DefaultMaxAhead,
-                ProtocolVersion = ClientConfiguration.Instance.DefaultProtocolVersion,
+                FrameSendRate = _frameSendRate,
+                MaxAhead = _maxAhead,
+                ProtocolVersion = _protocolVersion,
                 RandomSeed = _randomSeed,
                 RemoveStartingLocations = _removeStartingLocations,
             };
@@ -2287,5 +2231,35 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         }
 
         return true;
+    }
+
+    private static int ResolveDefaultFrameSendRate()
+    {
+        try { return EnvironmentServices.Resolve<IGameConfiguration>().DefaultFrameSendRate; }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameConfiguration — 字段初始化器早于注册
+            return AppState.Configuration.Legacy.DefaultFrameSendRate;
+        }
+    }
+
+    private static int ResolveDefaultMaxAhead()
+    {
+        try { return EnvironmentServices.Resolve<IGameConfiguration>().DefaultMaxAhead; }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameConfiguration — 字段初始化器早于注册
+            return AppState.Configuration.Legacy.DefaultMaxAhead;
+        }
+    }
+
+    private static int ResolveDefaultProtocolVersion()
+    {
+        try { return EnvironmentServices.Resolve<IGameConfiguration>().DefaultProtocolVersion; }
+        catch (InvalidOperationException)
+        {
+            // TODO(phase-A): inject IGameConfiguration — 字段初始化器早于注册
+            return AppState.Configuration.Legacy.DefaultProtocolVersion;
+        }
     }
 }

@@ -1,3 +1,4 @@
+using ClientAvalonia.CnCNet;
 using ClientAvalonia.IniUi.Models;
 using ClientCore.Extensions;
 
@@ -47,6 +48,7 @@ internal static class OptionsCnCNetControlsBootstrap
         }
 
         EnsureAllowPrivateMessagesDropdown(tree);
+        EnsureGameBroadcastIntervalDropdown(tree);
     }
 
     private static void EnsureAllowPrivateMessagesDropdown(UiNodeTree tree)
@@ -77,6 +79,32 @@ internal static class OptionsCnCNetControlsBootstrap
         hint.Props["Text"] = "提示：来源策略优先于内容防护；选「所有人」时完全依赖设置→安全中的入网 WAF。";
         hint.Props["Width"] = 520.0;
         hint.Props["Height"] = 32.0;
+    }
+
+    private static void EnsureGameBroadcastIntervalDropdown(UiNodeTree tree)
+    {
+        UiNode? panel = tree.FindNode("CnCNetOptionsPanel");
+        if (panel == null)
+            return;
+
+        UiNode label = EnsureOnPanel(tree, panel, "lblGameBroadcastInterval", "XNALabel", "DxLabel");
+        if (!HasDisplayText(label))
+        {
+            label.Props["Text"] = "Game listing refresh interval (seconds):"
+                .L10N("Client:DTAConfig:GameBroadcastInterval");
+        }
+
+        label.Props["Width"] = 320.0;
+
+        UiNode dropdown = EnsureOnPanel(tree, panel, "ddGameBroadcastInterval", "XNAClientDropDown", "DxComboBox");
+        dropdown.TemplateKey = "DxComboBox";
+        dropdown.Props["Width"] = 120.0;
+        dropdown.Props["Height"] = 24.0;
+        dropdown.Props["Items"] = CnCNetGameBroadcastIntervals.ComboItemsCsv;
+        dropdown.Props["DefaultIndex"] = CnCNetGameBroadcastIntervals.DefaultComboIndex;
+        dropdown.Props["SelectedIndex"] = CnCNetGameBroadcastIntervals.DefaultComboIndex;
+        // Persist the seconds value (5/10/.../30), not the combo index.
+        dropdown.Props["WriteItemValue"] = true;
     }
 
     /// <summary>Find-or-create and always reparent onto the CnCNet panel (INI often leaves the dropdown on root).</summary>

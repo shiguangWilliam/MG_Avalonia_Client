@@ -2,6 +2,7 @@ using Avalonia.Media;
 using ClientCore;
 using ClientCore.Extensions;
 using ClientCore.Settings;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -29,7 +30,7 @@ public static class CnCNetChatColorCatalog
         if (_cached != null)
             return _cached;
 
-        Color defaultColor = ParseRgb(ClientConfiguration.Instance.DefaultChatColor, Colors.LimeGreen);
+        Color defaultColor = ParseRgb(AppState.Configuration.Legacy.DefaultChatColor, Colors.LimeGreen);
         _cached =
         [
             new() { Name = "Default color".L10N("Client:Main:ColorDefault"), IrcColorId = 0, DisplayColor = defaultColor, Selectable = false },
@@ -58,7 +59,7 @@ public static class CnCNetChatColorCatalog
         if (savedIndex >= 0 && savedIndex < all.Count)
             return savedIndex;
 
-        int fallback = ClientConfiguration.Instance.DefaultPersonalChatColorIndex;
+        int fallback = AppState.Configuration.Legacy.DefaultPersonalChatColorIndex;
         return fallback >= 0 && fallback < all.Count ? fallback : 3;
     }
 

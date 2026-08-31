@@ -2,6 +2,7 @@ using ClientAvalonia.Core;
 using ClientCore;
 using ClientCore.I18N;
 using ClientUpdater;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -28,7 +29,7 @@ public sealed class ClientUpdateService
 
     public void RefreshInitialStatus()
     {
-        if (!ClientStartupService.IsUpdaterInitialized || ClientConfiguration.Instance.ModMode)
+        if (!ClientStartupService.IsUpdaterInitialized || AppState.Configuration.Legacy.ModMode)
         {
             UpdateStatusText = Localize("Client:Main:ClickToCheckUpdate", "Click to check for updates.");
             CanCheckForUpdates = false;
@@ -56,7 +57,7 @@ public sealed class ClientUpdateService
 
     public void CheckForUpdates()
     {
-        if (!ClientStartupService.IsUpdaterInitialized || ClientConfiguration.Instance.ModMode)
+        if (!ClientStartupService.IsUpdaterInitialized || AppState.Configuration.Legacy.ModMode)
             return;
 
         if (Updater.UpdateMirrors == null || Updater.UpdateMirrors.Count < 1)
@@ -88,7 +89,7 @@ public sealed class ClientUpdateService
             case VersionState.UPTODATE:
                 UpdateStatusText = string.Format(
                     Localize("Client:Main:GameUpToDate", "{0} is up to date."),
-                    ClientConfiguration.Instance.LocalGame);
+                    AppState.Configuration.Legacy.LocalGame);
                 CanCheckForUpdates = true;
                 break;
 

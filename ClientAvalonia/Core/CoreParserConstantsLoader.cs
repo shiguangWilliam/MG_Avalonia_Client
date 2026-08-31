@@ -1,6 +1,7 @@
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Loading;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
@@ -12,6 +13,6 @@ public static class CoreParserConstantsLoader
         if (!ClientCoreBootstrap.IsInitialized)
             return DefaultParserConstants.Create();
 
-        return ParserConstantsLoader.LoadForGame(ProgramConstants.GamePath);
+        return ParserConstantsLoader.LoadForGame(AppState.Environment.GamePath);
     }
 }

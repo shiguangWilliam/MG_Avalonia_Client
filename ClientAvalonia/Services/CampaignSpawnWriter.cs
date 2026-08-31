@@ -1,10 +1,13 @@
 using System.Globalization;
+using ClientAvalonia.Configuration;
 using ClientAvalonia.Domain;
+using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.Rendering;
 using ClientCore;
 using ClientCore.Enums;
 using ClientCore.Extensions;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -22,10 +25,15 @@ public static class CampaignSpawnWriter
     {
         difficultyIndex = Math.Clamp(difficultyIndex, 0, DifficultyIniPaths.Length - 1);
 
-        FileInfo spawnerSettingsFile = SafePath.GetFile(ProgramConstants.GamePath, ProgramConstants.SPAWNER_SETTINGS);
+        IGameEnvironment env = EnvironmentServices.Resolve<IGameEnvironment>();
+        IGameConfiguration config = EnvironmentServices.Resolve<IGameConfiguration>();
+        FileInfo spawnerSettingsFile = SafePath.GetFile(env.GamePath, ProgramConstants.SPAWNER_SETTINGS);
         spawnerSettingsFile.Delete();
 
-        bool copyMapsToSpawnmapIni = ClientConfiguration.Instance.CopyMissionsToSpawnmapINI;
+        // CopyMissionsToSpawnmapINI 未抽到 IGameConfiguration，通过 escape hatch 访问
+        ClientConfiguration? coreConfig = (config as ClientConfigurationAdapter)?.Legacy;
+        bool copyMapsToSpawnmapIni = coreConfig?.CopyMissionsToSpawnmapINI
+                                     ?? AppState.Configuration.Legacy.CopyMissionsToSpawnmapINI;
 
         Logger.Log("CampaignSpawnWriter: writing spawn.ini");
 
@@ -44,7 +52,7 @@ public static class CampaignSpawnWriter
         settings.AddKey("CampaignID", mission.CampaignId.ToString(CultureInfo.InvariantCulture));
         settings.AddKey("GameSpeed", UserINISettings.Instance.GameSpeed.ToString());
 
-        switch (ClientConfiguration.Instance.ClientGameType)
+        switch (config.ClientGameType)
         {
             case ClientType.YR or ClientType.Ares:
                 settings.AddKey("Ra2Mode", (!mission.RequiredAddon).ToString(CultureInfo.InvariantCulture));
@@ -56,7 +64,7 @@ public static class CampaignSpawnWriter
 
         settings.AddKey("CustomLoadScreen", LoadingScreenController.GetLoadScreenName(mission.Side.ToString(CultureInfo.InvariantCulture)));
         settings.AddKey("IsSinglePlayer", "Yes");
-        settings.AddKey("SidebarHack", ClientConfiguration.Instance.SidebarHack.ToString(CultureInfo.InvariantCulture));
+        settings.AddKey("SidebarHack", config.SidebarHack.ToString(CultureInfo.InvariantCulture));
         settings.AddKey("Side", mission.Side.ToString(CultureInfo.InvariantCulture));
         settings.AddKey("BuildOffAlly", mission.BuildOffAlly.ToString(CultureInfo.InvariantCulture));
 
@@ -79,7 +87,8 @@ public static class CampaignSpawnWriter
 
     private static void WriteSpawnMap(MissionEntry mission, int difficultyIndex)
     {
-        string scenarioPath = SafePath.CombineFilePath(ProgramConstants.GamePath, mission.Scenario);
+        string gamePath = EnvironmentServices.Resolve<IGameEnvironment>().GamePath;
+        string scenarioPath = SafePath.CombineFilePath(gamePath, mission.Scenario);
         if (!File.Exists(scenarioPath))
         {
             Logger.Log($"CampaignSpawnWriter: scenario file not found: {scenarioPath}");
@@ -87,17 +96,18 @@ public static class CampaignSpawnWriter
         }
 
         var mapIni = new IniFile(scenarioPath);
-        var difficultyIni = new IniFile(SafePath.CombineFilePath(ProgramConstants.GamePath, DifficultyIniPaths[difficultyIndex]));
+        var difficultyIni = new IniFile(SafePath.CombineFilePath(gamePath, DifficultyIniPaths[difficultyIndex]));
         IniFile.ConsolidateIniFiles(mapIni, difficultyIni);
 
-        mapIni.WriteIniFile(SafePath.CombineFilePath(ProgramConstants.GamePath, ProgramConstants.SPAWNMAP_INI));
+        mapIni.WriteIniFile(SafePath.CombineFilePath(gamePath, ProgramConstants.SPAWNMAP_INI));
     }
 
     private static int GetComputerDifficulty(int difficultyIndex) => Math.Abs(difficultyIndex - 2);
 
     private static void ApplyCampaignForcedSpawnOptions(IniFile spawnIni)
     {
-        string gameOptionsPath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), ClientConfiguration.GAME_OPTIONS);
+        string baseResourcesPath = EnvironmentServices.Resolve<IGameEnvironment>().BaseResourcesPath;
+        string gameOptionsPath = SafePath.CombineFilePath(baseResourcesPath, ClientConfiguration.GAME_OPTIONS);
         if (!File.Exists(gameOptionsPath))
             return;
 

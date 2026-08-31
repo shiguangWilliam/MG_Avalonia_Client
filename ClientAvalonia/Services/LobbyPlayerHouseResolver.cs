@@ -1,6 +1,7 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Session;
 using ClientCore;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -14,6 +15,13 @@ public static class LobbyPlayerHouseResolver
         public int GameColorIndex { get; init; }
 
         public bool IsSpectator { get; init; }
+
+        /// <summary>
+        /// DX PlayerHouseInfo.RandomizeStart outcome: N-1 for an explicitly picked
+        /// start (Slot.StartIndex is 1-based), 90 for spectators, -1 for "let the
+        /// game randomize" (unset). Consumed by [SpawnLocations] writers.
+        /// </summary>
+        public int StartingWaypoint { get; init; }
     }
 
     /// <summary>
@@ -51,6 +59,7 @@ public static class LobbyPlayerHouseResolver
                 InternalSideIndex = ToInternalSideIndex(sideIndex, isSpectator),
                 GameColorIndex = colorIndex,
                 IsSpectator = isSpectator,
+                StartingWaypoint = ResolveStartingWaypoint(slot.StartIndex, isSpectator),
             });
         }
 
@@ -58,13 +67,17 @@ public static class LobbyPlayerHouseResolver
     }
 
     /// <summary>
-    /// Legacy overload (delegates to <see cref="Resolve(IReadOnlyList{IPlayerSlot}, int)"/>).
+    /// DX PlayerHouseInfo.RandomizeStart (client-managed branch): an explicit pick
+    /// becomes waypoint = pick - 1; spectators pin to 90 (spawner observer waypoint);
+    /// unset (0) stays -1 so the game's own placement logic runs.
     /// </summary>
-    [Obsolete("Phase 3 P3-1: 改用 Resolve(IReadOnlyList<IPlayerSlot>, int)。Phase 5 调用方已迁移。")]
-    public static IReadOnlyList<ResolvedHouse> Resolve(
-        IReadOnlyList<LobbyPlayerSlot> occupiedSlots,
-        int randomSeed)
-        => Resolve((IReadOnlyList<IPlayerSlot>)occupiedSlots, randomSeed);
+    private static int ResolveStartingWaypoint(int startIndex, bool isSpectator)
+    {
+        if (isSpectator)
+            return 90;
+
+        return startIndex > 0 ? startIndex - 1 : -1;
+    }
 
     private static int ResolveSideIndex(
         int sideId,
@@ -130,11 +143,11 @@ public static class LobbyPlayerHouseResolver
 
     private static int ToInternalSideIndex(int sideIndex, bool isSpectator)
     {
-        if (isSpectator && !string.IsNullOrEmpty(ClientConfiguration.Instance.SpectatorInternalSideIndex)
-            && int.TryParse(ClientConfiguration.Instance.SpectatorInternalSideIndex, out int spectatorIndex))
+        if (isSpectator && !string.IsNullOrEmpty(AppState.Configuration.Legacy.SpectatorInternalSideIndex)
+            && int.TryParse(AppState.Configuration.Legacy.SpectatorInternalSideIndex, out int spectatorIndex))
             return spectatorIndex;
 
-        string internalIndices = ClientConfiguration.Instance.InternalSideIndices;
+        string internalIndices = AppState.Configuration.Legacy.InternalSideIndices;
         if (!string.IsNullOrEmpty(internalIndices))
         {
             int[] mapped = internalIndices.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

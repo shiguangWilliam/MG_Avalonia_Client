@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using ClientAvalonia.Domain;
@@ -21,9 +21,10 @@ public sealed class DefaultAiSlotPolicyTests
     {
         SkirmishSession session = NewSession();
 
-        DefaultAiSlotPolicy.AutoFillToMapCapacity(session, 2, "Local", NewColors(), session.Player.AiNames);
+        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+            session, 2, "Local", NewColors(), LobbyCatalogService.Instance.AiNames);
 
-        session.Player.OccupiedSlotCount.Should().Be(2);
+        session.OccupiedSlotCount().Should().Be(2);
         session.PlayerSlots[0].IsHumanLocal.Should().BeTrue();
         session.PlayerSlots[1].IsAi.Should().BeTrue();
         session.PlayerSlots[2].IsOccupied.Should().BeFalse();
@@ -34,9 +35,10 @@ public sealed class DefaultAiSlotPolicyTests
     {
         SkirmishSession session = NewSession();
 
-        DefaultAiSlotPolicy.AutoFillToMapCapacity(session, 8, "Local", NewColors(), session.Player.AiNames);
+        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+            session, 8, "Local", NewColors(), LobbyCatalogService.Instance.AiNames);
 
-        session.Player.OccupiedSlotCount.Should().Be(8);
+        session.OccupiedSlotCount().Should().Be(8);
         session.PlayerSlots[0].IsHumanLocal.Should().BeTrue();
         Enumerable.Range(1, 7).Select(i => session.PlayerSlots[i].IsAi).Should().AllBeEquivalentTo(true);
     }
@@ -50,9 +52,10 @@ public sealed class DefaultAiSlotPolicyTests
         session.PlayerSlots[1].ColorIndex = 5;
         session.PlayerSlots[1].AiLevel = 2;
 
-        DefaultAiSlotPolicy.AutoFillToMapCapacity(session, 3, "Local", NewColors(), session.Player.AiNames);
+        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+            session, 3, "Local", NewColors(), LobbyCatalogService.Instance.AiNames);
 
-        session.Player.OccupiedSlotCount.Should().Be(3);
+        session.OccupiedSlotCount().Should().Be(3);
         session.PlayerSlots[1].ColorIndex.Should().NotBe(5);
         session.PlayerSlots[1].AiLevel.Should().Be(0);
     }
@@ -62,11 +65,13 @@ public sealed class DefaultAiSlotPolicyTests
     {
         SkirmishSession session = NewSession();
 
-        DefaultAiSlotPolicy.AutoFillToMapCapacity(session, 0, "Local", NewColors(), session.Player.AiNames);
-        session.Player.OccupiedSlotCount.Should().Be(1);
+        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+            session, 0, "Local", NewColors(), LobbyCatalogService.Instance.AiNames);
+        session.OccupiedSlotCount().Should().Be(1);
 
-        DefaultAiSlotPolicy.AutoFillToMapCapacity(session, 99, "Local", NewColors(), session.Player.AiNames);
-        session.Player.OccupiedSlotCount.Should().Be(LobbyPlayerSlot.MaxSlots);
+        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+            session, 99, "Local", NewColors(), LobbyCatalogService.Instance.AiNames);
+        session.OccupiedSlotCount().Should().Be(LobbyPlayerSlot.MaxSlots);
     }
 
     [Fact]
@@ -78,9 +83,8 @@ public sealed class DefaultAiSlotPolicyTests
 
     private static SkirmishSession NewSession()
     {
-        var state = new LobbyPlayerState();
-        state.LoadCatalogs(includeSpectator: false);
-        return new SkirmishSession(state);
+        LobbyCatalogService.Instance.Reload(includeSpectator: false);
+        return new SkirmishSession();
     }
 
     private static IMultiplayerColorCatalog NewColors() => new FixedColorCatalog();

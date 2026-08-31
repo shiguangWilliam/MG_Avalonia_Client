@@ -1,5 +1,6 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Session;
+using ClientAvalonia.Services;
 
 namespace ClientAvalonia.Services;
 
@@ -7,8 +8,7 @@ namespace ClientAvalonia.Services;
 public static class SkirmishLaunchValidator
 {
     /// <summary>
-    /// Phase 2 P2-4：Session-aware 重载——吃 <see cref="IReadOnlyList{IPlayerSlot}"/>，不再依赖
-    /// <see cref="LobbyPlayerState"/>。供未来 <see cref="IGameSession.PlayerSlots"/> 直接传入。
+    /// Session-aware：吃 <see cref="IReadOnlyList{IPlayerSlot}"/> + sideCount。
     /// </summary>
     public static string? Validate(
         MapEntry map,
@@ -16,8 +16,11 @@ public static class SkirmishLaunchValidator
         IReadOnlyList<IPlayerSlot> slots,
         int sideCount)
     {
-        int randomSideIndex = Math.Max(0, sideCount - 1);
-        int totalPlayers = slots.Count(s => s.IsOccupied && s.SideIndex < randomSideIndex);
+        // DX: Players.Count(p => p.SideId < ddPlayerSides[0].Items.Count - 1) — spectators
+        // (the last side entry) are NOT players. Mirror that explicitly instead of relying
+        // on the caller passing a count whose last item happens to be Spectator.
+        int spectatorSideIndex = LobbySideCatalog.SpectatorSideIndex;
+        int totalPlayers = slots.Count(s => s.IsOccupied && s.SideIndex != spectatorSideIndex);
 
         if (gameMode.MultiplayerOnly)
         {
@@ -57,11 +60,5 @@ public static class SkirmishLaunchValidator
         }
 
         return null;
-    }
-
-    /// <summary>Legacy overload (delegates to <see cref="Validate(MapEntry, GameModeEntry, IReadOnlyList{IPlayerSlot}, int)"/>).</summary>
-    public static string? Validate(MapEntry map, GameModeEntry gameMode, LobbyPlayerState players)
-    {
-        return Validate(map, gameMode, players.Slots, players.SideNames.Count);
     }
 }

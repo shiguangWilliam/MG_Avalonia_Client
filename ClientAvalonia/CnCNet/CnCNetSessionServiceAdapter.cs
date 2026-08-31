@@ -180,9 +180,6 @@ public sealed class CnCNetSessionServiceAdapter : ICnCNetSession
     /// <inheritdoc />
     public bool TryHostChangeTunnel(CnCNetTunnel tunnel) => _service.TryHostChangeTunnel(tunnel);
 
-    [Obsolete("Phase 3 P3-4: 改用 ICnCNetGameSession.BroadcastPlayerOptionsFromSlots。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public void SyncGameRoomFromLobby(LobbyPlayerState state) => _service.SyncGameRoomFromLobby(state);
-
     /// <inheritdoc />
     public void EnsureGameBroadcastChannelsJoined() => _service.EnsureGameBroadcastChannelsJoined();
 

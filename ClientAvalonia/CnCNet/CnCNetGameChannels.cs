@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -19,7 +20,7 @@ public sealed class CnCNetGameChannels
 
     public static CnCNetGameChannels? LoadForLocalGame()
     {
-        string localGame = ClientConfiguration.Instance.LocalGame;
+        string localGame = AppState.Configuration.Legacy.LocalGame;
         if (string.IsNullOrWhiteSpace(localGame))
             return null;
 
@@ -60,14 +61,14 @@ public sealed class CnCNetGameChannels
         return null;
     }
 
-    /// <summary>XNA loads from <see cref="ProgramConstants.GetBaseResourcePath()"/> (Resources/), not the theme subfolder.</summary>
+    /// <summary>XNA loads from <see cref="AppState.Environment.BaseResourcesPath"/> (Resources/), not the theme subfolder.</summary>
     private static string? ResolveConfigPath()
     {
-        string basePath = SafePath.CombineFilePath(ProgramConstants.GetBaseResourcePath(), "GameCollectionConfig.ini");
+        string basePath = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, "GameCollectionConfig.ini");
         if (File.Exists(basePath))
             return basePath;
 
-        string themePath = SafePath.CombineFilePath(ProgramConstants.GetResourcePath(), "GameCollectionConfig.ini");
+        string themePath = SafePath.CombineFilePath(AppState.Environment.ResourcesPath, "GameCollectionConfig.ini");
         if (File.Exists(themePath))
             return themePath;
 

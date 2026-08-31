@@ -11,7 +11,11 @@ namespace ClientAvalonia.Domain;
 /// </summary>
 public sealed class LobbyPlayerSlot : IPlayerSlot, ICnCNetPlayerSlot
 {
-    public const int MaxSlots = 8;
+    /// <summary>
+    /// 大厅玩家槽上限。DX 基线为 8；MG 分支提升至 9（9 人图 / 人类+8 AI）。
+    /// 出生点映射（StartIndexToCombo）与加载 clamp 依赖此值同步放宽。
+    /// </summary>
+    public const int MaxSlots = 9;
 
     public string Name { get; set; } = string.Empty;
 

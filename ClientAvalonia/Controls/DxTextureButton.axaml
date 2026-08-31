@@ -39,10 +39,10 @@
                  VerticalAlignment="Center"
                  TextAlignment="Center"
                  IsVisible="{Binding ShowButtonText}" />
-      <Border Background="#221C16"
-              BorderBrush="#5A4632"
+      <Border Background="{DynamicResource DxFallbackButtonBackground}"
+              BorderBrush="{DynamicResource DxFallbackButtonBorder}"
               BorderThickness="1"
-              CornerRadius="6"
+              CornerRadius="{DynamicResource DxFallbackButtonRadius}"
               IsVisible="{Binding HasTextureImage, Converter={x:Static BoolConverters.Not}}">
         <Border.Styles>
           <Style Selector="Border">

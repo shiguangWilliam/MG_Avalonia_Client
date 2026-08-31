@@ -129,6 +129,15 @@ function Copy-AvaloniaClientResources {
     Copy-Item -LiteralPath $ClientDefinitions -Destination $ResourcesDest -Force
   }
 
+  # Client I18N packs (Resources/Translations/{locale}/Translation.ini).
+  $TranslationsSrc = Join-Path $ResourcesSrc 'Translations'
+  if (Test-Path -LiteralPath $TranslationsSrc) {
+    $TranslationsDest = Join-Path $DestinationRoot 'Resources\Translations'
+    New-Item -ItemType Directory -Force -Path $TranslationsDest | Out-Null
+    Copy-Item -Path (Join-Path $TranslationsSrc '*') -Destination $TranslationsDest -Recurse -Force
+    Write-Host "Staged Translations → $TranslationsDest"
+  }
+
   $SunIni = Join-Path $ResourcesSrc 'SUN.ini'
   if (Test-Path -LiteralPath $SunIni) {
     Copy-Item -LiteralPath $SunIni -Destination $DestinationRoot -Force
@@ -239,6 +248,18 @@ function Copy-AvaloniaRuntimeOnly {
       $wafDestDir = Join-Path $DestinationRoot 'Client'
       New-Item -ItemType Directory -Force -Path $wafDestDir | Out-Null
       Copy-Item -LiteralPath $wafSrc -Destination (Join-Path $wafDestDir 'WafRules.default.json') -Force
+    }
+
+    # Merge packaged Translations into the game root (do not wipe other Resources).
+    $translationsSrc = Join-Path $SourceRoot 'Resources\Translations'
+    if (!(Test-Path -LiteralPath $translationsSrc)) {
+      $translationsSrc = Join-Path $PSScriptRoot '..\DXMainClient\Resources\Translations'
+    }
+    if (Test-Path -LiteralPath $translationsSrc) {
+      $translationsDest = Join-Path $DestinationRoot 'Resources\Translations'
+      New-Item -ItemType Directory -Force -Path $translationsDest | Out-Null
+      Copy-Item -Path (Join-Path $translationsSrc '*') -Destination $translationsDest -Recurse -Force
+      Write-Host "Synced Translations → $translationsDest"
     }
     return
   }

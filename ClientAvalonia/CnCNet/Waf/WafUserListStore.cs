@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet.Waf;
 
@@ -129,7 +130,7 @@ public static class WafUserListStore
 
     private static string ResolvePath(string fileName)
     {
-        string root = ProgramConstants.GamePath;
+        string root = AppState.Environment.GamePath;
         if (string.IsNullOrWhiteSpace(root))
             root = AppContext.BaseDirectory;
         return Path.Combine(root, "Client", fileName);

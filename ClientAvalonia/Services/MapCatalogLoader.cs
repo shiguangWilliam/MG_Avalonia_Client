@@ -4,6 +4,7 @@ using ClientCore;
 using ClientCore.Extensions;
 using Rampastring.Tools;
 using System.Globalization;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -19,7 +20,7 @@ public static class MapCatalogLoader
         if (!ClientCoreBootstrap.IsInitialized)
             return [];
 
-        string mpMapsPath = SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath);
+        string mpMapsPath = SafePath.CombineFilePath(AppState.Environment.GamePath, AppState.Configuration.Legacy.MPMapsIniPath);
         if (!File.Exists(mpMapsPath))
         {
             Logger.Log($"MapCatalogLoader: MPMaps.ini not found at {mpMapsPath}");
@@ -71,7 +72,7 @@ public static class MapCatalogLoader
 
     private static List<MapEntry> LoadOfficialMaps()
     {
-        string mpMapsPath = SafePath.CombineFilePath(ProgramConstants.GamePath, ClientConfiguration.Instance.MPMapsIniPath);
+        string mpMapsPath = SafePath.CombineFilePath(AppState.Environment.GamePath, AppState.Configuration.Legacy.MPMapsIniPath);
         if (!File.Exists(mpMapsPath))
         {
             Logger.Log($"MapCatalogLoader: MPMaps.ini not found at {mpMapsPath}");
@@ -86,7 +87,7 @@ public static class MapCatalogLoader
             return [];
         }
 
-        string extension = ClientConfiguration.Instance.MapFileExtension;
+        string extension = AppState.Configuration.Legacy.MapFileExtension;
         var maps = new List<MapEntry>();
 
         foreach (string key in keys)
@@ -100,7 +101,7 @@ public static class MapCatalogLoader
 
             mapPath = mapPath.Replace('\\', '/');
             FileInfo mapFile = SafePath.GetFile(
-                ProgramConstants.GamePath,
+                AppState.Environment.GamePath,
                 FormattableString.Invariant($"{mapPath}.{extension}"));
 
             if (!mapFile.Exists)
@@ -223,12 +224,12 @@ public static class MapCatalogLoader
 
     private static List<MapEntry> LoadCustomMaps()
     {
-        DirectoryInfo customDir = SafePath.GetDirectory(ProgramConstants.GamePath, CustomMapsDirectory);
+        DirectoryInfo customDir = SafePath.GetDirectory(AppState.Environment.GamePath, CustomMapsDirectory);
         if (!customDir.Exists)
             return [];
 
-        string extension = ClientConfiguration.Instance.MapFileExtension;
-        string[] allowedModes = ClientConfiguration.Instance.AllowedCustomGameModes
+        string extension = AppState.Configuration.Legacy.MapFileExtension;
+        string[] allowedModes = AppState.Configuration.Legacy.AllowedCustomGameModes
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         var maps = new List<MapEntry>();
@@ -246,7 +247,7 @@ public static class MapCatalogLoader
     {
         try
         {
-            string baseFilePath = mapFile.FullName[ProgramConstants.GamePath.Length..]
+            string baseFilePath = mapFile.FullName[AppState.Environment.GamePath.Length..]
                 .Replace('\\', '/')
                 .TrimStart('/');
             baseFilePath = baseFilePath[..^Path.GetExtension(baseFilePath).Length];

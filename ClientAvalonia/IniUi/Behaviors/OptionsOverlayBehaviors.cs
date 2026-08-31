@@ -3,6 +3,7 @@ using ClientAvalonia.IniUi.Binding;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientUpdater;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.IniUi.Behaviors;
 
@@ -17,7 +18,6 @@ public static class OptionsOverlayBehaviors
                 return;
 
             host.CommitSettings();
-            host.ShowStatus("设置已保存");
         });
 
         RegisterClose(registry, host, "btnOK", commit: true);

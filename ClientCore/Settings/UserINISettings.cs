@@ -22,6 +22,7 @@ namespace ClientCore
         public const string COMPATIBILITY = "Compatibility";
         public const string GAME_FILTERS = "GameFilters";
         public const string CNC_NET_WAF = "CnCNetWaf";
+        public const string VISUAL = "Visual";
         private const string FAVORITE_MAPS = "FavoriteMaps";
 
         private const bool DEFAULT_SHOW_FRIENDS_ONLY_GAMES = false;
@@ -102,6 +103,9 @@ namespace ClientCore
 
             IngameScreenWidth = new IntSetting(iniFile, VIDEO, "ScreenWidth", 1024);
             IngameScreenHeight = new IntSetting(iniFile, VIDEO, "ScreenHeight", 768);
+            // Avalonia Options "Client resolution" — must be constructed or DisplayOptionsApplier.Apply NRE-aborts.
+            ClientResolutionX = new IntSetting(iniFile, VIDEO, "ClientResolutionX", 0);
+            ClientResolutionY = new IntSetting(iniFile, VIDEO, "ClientResolutionY", 0);
             ClientTheme = new StringSetting(iniFile, MULTIPLAYER, "Theme", ClientConfiguration.Instance.GetThemeInfoFromIndex(0).Name);
             Translation = new StringSetting(iniFile, OPTIONS, "Translation", I18N.Translation.GetDefaultTranslationLocaleCode());
             DetailLevel = new IntSetting(iniFile, OPTIONS, "DetailLevel", 2);
@@ -133,6 +137,7 @@ namespace ClientCore
             ChatColor = new IntSetting(iniFile, MULTIPLAYER, "ChatColor", -1);
             LANChatColor = new IntSetting(iniFile, MULTIPLAYER, "LANChatColor", -1);
             PingUnofficialCnCNetTunnels = new BoolSetting(iniFile, MULTIPLAYER, "PingCustomTunnels", true);
+            GameBroadcastIntervalSeconds = new IntSetting(iniFile, MULTIPLAYER, "GameBroadcastIntervalSeconds", 30);
             WritePathToRegistry = new BoolSetting(iniFile, OPTIONS, "WriteInstallationPathToRegistry", ClientConfiguration.Instance.UserDefault_WriteInstallationPathToRegistry);
             PlaySoundOnGameHosted = new BoolSetting(iniFile, MULTIPLAYER, "PlaySoundOnGameHosted", true);
             SkipConnectDialog = new BoolSetting(iniFile, MULTIPLAYER, "SkipConnectDialog", false);
@@ -181,6 +186,16 @@ namespace ClientCore
             WafAutoHideHighRisk = new BoolSetting(iniFile, CNC_NET_WAF, "AutoHideHighRisk", false);
             WafAllowHeuristicDrop = new BoolSetting(iniFile, CNC_NET_WAF, "AllowHeuristicDrop", false);
 
+            VisualStyle = new StringSetting(iniFile, VISUAL, "VisualStyle", "Default");
+            AccentColor = new StringSetting(iniFile, VISUAL, "AccentColor", string.Empty);
+            UiAnimationsEnabled = new BoolSetting(iniFile, VISUAL, "UiAnimationsEnabled", true);
+            GlobeAutoRotateEnabled = new BoolSetting(iniFile, VISUAL, "GlobeAutoRotateEnabled", true);
+            GlobeStyle = new StringSetting(iniFile, VISUAL, "GlobeStyle", "Vector");
+            GlobeFocusEnabled = new BoolSetting(iniFile, VISUAL, "GlobeFocusEnabled", true);
+            GlobeBorderHighlightEnabled = new BoolSetting(iniFile, VISUAL, "GlobeBorderHighlightEnabled", true);
+            GlobeCityHoloEnabled = new BoolSetting(iniFile, VISUAL, "GlobeCityHoloEnabled", true);
+            SolarSystemEnabled = new BoolSetting(iniFile, VISUAL, "SolarSystemEnabled", true);
+
             LoadFavoriteMaps(iniFile);
         }
 
@@ -196,6 +211,20 @@ namespace ClientCore
         public IntSetting IngameScreenHeight { get; private set; }
         public StringSetting ClientTheme { get; private set; }
         public string ThemeFolderPath => ClientConfiguration.Instance.GetThemePath(ClientTheme);
+
+        /***********/
+        /* VISUAL */
+        /***********/
+
+        public StringSetting VisualStyle { get; private set; }
+        public StringSetting AccentColor { get; private set; }
+        public BoolSetting UiAnimationsEnabled { get; private set; }
+        public BoolSetting GlobeAutoRotateEnabled { get; private set; }
+        public StringSetting GlobeStyle { get; private set; }
+        public BoolSetting GlobeFocusEnabled { get; private set; }
+        public BoolSetting GlobeBorderHighlightEnabled { get; private set; }
+        public BoolSetting GlobeCityHoloEnabled { get; private set; }
+        public BoolSetting SolarSystemEnabled { get; private set; }
         public StringSetting Translation { get; private set; }
         public string TranslationFolderPath => SafePath.CombineDirectoryPath(
             ClientConfiguration.Instance.TranslationsFolderPath, Translation);
@@ -246,6 +275,12 @@ namespace ClientCore
         public IntSetting ChatColor { get; private set; }
         public IntSetting LANChatColor { get; private set; }
         public BoolSetting PingUnofficialCnCNetTunnels { get; private set; }
+
+        /// <summary>
+        /// Host GAME CTCP refresh interval in seconds (Avalonia). Discrete values 5..30 step 5; default 30 (DX parity).
+        /// </summary>
+        public IntSetting GameBroadcastIntervalSeconds { get; private set; }
+
         public BoolSetting WritePathToRegistry { get; private set; }
         public BoolSetting PlaySoundOnGameHosted { get; private set; }
 

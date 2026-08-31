@@ -81,6 +81,68 @@ public sealed class SkirmishSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void MapSha1_And_GameModeFilter_RoundTrip()
+    {
+        var svc = NewSvc();
+        var dto = new SkirmishSettingsDto
+        {
+            Human = new SkirmishPlayerDto { Name = "P", Index = 0 },
+            MapSha1 = "ABC123DEF456",
+            GameModeMapFilter = "常规作战",
+        };
+        svc.Save(dto);
+
+        var loaded = svc.TryLoad();
+        loaded.Should().NotBeNull();
+        loaded!.MapSha1.Should().Be("ABC123DEF456");
+        loaded.GameModeMapFilter.Should().Be("常规作战");
+    }
+
+    [Fact]
+    public void Missing_Map_Settings_Default_To_Empty()
+    {
+        var svc = NewSvc();
+        var dto = new SkirmishSettingsDto
+        {
+            Human = new SkirmishPlayerDto { Name = "P", Index = 0 },
+        };
+        svc.Save(dto);
+
+        var loaded = svc.TryLoad();
+        loaded.Should().NotBeNull();
+        loaded!.MapSha1.Should().BeEmpty();
+        loaded.GameModeMapFilter.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GameOptions_RoundTrip_And_Stale_Keys_Dropped()
+    {
+        var svc = NewSvc();
+        var first = new SkirmishSettingsDto
+        {
+            Human = new SkirmishPlayerDto { Name = "P", Index = 0 },
+        };
+        first.GameOptions["chkBrutalAI"] = "False";
+        first.GameOptions["cmbCredits"] = "3";
+        first.GameOptions["chkShortGame"] = "True";
+        svc.Save(first);
+
+        var second = new SkirmishSettingsDto
+        {
+            Human = new SkirmishPlayerDto { Name = "P", Index = 0 },
+        };
+        second.GameOptions["chkBrutalAI"] = "True";
+        svc.Save(second);
+
+        var loaded = svc.TryLoad();
+        loaded.Should().NotBeNull();
+        loaded!.GameOptions.Should().ContainKey("chkBrutalAI").WhoseValue.Should().Be("True");
+        // Keys absent from the new save must not linger from the previous session.
+        loaded.GameOptions.Should().NotContainKey("chkShortGame");
+        loaded.GameOptions.Should().NotContainKey("cmbCredits");
+    }
+
+    [Fact]
     public void TryParseLine_Rejects_Empty_Name()
     {
         SkirmishSettingsService.TryParseLine(",1,2,3,4,5,true,0", out var slot).Should().BeFalse();

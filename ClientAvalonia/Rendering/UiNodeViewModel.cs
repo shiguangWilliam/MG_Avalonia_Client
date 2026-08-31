@@ -636,6 +636,16 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
 
     private void LoadImages()
     {
+        // Tactical skin replaces the original PNG chrome with procedurally
+        // generated textures (cold, hairline, token-driven).
+        if (Themes.DxThemeManager.IsTactical)
+        {
+            ApplyTacticalTextures();
+            ApplyDrawModePresentation();
+            OnPropertyChanged(nameof(HasTextureImage));
+            return;
+        }
+
         IdleImage = _resources.LoadBitmap(GetString("IdleTexture"));
         HoverImage = _resources.LoadBitmap(GetString("HoverTexture"));
         BackgroundImage = _resources.LoadBitmap(GetString("Background") ?? GetString("BackgroundTexture"));
@@ -666,6 +676,51 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(UseTiledBackground));
         OnPropertyChanged(nameof(TiledBackgroundBrush));
         OnPropertyChanged(nameof(PreviewImageStretch));
+    }
+
+    /// <summary>
+    /// Tactical mode: buttons get generated hairline textures; window roots get the
+    /// cold chrome texture; checkboxes get generated boxes. Original assets are
+    /// deliberately replaced everywhere for a unified style.
+    /// </summary>
+    private void ApplyTacticalTextures()
+    {
+        bool isButton = IsButtonLike();
+        bool isMainMenuRoot = string.Equals(Node.WindowName, "MainMenu", StringComparison.OrdinalIgnoreCase)
+            && Node.Parent is null;
+        bool isWindowRoot = !isMainMenuRoot
+            && (Node.Props.ContainsKey("DrawMode") || Node.Props.ContainsKey("BackgroundTexture"));
+
+        if (isButton)
+        {
+            int width = (int)Math.Round(Math.Clamp(Width, 60, 600));
+            (Bitmap idle, Bitmap hover) = Themes.TacticalAssetFactory.CreateButton(width);
+            SetButtonTextures(idle, hover);
+            Node.Props["Width"] = (double)idle.PixelSize.Width;
+            Node.Props["Height"] = (double)idle.PixelSize.Height;
+        }
+        else if (isWindowRoot)
+        {
+            BackgroundImage = Themes.TacticalAssetFactory.CreateWindowChrome(
+                (int)Math.Round(Width),
+                (int)Math.Round(Height));
+            BackgroundImageStretch = Stretch.Fill;
+        }
+
+        if (ControlType.Contains("CheckBox", StringComparison.OrdinalIgnoreCase))
+        {
+            CheckBoxClearImage = Themes.TacticalAssetFactory.CreateCheckbox(false);
+            CheckBoxCheckedImage = Themes.TacticalAssetFactory.CreateCheckbox(true);
+        }
+
+        OnPropertyChanged(nameof(IdleImage));
+        OnPropertyChanged(nameof(HoverImage));
+        OnPropertyChanged(nameof(BackgroundImage));
+        OnPropertyChanged(nameof(CheckBoxClearImage));
+        OnPropertyChanged(nameof(CheckBoxCheckedImage));
+        OnPropertyChanged(nameof(BackgroundImageStretch));
+        OnPropertyChanged(nameof(Width));
+        OnPropertyChanged(nameof(Height));
     }
 
     private void ApplyDrawModePresentation()

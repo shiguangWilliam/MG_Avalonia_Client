@@ -6,6 +6,7 @@ using ClientAvalonia.CnCNet;
 using ClientAvalonia.GlobalState.Environment;
 using ClientAvalonia.Services;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Core;
 
@@ -48,6 +49,9 @@ public static class ShutdownService
             return;
         }
 
+        // TODO(phase-A): shutdown-path escape hatch. This branch only fires when
+        // EnvironmentServices has no ICnCNetSession registered (early crash before
+        // PreStartup runs). Production code should not rely on this fallback.
         CnCNetSessionService.Instance.Dispose();
     };
 

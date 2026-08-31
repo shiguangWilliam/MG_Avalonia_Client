@@ -1,30 +1,18 @@
 {
   "version": 2,
-  "description": "CnCNet ingress WAF rule pack. Operators may override with Client/WafRules.json (same schema). Runtime loads: user override → Client/WafRules.default.json → embedded default.",
+  "description": "CnCNet ingress WAF rule pack. Operators may override with Client/WafRules.json (same schema). Runtime loads: user override → Client/WafRules.default.json → embedded default. Hang-farm GAME/protocol fingerprints are temporarily off (bots use stock CnCNet formats; R8/field-count etc. false-positived normal rooms). Re-enable by adding protocol rules + hostBotTunnels in an override pack.",
   "policyAlignment": [
     "Discord Community Guidelines (harassment, spam, scams, sexual content, violent threats — subset, keyword/regex only)",
     "Meta Community Standards (hate speech / bullying / scams / adult solicitation — subset)",
-    "Telegram / WeChat-style chat: promo+contact spam, fraud, insults, sexual solicitation",
-    "CnCNet hosting-bot IRC fingerprints (local protocol heuristics)"
+    "Telegram / WeChat-style chat: promo+contact spam, fraud, insults, sexual solicitation"
   ],
-  "hostBotTunnels": [
-    "175.178.174.40:50000"
-  ],
+  "hostBotTunnels": [],
   "sensitivity": {
     "0": { "warn": 30, "hide": 100, "drop": 9999 },
     "1": { "warn": 25, "hide": 80, "drop": 9999 },
     "2": { "warn": 15, "hide": 55, "drop": 180 }
   },
-  "protocol": [
-    { "id": "proto.game.r8", "score": 40, "reason": "GAME 使用已弃用的 R8 协议（常见挂房机）" },
-    { "id": "proto.game.field_count", "score": 50, "reason": "GAME 字段数异常" },
-    { "id": "proto.tunnel.blacklist", "score": 80, "reason": "命中已知挂房机隧道样本" },
-    { "id": "proto.tunnel.shared_hosts", "score": 30, "reason": "同一隧道短时出现多个「房主」", "threshold": 3 },
-    { "id": "proto.game.burst", "score": 15, "reason": "房间广播刷新异常频繁", "minCount": 4, "windowSeconds": 20, "perBurst": 15, "cap": 60 },
-    { "id": "proto.game.fake_players", "score": 35, "reason": "玩家名单呈模板化假名" },
-    { "id": "proto.game.template_fingerprint", "score": 35, "reason": "相同房间模板被不同昵称反复挂出", "threshold": 2 },
-    { "id": "proto.invite.flood", "score": 40, "reason": "短时大量游戏邀请（INVITE）", "minCount": 3, "windowSeconds": 30, "perExtra": 10, "cap": 80 }
-  ],
+  "protocol": [],
   "pm": {
     "burst": {
       "id": "content.pm.burst",

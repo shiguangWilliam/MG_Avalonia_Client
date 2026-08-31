@@ -23,6 +23,7 @@ internal static class OptionsPanelStackLayout
         "lblClientResolution", "ddClientResolution",
         "chkBorderlessClient",
         "lblClientTheme", "ddClientTheme",
+        "lblVisualStyle", "ddVisualStyle",
         "chkMEDDraw",
         "chkStretchMovies",
         "lblReShade", "ddReShade",
@@ -38,6 +39,8 @@ internal static class OptionsPanelStackLayout
         "lblAllowPrivateMessagesFrom",
         "ddAllowPrivateMessagesFrom",
         "lblAllowPrivateMessagesFromHint",
+        "lblGameBroadcastInterval",
+        "ddGameBroadcastInterval",
     ];
 
     private static readonly string[] CnCNetRightColumn =

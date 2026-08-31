@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using ClientCore;
 using ClientCore.Extensions;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
@@ -83,7 +84,7 @@ public static class NameValidator
             }
         }
 
-        if (name.Length > ClientConfiguration.Instance.MaxNameLength)
+        if (name.Length > AppState.Configuration.Legacy.MaxNameLength)
         {
             localizedErrorMessage = GetLocalizedPlayerNameErrorMessage(NameValidationError.TooLong);
             return NameValidationError.TooLong;
@@ -97,7 +98,7 @@ public static class NameValidator
     {
         char[] disallowedCharacters = [',', ';'];
         string validName = new(name.Trim().Where(c => !disallowedCharacters.Contains(c)).ToArray());
-        int maxLength = ClientConfiguration.Instance.MaxNameLength;
+        int maxLength = AppState.Configuration.Legacy.MaxNameLength;
 
         if (maxLength > 0 && validName.Length > maxLength)
             return validName[..maxLength];

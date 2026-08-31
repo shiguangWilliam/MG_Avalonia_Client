@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using ClientCore;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet.Waf;
 
@@ -227,8 +228,8 @@ public static class WafRulePackLoader
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(ProgramConstants.GamePath))
-                return ProgramConstants.GamePath;
+            if (!string.IsNullOrWhiteSpace(AppState.Environment.GamePath))
+                return AppState.Environment.GamePath;
         }
         catch
         {
@@ -271,18 +272,14 @@ public static class WafRulePackLoader
         {
             Version = 2,
             Description = "minimal fallback",
-            HostBotTunnels = ["175.178.174.40:50000"],
+            HostBotTunnels = [],
             Sensitivity =
             {
                 ["0"] = new WafSensitivityThresholdDto { Warn = 30, Hide = 100, Drop = 9999 },
                 ["1"] = new WafSensitivityThresholdDto { Warn = 25, Hide = 80, Drop = 9999 },
                 ["2"] = new WafSensitivityThresholdDto { Warn = 15, Hide = 55, Drop = 180 },
             },
-            Protocol =
-            [
-                new() { Id = "proto.tunnel.blacklist", Score = 80, Reason = "命中已知挂房机隧道样本" },
-                new() { Id = "proto.game.r8", Score = 40, Reason = "GAME R8" },
-            ],
+            Protocol = [],
             ContentClasses =
             [
                 new()

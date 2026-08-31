@@ -6,6 +6,7 @@ using Avalonia.Markup.Xaml;
 using ClientAvalonia.Core;
 using ClientAvalonia.Platform;
 using ClientAvalonia.Services;
+using ClientAvalonia.Themes;
 using ClientAvalonia.Views;
 
 namespace ClientAvalonia;
@@ -20,7 +21,14 @@ public class App : Application
         Resources.MergedDictionaries.Add(
             (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxCampaignStyles.axaml")));
         Resources.MergedDictionaries.Add(
+            (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxCampaignTacticalStyles.axaml")));
+        Resources.MergedDictionaries.Add(
+            (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxMainMenuTacticalStyles.axaml")));
+        Resources.MergedDictionaries.Add(
             (ResourceDictionary)AvaloniaXamlLoader.Load(new Uri("avares://ClientAvalonia/Themes/DxOfficialTheme.axaml")));
+
+        // Visual style layer (Classic keeps DxOfficialTheme; Tactical swaps the last dictionary).
+        DxThemeManager.InitializeFromSettings();
     }
 
     public override void OnFrameworkInitializationCompleted()

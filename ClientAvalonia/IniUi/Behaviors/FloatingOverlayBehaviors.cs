@@ -4,15 +4,10 @@ internal static class FloatingOverlayBehaviors
 {
     public static void RegisterForOverlay(BehaviorRegistry registry, IUiNavigationHost host, string windowName)
     {
-        switch (windowName)
-        {
-            case "OptionsWindow":
-                OptionsWindowBehaviors.Register(registry, host);
-                break;
-            case "CampaignSelector":
-                CampaignOverlayBehaviors.Register(registry, host);
-                break;
-        }
+        if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+            OptionsWindowBehaviors.Register(registry, host);
+        else if (Services.FloatingOverlayLayout.IsCampaignWindow(windowName))
+            CampaignOverlayBehaviors.Register(registry, host);
 
         CommonWindowBehaviors.Register(registry, host);
 

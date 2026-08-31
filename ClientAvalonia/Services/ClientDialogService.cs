@@ -393,6 +393,96 @@ public static class ClientDialogService
         return $"[{mode}] {row.Id} — {content}";
     }
 
+    /// <summary>DX <c>GameLoadingWindow</c>: pick a <c>*.SAV</c> to load / delete.</summary>
+    public static async Task<SinglePlayerSavedGame?> ShowLoadGamePickerAsync(
+        Window? owner,
+        IReadOnlyList<SinglePlayerSavedGame> initialSaves)
+    {
+        var saves = initialSaves.ToList();
+        var window = new Window
+        {
+            Title = "Load Game",
+            Width = 560,
+            Height = 420,
+            WindowStartupLocation = owner != null ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
+            CanResize = false,
+        };
+
+        var list = new ListBox
+        {
+            ItemsSource = saves.Select(s => $"{s.DisplayName}    {s.LastModified}").ToList(),
+            MinHeight = 280,
+        };
+
+        SinglePlayerSavedGame? selected = null;
+        bool load = false;
+
+        var loadBtn = new Button { Content = "Load", MinWidth = 90, IsDefault = true, IsEnabled = false };
+        var deleteBtn = new Button { Content = "Delete", MinWidth = 90, IsEnabled = false };
+        var cancelBtn = new Button { Content = "Cancel", MinWidth = 90, IsCancel = true };
+
+        list.SelectionChanged += (_, _) =>
+        {
+            bool ok = list.SelectedIndex >= 0 && list.SelectedIndex < saves.Count;
+            loadBtn.IsEnabled = ok;
+            deleteBtn.IsEnabled = ok;
+        };
+
+        loadBtn.Click += (_, _) =>
+        {
+            if (list.SelectedIndex < 0 || list.SelectedIndex >= saves.Count)
+                return;
+            selected = saves[list.SelectedIndex];
+            load = true;
+            window.Close();
+        };
+
+        deleteBtn.Click += (_, _) =>
+        {
+            if (list.SelectedIndex < 0 || list.SelectedIndex >= saves.Count)
+                return;
+            SinglePlayerSavedGame sg = saves[list.SelectedIndex];
+            if (SinglePlayerSavedGameCatalog.TryDelete(sg.FileName))
+            {
+                saves = SinglePlayerSavedGameCatalog.ListSaves().ToList();
+                list.ItemsSource = saves.Select(s => $"{s.DisplayName}    {s.LastModified}").ToList();
+                list.SelectedIndex = -1;
+            }
+        };
+
+        cancelBtn.Click += (_, _) => window.Close();
+
+        window.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = "Select a saved game:" },
+                list,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Spacing = 12,
+                    Children = { loadBtn, deleteBtn, cancelBtn },
+                },
+            },
+        };
+
+        if (owner != null)
+            await window.ShowDialog(owner);
+        else
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            window.Closed += (_, _) => tcs.TrySetResult(true);
+            window.Show();
+            await tcs.Task;
+        }
+
+        return load ? selected : null;
+    }
+
     private static Window CreateDialog(Window? owner, string title, string message)
     {
         var window = new Window

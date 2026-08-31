@@ -8,20 +8,9 @@ namespace ClientAvalonia.Services;
 /// <summary>Maps CnCNet PO order to lobby rows (XNA Players + AIPlayers → consecutive UI rows).</summary>
 public static class MultiplayerSlotLayout
 {
-    /// <summary>Legacy 入口（Phase 3 P3-4：标记为已过时）。新代码用 <see cref="ApplyToSlots"/> + <see cref="IPlayerSlotSink"/>。</summary>
-    [Obsolete("Phase 3 P3-4: 改用 ApplyToSlots + session.SlotSink。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public static void ApplyToState(
-        LobbyPlayerState state,
-        IReadOnlyList<CnCNetGameRoomPlayer> entries,
-        string localNick)
-    {
-        state.ClearSlots();
-        ApplyToSlots(state.Slots, entries, localNick);
-    }
-
     /// <summary>
-    /// Session-aware 重载（Phase 2 缺口 2.5）：把 PO DTO 写入任意 <see cref="IPlayerSlot"/> 数组。
-    /// 不调用 ClearSlots——调用方负责清空（在 Session 路径下，清空由 SlotSink.ClearAll 完成）。
+    /// 把 PO DTO 写入任意 <see cref="IPlayerSlot"/> 数组。
+    /// 不调用 ClearSlots——调用方负责清空（Session 路径下由 SlotSink.ClearAll 完成）。
     /// </summary>
     public static void ApplyToSlots(
         IReadOnlyList<IPlayerSlot> slots,
@@ -45,28 +34,9 @@ public static class MultiplayerSlotLayout
         }
     }
 
-    [Obsolete("Phase 3 P3-4: 改用 IReadOnlyList<IPlayerSlot> 重载。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public static List<LobbyPlayerSlot> ExtractAiRows(LobbyPlayerState state)
-    {
-        var ais = new List<LobbyPlayerSlot>();
-        int start = state.HumanRowCount;
-        for (int i = start; i < start + state.AiRowCount; i++)
-            ais.Add(state.Slots[i].Clone());
-
-        return ais;
-    }
-
-    /// <summary>Legacy 入口（Phase 3 P3-4：标记为已过时）。新代码用 <see cref="BuildPoList"/>。</summary>
-    [Obsolete("Phase 3 P3-4: 改用 BuildPoList(IReadOnlyList<IPlayerSlot>, string, IReadOnlyList<string>)。Phase 4 完成 Session-aware 路径；Phase 5 删除。")]
-    public static List<CnCNetGameRoomPlayer> BuildPoListFromState(LobbyPlayerState state, string hostName)
-        => BuildPoList(state.Slots, hostName, state.AiNames);
-
     /// <summary>
-    /// Session-aware 重载（Phase 2 缺口 2.5）：从任意 <see cref="IPlayerSlot"/> 数组重建 PO DTO。
+    /// 从任意 <see cref="IPlayerSlot"/> 数组重建 PO DTO。
     /// </summary>
-    /// <param name="slots">槽位数组（按顺序：先人类，再 AI；空位跳过）。</param>
-    /// <param name="hostName">房主名（用于 IsHost 标记）。</param>
-    /// <param name="aiNames">AI 名字目录（按 AiLevel 索引）。</param>
     public static List<CnCNetGameRoomPlayer> BuildPoList(
         IReadOnlyList<IPlayerSlot> slots,
         string hostName,
@@ -115,22 +85,62 @@ public static class MultiplayerSlotLayout
         return entries;
     }
 
-    public static void ApplySkirmishAiSelection(LobbyPlayerState state, int rowIndex, int selectedIndex)
+    /// <summary>
+    /// Skirmish：按 name dropdown 选择 AI / 清空，并重排 AI 行。
+    /// </summary>
+    public static void ApplySkirmishAiSelection(
+        LobbyPlayerSlot[] slots,
+        IReadOnlyList<string> aiNames,
+        int rowIndex,
+        int selectedIndex)
     {
-        if (selectedIndex < 1 || selectedIndex - 1 >= state.AiNames.Count)
+        ArgumentNullException.ThrowIfNull(slots);
+        ArgumentNullException.ThrowIfNull(aiNames);
+
+        if (rowIndex < 0 || rowIndex >= slots.Length)
+            return;
+
+        if (selectedIndex < 1 || selectedIndex - 1 >= aiNames.Count)
         {
-            state.Slots[rowIndex].Clear();
-            state.RebuildAiRowsFromUi(state.HumanRowCount);
+            slots[rowIndex].Clear();
+            RebuildAiRowsFromUi(slots, ((IReadOnlyList<IPlayerSlot>)slots).HumanRowCount());
             return;
         }
 
-        string aiName = state.AiNames[selectedIndex - 1];
-        LobbyPlayerSlot slot = state.Slots[rowIndex];
+        string aiName = aiNames[selectedIndex - 1];
+        LobbyPlayerSlot slot = slots[rowIndex];
         slot.Name = aiName;
         slot.IsAi = true;
         slot.IsHumanLocal = false;
         slot.AiLevel = selectedIndex - 1;
-        state.RebuildAiRowsFromUi(state.HumanRowCount);
+        RebuildAiRowsFromUi(slots, ((IReadOnlyList<IPlayerSlot>)slots).HumanRowCount());
+    }
+
+    /// <summary>Rebuild AI rows from UI starting at first AI row (XNA CopyPlayerDataFromUI).</summary>
+    public static void RebuildAiRowsFromUi(LobbyPlayerSlot[] slots, int firstAiRow)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+
+        var preserved = new List<LobbyPlayerSlot>();
+        for (int i = firstAiRow; i < slots.Length; i++)
+        {
+            LobbyPlayerSlot slot = slots[i];
+            if (slot.IsOccupied && slot.IsAi)
+                preserved.Add(slot.Clone());
+        }
+
+        for (int i = firstAiRow; i < slots.Length; i++)
+            slots[i].Clear();
+
+        int row = firstAiRow;
+        foreach (LobbyPlayerSlot ai in preserved)
+        {
+            if (row >= slots.Length)
+                break;
+
+            slots[row] = ai;
+            row++;
+        }
     }
 
     private static void ApplyHuman(IPlayerSlot slot, CnCNetGameRoomPlayer human, string localNick)

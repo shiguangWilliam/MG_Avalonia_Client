@@ -4,6 +4,7 @@ using ClientCore;
 using ClientCore.Extensions;
 using ClientCore.I18N;
 using Rampastring.Tools;
+using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.Services;
 
@@ -17,7 +18,7 @@ public static class MapCodeHelper
 
     public static void ApplyMapCode(IniFile mapIni, string customIniPath, GameModeEntry? gameMode)
     {
-        string associatedIniPath = SafePath.CombineFilePath(ProgramConstants.GamePath, customIniPath);
+        string associatedIniPath = SafePath.CombineFilePath(AppState.Environment.GamePath, customIniPath);
         if (!File.Exists(associatedIniPath))
             return;
 
@@ -32,7 +33,7 @@ public static class MapCodeHelper
 
         if (!string.IsNullOrEmpty(extraIniName))
         {
-            string extraIniPath = SafePath.CombineFilePath(ProgramConstants.GamePath, extraIniName);
+            string extraIniPath = SafePath.CombineFilePath(AppState.Environment.GamePath, extraIniName);
             if (File.Exists(extraIniPath))
             {
                 Encoding extraIniEncoding = GetMapEncoding(extraIniPath);
@@ -58,7 +59,7 @@ public static class MapCodeHelper
 
         if (!string.IsNullOrEmpty(map.ExtraIniName))
         {
-            string extraIniPath = SafePath.CombineFilePath(ProgramConstants.GamePath, "INI", "Map Code", map.ExtraIniName);
+            string extraIniPath = SafePath.CombineFilePath(AppState.Environment.GamePath, "INI", "Map Code", map.ExtraIniName);
             if (File.Exists(extraIniPath))
             {
                 Encoding extraIniEncoding = GetMapEncoding(extraIniPath);

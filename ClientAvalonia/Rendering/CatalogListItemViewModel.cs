@@ -24,5 +24,16 @@ public sealed class CatalogListItemViewModel
 
     public string? ToolTip { get; init; }
 
+    /// <summary>Optional Tactical-globe latitude in degrees. Null = no fixed position.</summary>
+    public double? GlobeLatitude { get; init; }
+
+    /// <summary>Optional Tactical-globe longitude in degrees. Null = no fixed position.</summary>
+    public double? GlobeLongitude { get; init; }
+
+    /// <summary>ISO 3166-1 alpha-2/3 code for the F2 border highlight. Null = none.</summary>
+    public string? GlobeCountry { get; init; }
+
+    public bool HasGlobePosition => GlobeLatitude.HasValue && GlobeLongitude.HasValue;
+
     public double Opacity => IsHeader || IsEnabled ? 1.0 : 0.55;
 }
