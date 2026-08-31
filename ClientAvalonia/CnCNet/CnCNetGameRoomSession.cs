@@ -21,13 +21,11 @@ namespace ClientAvalonia.CnCNet;
 
 using ClientAvalonia.Domain.Multiplayer.CnCNet;
 /// <summary>In-room CnCNet game lobby logic (XNA CnCNetGameLobby CTCP subset). Implements ICnCNetGameSession.</summary>
-public sealed class CnCNetGameRoomSession : ICnCNetGameSession
+public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
 {
     private readonly object _sync = new();
     private readonly List<CnCNetGameRoomPlayer> _players = [];
     private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ICnCNetPlayerSlot[] _playerSlots =
-        Enumerable.Range(0, LobbyPlayerSlot.MaxSlots).Select(_ => new LobbyPlayerSlot()).ToArray();
     private readonly GameOptionsState _sessionOptions = new();
     private IMapResource? _sessionMap;
     private GameSessionState _sessionState = GameSessionState.Lobby;
@@ -119,31 +117,17 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     public event Action? LocalUserKicked;
 
     private string _gameFilesHash = string.Empty;
-    private long _revision;
 
     public CnCNetGameRoomSession(CnCNetActiveGameRoom room)
     {
         Room = room;
         HostName = room.IsHost ? AppState.Environment.PlayerName : room.HostName;
-        SlotSink = new LobbyPlayerSlotSink(
-            () => _playerSlots,
-            () => BumpRevision());
-    }
-
-    /// <summary>原子脏读 tag 自增并触发 StateChanged。</summary>
-    private void BumpRevision()
-    {
-        System.Threading.Interlocked.Increment(ref _revision);
-        StateChanged?.Invoke();
     }
 
     public CnCNetActiveGameRoom Room { get; }
 
     /// <inheritdoc />
     public LobbyPlayerMode Mode => LobbyPlayerMode.Multiplayer;
-
-    /// <inheritdoc />
-    public long Revision => _revision;
 
     public bool IsHost => Room.IsHost;
 
@@ -163,33 +147,20 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         set
         {
             _sessionMap = value;
-            StateChanged?.Invoke();
+            FireStateChanged();
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<IPlayerSlot> PlayerSlots => _playerSlots;
-
-    /// <summary>
-    /// CnCNet 视角的槽位（含 Ready / Ping / Port 等网络字段）。
-    /// 与 <see cref="PlayerSlots"/> 同源；用此属性避免在调用点做类型转换。
-    /// </summary>
-    public IReadOnlyList<ICnCNetPlayerSlot> CnCNetPlayerSlots => _playerSlots;
+    public IReadOnlyList<ICnCNetPlayerSlot> CnCNetPlayerSlots => CoreSlots;
 
     /// <inheritdoc />
     /// <remarks>
-    /// Sink 直接操作 <c>_playerSlots</c>。非静默写入后触发 <see cref="StateChanged"/>。
+    /// 非静默写入后触发 <see cref="StateChanged"/>。
     /// 注：sink 写入不会自动广播 PO CTCP——广播责任在 Service 层
     /// （见 <see cref="BroadcastPlayerOptions"/>）。
     /// </remarks>
-    public IPlayerSlotSink SlotSink { get; }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// CnCNet 房间里改地图：房主会清 AI 槽并按新 maxPlayers 调整，但保留人类玩家。
-    /// Joiner 不应调用此方法（地图由房主决定）。
-    /// </remarks>
-    public void ResetSlotsForMap(int maxPlayers)
+    public override void ResetSlotsForMap(int maxPlayers)
     {
         if (!IsHost)
             return;
@@ -197,13 +168,13 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         lock (_sync)
         {
             // 仅清 AI 槽（人类玩家保留）；与 SyncPlayersFromLobby 的语义一致。
-            for (int i = 0; i < _playerSlots.Length; i++)
+            for (int i = 0; i < CoreSlots.Length; i++)
             {
-                if (_playerSlots[i].IsAi)
-                    ClearSlotLocked(_playerSlots[i]);
+                if (CoreSlots[i].IsAi)
+                    ClearSlotLocked(CoreSlots[i]);
             }
         }
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     /// <inheritdoc />
@@ -213,15 +184,15 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         // 不走 DefaultAiSlotPolicy 自动填充；AI / 玩家由房主操作或 PO 同步。
         lock (_sync)
         {
-            for (int i = 0; i < _playerSlots.Length; i++)
-                ClearSlotLocked(_playerSlots[i]);
+            for (int i = 0; i < CoreSlots.Length; i++)
+                ClearSlotLocked(CoreSlots[i]);
 
-            var host = _playerSlots[0];
+            var host = CoreSlots[0];
             host.Name = localPlayerName;
             host.IsAi = false;
             host.IsHumanLocal = true;
         }
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     /// <inheritdoc />
@@ -236,7 +207,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
 
         lock (_sync)
         {
-            foreach (var slot in _playerSlots)
+            foreach (var slot in CoreSlots)
             {
                 if (!slot.IsOccupied)
                     continue;
@@ -249,7 +220,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             var host = humans.FirstOrDefault(h => h.Name.Equals(hostName, StringComparison.OrdinalIgnoreCase));
             if (host == null)
             {
-                host = CloneSlot(_playerSlots[0]); // 模板
+                host = CloneSlot(CoreSlots[0]); // 模板
                 host.Name = hostName;
                 host.IsAi = false;
                 host.SideIndex = 0;
@@ -264,24 +235,24 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             humans.Insert(0, host);
 
             // 清空再写回
-            for (int i = 0; i < _playerSlots.Length; i++)
-                ClearSlotLocked(_playerSlots[i]);
+            for (int i = 0; i < CoreSlots.Length; i++)
+                ClearSlotLocked(CoreSlots[i]);
 
             int row = 0;
             foreach (var h in humans)
             {
-                if (row >= _playerSlots.Length) break;
-                CopySlotTo(h, _playerSlots[row]);
+                if (row >= CoreSlots.Length) break;
+                CopySlotTo(h, CoreSlots[row]);
                 row++;
             }
             foreach (var a in ais)
             {
-                if (row >= _playerSlots.Length) break;
-                CopySlotTo(a, _playerSlots[row]);
+                if (row >= CoreSlots.Length) break;
+                CopySlotTo(a, CoreSlots[row]);
                 row++;
             }
         }
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     private static ICnCNetPlayerSlot CloneSlot(ICnCNetPlayerSlot src)
@@ -344,26 +315,26 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         // 在所有槽位中找到名字匹配的，标 IsHumanLocal=true，其余清掉此标志。
         lock (_sync)
         {
-            foreach (var slot in _playerSlots)
+            foreach (var slot in CoreSlots)
                 slot.IsHumanLocal = string.Equals(slot.Name, playerName, StringComparison.Ordinal);
         }
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     /// <inheritdoc />
     public void ApplyPlayersFromNetwork(IReadOnlyList<CnCNetGameRoomPlayer> entries, string hostName, string localNick)
     {
-        // Phase 2 缺口 2.3：把 CTCP 收到的 PO DTO 应用到 _playerSlots，并完成 host 重排 + 本地标记。
+        // Phase 2 缺口 2.3：把 CTCP 收到的 PO DTO 应用到 CoreSlots，并完成 host 重排 + 本地标记。
         // 替代 MainWindow 旧的 ApplyToState + EnsureHostAsFirstHuman + MarkLocalHuman 三步胶水。
         ArgumentNullException.ThrowIfNull(entries);
 
         lock (_sync)
         {
             // 清空 → 写入
-            for (int i = 0; i < _playerSlots.Length; i++)
-                ClearSlotLocked(_playerSlots[i]);
+            for (int i = 0; i < CoreSlots.Length; i++)
+                ClearSlotLocked(CoreSlots[i]);
 
-            MultiplayerSlotLayout.ApplyToSlots(_playerSlots, entries, localNick);
+            MultiplayerSlotLayout.ApplyToSlots(CoreSlots, entries, localNick);
         }
 
         // Host 重排（保留 + 移到 [0]）+ 本地标记
@@ -376,14 +347,14 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     /// <inheritdoc />
     public void BroadcastPlayerOptionsFromSlots(string hostName, IReadOnlyList<string> aiNames)
     {
-        // Phase 2 缺口 2.4：从 _playerSlots 重建 PO DTO + 广播。
+        // Phase 2 缺口 2.4：从 CoreSlots 重建 PO DTO + 广播。
         // 替代旧 SyncPlayersFromLobby(LobbyPlayerState, string)，不再依赖 LobbyPlayerState。
         if (!IsHost)
             return;
 
-        var dto = MultiplayerSlotLayout.BuildPoList(_playerSlots, hostName, aiNames);
+        var dto = MultiplayerSlotLayout.BuildPoList(CoreSlots, hostName, aiNames);
         SyncPlayersFromDtoLocked(dto, hostName, aiNames);
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     /// <summary>
@@ -419,7 +390,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         if (PlayerListsEquivalent(_players, entries))
             return;
 
-        PlayerOptionsCodec.ApplyDto(entries, _playerSlots, _localNick);
+        PlayerOptionsCodec.ApplyDto(entries, CoreSlots, _localNick);
         SyncPlayersFromSlotsLocked(hostName, aiNames);
         BroadcastPlayerOptionsLocked();
     }
@@ -444,7 +415,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             if (update.TeamIndex.HasValue) player.TeamId = update.TeamIndex.Value;
             if (update.StartIndex.HasValue) player.StartingLocation = update.StartIndex.Value;
         }
-        BumpRevision();
+        RaiseStateChanged();
     }
 
     private static void ClearSlotLocked(ICnCNetPlayerSlot slot)
@@ -471,10 +442,6 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     IGameOptionsState IGameSession.Options => _sessionOptions;
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
-        = new Dictionary<string, string>();
-
-    /// <inheritdoc />
     public GameSessionState State
     {
         get => _sessionState;
@@ -483,7 +450,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             if (_sessionState == value)
                 return;
             _sessionState = value;
-            StateChanged?.Invoke();
+            FireStateChanged();
         }
     }
 
@@ -533,8 +500,6 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
                 return _players.ToList();
         }
     }
-
-    public event Action? StateChanged;
 
     public event Action<string>? NoticeLogged;
 
@@ -599,11 +564,11 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             {
                 Room.Tunnel.UpdatePing();
                 BroadcastLocalTunnelPingLocked();
-                StateChanged?.Invoke();
+                FireStateChanged();
             });
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void OnChannelUserList(IReadOnlyList<string> users)
@@ -642,7 +607,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             }
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void OnUserJoined(string channel, string user)
@@ -680,7 +645,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             }
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void OnUserLeft(string channel, string user)
@@ -704,7 +669,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             }
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void OnUserKicked(string channel, string user)
@@ -746,7 +711,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
                 HostName = newNickname;
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void OnChannelCtcp(string channel, string sender, string ctcp)
@@ -884,7 +849,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         else
             CancelLobbyPrewarm();
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void RefreshGameListingLockedFlag()
@@ -929,7 +894,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         if (IsHost)
         {
             // Host already issued MODE and notices from SetLocked; avoid duplicate chat lines.
-            StateChanged?.Invoke();
+            FireStateChanged();
             return;
         }
 
@@ -946,7 +911,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             AddRoomNotice("The game room has been unlocked.");
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void SetLocalReady(bool ready, bool autoReady = false)
@@ -969,7 +934,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         if (readyState > 0)
             RequestLobbyPrewarm();
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     /// <summary>Joiner sends side/color/start/team (XNA CnCNetGameLobby.RequestPlayerOptions / OR CTCP).</summary>
@@ -1004,7 +969,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         lock (_sync)
             BroadcastLocalTunnelPingLocked();
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     /// <summary>Send TNLPNG without ICMP (launch keepalive synthetic mode).</summary>
@@ -1025,7 +990,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
                 local.Ping = pingMs;
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     public void UpdateGameLobbySettings(string roomName, int maxPlayers, int skillLevel, string? password)
@@ -1096,7 +1061,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             _locked,
             closed: false);
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     /// <summary>
@@ -1126,7 +1091,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             }
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
         return true;
     }
 
@@ -1155,14 +1120,14 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     }
 
     /// <summary>
-    /// 把 <see cref="_playerSlots"/> 重新编码为 PO DTO 列表，覆盖 <see cref="_players"/>。
+    /// 把 <see cref="CoreSlots"/> 重新编码为 PO DTO 列表，覆盖 <see cref="_players"/>。
     /// 保留 NAT 分配的端口（端口不在槽位状态里，只存在于 _players / START 协议中）。
     /// </summary>
     /// <param name="hostName">房主名（PO DTO 中 IsHost 判定）。</param>
     /// <param name="aiNames">AI 名字目录（按 AiLevel 索引）。</param>
     private void SyncPlayersFromSlotsLocked(string hostName, IReadOnlyList<string> aiNames)
     {
-        var dto = PlayerOptionsCodec.ToDto(_playerSlots, hostName, aiNames);
+        var dto = PlayerOptionsCodec.ToDto(CoreSlots, hostName, aiNames);
 
         var preservedPorts = _players.Where(p => !p.IsAi)
             .ToDictionary(p => p.Name, p => p.Port, StringComparer.OrdinalIgnoreCase);
@@ -1178,15 +1143,15 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     }
 
     /// <summary>
-    /// 把 <see cref="_players"/> 的当前内容同步到 <see cref="_playerSlots"/>。
+    /// 把 <see cref="_players"/> 的当前内容同步到 <see cref="CoreSlots"/>。
     /// 在每个修改 <see cref="_players"/> 的方法末尾、释放锁或触发 StateChanged 之前调用。
     ///
     /// 这是 PRAGMATIC MINIMAL 版本：_players 仍是 CTCP/START 路径写入的状态，
-    /// 但 _playerSlots 始终与之保持一致，作为对外的「单一真相源」投影。
+    /// 但 CoreSlots 始终与之保持一致，作为对外的「单一真相源」投影。
     /// </summary>
     private void SyncSlotsFromPlayersLocked()
     {
-        PlayerOptionsCodec.ApplyDto(_players, _playerSlots, _localNick);
+        PlayerOptionsCodec.ApplyDto(_players, CoreSlots, _localNick);
     }
 
     public bool TryHostLaunch(out string message)
@@ -1563,7 +1528,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             player.Ping = ping;
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void BroadcastLocalTunnelPingLocked()
@@ -1600,7 +1565,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         if (allReady)
             RequestLobbyPrewarm();
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void ApplyOptionsRequest(string playerName, string payload)
@@ -1629,7 +1594,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             BroadcastPlayerOptionsLocked();
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void ClearHumanReadyStatesLocked(string? exceptName = null)
@@ -1707,7 +1672,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             SyncSlotsFromPlayersLocked();
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void ApplyGameOptions(string sender, string message)
@@ -1747,7 +1712,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         }
 
         AddRoomNotice("Game options updated by host.");
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void ApplyGameLobbySettings(string sender, string message)
@@ -1790,7 +1755,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             LogNotice($"{sender} changed skill level to {skillName}.");
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void HandleFileHashNotification(string sender, string filesHash)
@@ -1833,7 +1798,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
         {
             _tunnelErrorMode = true;
             LogNotice("The game host has selected an invalid tunnel server! The game host needs to change the server or you will be unable to participate in the match.");
-            StateChanged?.Invoke();
+            FireStateChanged();
             return;
         }
 
@@ -1850,7 +1815,7 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
             }
         }
 
-        StateChanged?.Invoke();
+        FireStateChanged();
     }
 
     private void BroadcastGameLobbySettings()

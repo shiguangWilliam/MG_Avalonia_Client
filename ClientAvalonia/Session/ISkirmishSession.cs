@@ -10,12 +10,6 @@ namespace ClientAvalonia.Session;
 public interface ISkirmishSession : IGameSession
 {
     // 单人本地，无额外网络元数据。
-    // 共享逻辑（若有）用扩展方法，不用抽象基类（见 global-state-refactor.md §6.3）。
-
-    /// <summary>
-    /// 最近一次 <c>TryLoadSkirmishSettings</c> 读到的游戏选项快照
-    /// （id → "True/False" | index；DX SkirmishLobby LoadSettings 的 [GameOptions]）。
-    /// View 层负责把它回填到 UI；Session 本身不解析。
-    /// </summary>
-    IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; }
+    // 槽位核心共享经 GameSessionBase（实例状态需类载体，扩展方法不适用——
+    // 见 note/architecture-issue-list-2026-08-25.md 附二，2026-08-31 决策）。
 }

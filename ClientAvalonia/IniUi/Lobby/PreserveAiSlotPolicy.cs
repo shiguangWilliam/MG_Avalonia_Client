@@ -39,18 +39,13 @@ public static class PreserveAiSlotPolicy
         if (maxPlayers > LobbyPlayerSlot.MaxSlots) maxPlayers = LobbyPlayerSlot.MaxSlots;
 
         IPlayerSlot human = session.PlayerSlots[0];
-        // Snapshot the human's own choices too — ClearAll() wipes slot 0 as well.
         string playerName = !string.IsNullOrWhiteSpace(human.Name) ? human.Name : "Player";
         bool humanIsLocal = human.IsHumanLocal;
         int humanSide = human.SideIndex;
         int humanColor = human.ColorIndex;
         int humanTeam = human.TeamIndex;
-        // Start waypoints differ per map: a saved pick beyond the new capacity is
-        // meaningless (DX CheckLoadedPlayerVariableBounds clamps AI starts the same way).
         int humanStart = human.StartIndex <= maxPlayers ? human.StartIndex : 0;
 
-        // Snapshot adjusted AI rows in slot order (they are already compacted by
-        // RebuildAiRowsFromUi, but snapshot defensively skips holes).
         var preservedAis = new List<LobbyPlayerSlot>();
         for (int i = 1; i < session.PlayerSlots.Count; i++)
         {
@@ -59,25 +54,21 @@ public static class PreserveAiSlotPolicy
                 preservedAis.Add(slot is LobbyPlayerSlot concrete ? concrete.Clone() : ToClone(slot));
         }
 
-        // Requirement: same count → keep; more → drop tail; fewer → append defaults
-        // (fillToCapacity only — restore semantics never invent AI rows).
         int targetAiCount = fillToCapacity ? maxPlayers - 1 : Math.Min(preservedAis.Count, maxPlayers - 1);
         var kept = preservedAis.Take(targetAiCount).ToList();
 
         IReadOnlyList<string> names = aiNames ?? [];
         int colorCount = Math.Max(1, colors.Load().Count);
 
-        session.SlotSink.ClearAll();
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
 
-        // Human slot: restored verbatim (side/color/team survive the switch).
-        human = session.PlayerSlots[0];
-        human.Name = playerName;
-        human.IsHumanLocal = humanIsLocal;
-        human.IsAi = false;
-        human.SideIndex = humanSide;
-        human.ColorIndex = humanColor;
-        human.TeamIndex = humanTeam;
-        human.StartIndex = humanStart;
+        grid[0].Name = playerName;
+        grid[0].IsHumanLocal = humanIsLocal;
+        grid[0].IsAi = false;
+        grid[0].SideIndex = humanSide;
+        grid[0].ColorIndex = humanColor;
+        grid[0].TeamIndex = humanTeam;
+        grid[0].StartIndex = humanStart;
 
         int row = 1;
         foreach (LobbyPlayerSlot ai in kept)
@@ -85,7 +76,7 @@ public static class PreserveAiSlotPolicy
             if (row >= LobbyPlayerSlot.MaxSlots)
                 break;
 
-            IPlayerSlot target = session.PlayerSlots[row];
+            LobbyPlayerSlot target = grid[row];
             target.Name = ai.Name;
             target.IsAi = true;
             target.IsHumanLocal = false;
@@ -93,29 +84,27 @@ public static class PreserveAiSlotPolicy
             target.SideIndex = ai.SideIndex;
             target.ColorIndex = ai.ColorIndex;
             target.TeamIndex = ai.TeamIndex;
-            // Start waypoints differ per map: an index beyond the new capacity is meaningless.
             target.StartIndex = ai.StartIndex <= maxPlayers ? ai.StartIndex : 0;
             row++;
         }
 
-        if (!fillToCapacity)
-            return;
-
-        for (int i = row; i < maxPlayers; i++)
+        if (fillToCapacity)
         {
-            IPlayerSlot slot = session.PlayerSlots[i];
-            slot.Name = names.Count > 0 ? names[(i - 1) % names.Count] : $"AI {i}";
-            slot.IsAi = true;
-            slot.IsHumanLocal = false;
-            slot.AiLevel = 0;
-            slot.SideIndex = 0;
-            slot.ColorIndex = i % colorCount;
-            slot.TeamIndex = 0;
-            slot.StartIndex = 0;
+            for (int i = row; i < maxPlayers; i++)
+            {
+                LobbyPlayerSlot slot = grid[i];
+                slot.Name = names.Count > 0 ? names[(i - 1) % names.Count] : $"AI {i}";
+                slot.IsAi = true;
+                slot.IsHumanLocal = false;
+                slot.AiLevel = 0;
+                slot.SideIndex = 0;
+                slot.ColorIndex = i % colorCount;
+                slot.TeamIndex = 0;
+                slot.StartIndex = 0;
+            }
         }
 
-        if (session is SkirmishSession skirmish)
-            skirmish.NotifyStateChanged();
+        LobbySlotGrid.ApplyToSink(session, grid);
     }
 
     private static LobbyPlayerSlot ToClone(IPlayerSlot slot)

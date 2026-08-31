@@ -14,6 +14,7 @@ namespace ClientAvalonia.Tests.IniUi;
 /// Requirement P0-2: switching maps remembers prior AI adjustments —
 /// equal capacity keeps rows, shrink drops the tail, growth appends defaults.
 /// </summary>
+[Collection("ProgramConstantsSerial")]
 public sealed class PreserveAiSlotPolicyTests
 {
     [Fact]

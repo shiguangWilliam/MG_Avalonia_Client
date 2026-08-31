@@ -72,6 +72,12 @@ public interface IGameSession
     /// </summary>
     /// <param name="maxPlayers">新地图最大玩家数。</param>
     void ResetSlotsForMap(int maxPlayers);
+
+    /// <summary>
+    /// 通知 UI 刷新（槽位 / 选项变更后调用）。批量写入策略经此触发一次状态变更，
+    /// 替代对具体会话类的类型特判——见 GameSessionBase.NotifyStateChanged。
+    /// </summary>
+    void NotifyStateChanged();
 }
 
 /// <summary>游戏会话生命周期。</summary>

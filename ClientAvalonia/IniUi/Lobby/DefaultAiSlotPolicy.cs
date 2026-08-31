@@ -28,35 +28,17 @@ public static class DefaultAiSlotPolicy
         if (maxPlayers < 1) maxPlayers = 1;
         if (maxPlayers > LobbyPlayerSlot.MaxSlots) maxPlayers = LobbyPlayerSlot.MaxSlots;
 
-        IReadOnlyList<IPlayerSlot> slots = session.PlayerSlots;
-        for (int i = 0; i < slots.Count; i++)
-        {
-            IPlayerSlot slot = slots[i];
-            slot.Name = string.Empty;
-            slot.IsAi = false;
-            slot.IsHumanLocal = false;
-            slot.SideIndex = 0;
-            slot.ColorIndex = 0;
-            slot.StartIndex = 0;
-            slot.TeamIndex = 0;
-            slot.AiLevel = 0;
-        }
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
 
-        IPlayerSlot human = slots[0];
-        human.Name = playerName;
-        human.IsHumanLocal = true;
-        human.IsAi = false;
-        human.AiLevel = 0;
-        human.SideIndex = 0;
-        human.ColorIndex = 0;
-        human.TeamIndex = 0;
-        human.StartIndex = 0;
+        grid[0].Name = playerName;
+        grid[0].IsHumanLocal = true;
+        grid[0].IsAi = false;
 
         IReadOnlyList<string> names = aiNames ?? [];
         int colorCount = Math.Max(1, colors.Load().Count);
         for (int i = 1; i < maxPlayers; i++)
         {
-            IPlayerSlot slot = slots[i];
+            LobbyPlayerSlot slot = grid[i];
             slot.Name = names.Count > 0 ? names[(i - 1) % names.Count] : $"AI {i}";
             slot.IsAi = true;
             slot.IsHumanLocal = false;
@@ -67,7 +49,6 @@ public static class DefaultAiSlotPolicy
             slot.StartIndex = 0;
         }
 
-        if (session is SkirmishSession skirmish)
-            skirmish.NotifyStateChanged();
+        LobbySlotGrid.ApplyToSink(session, grid);
     }
 }

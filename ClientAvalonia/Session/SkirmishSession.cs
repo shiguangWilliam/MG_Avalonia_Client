@@ -7,36 +7,16 @@ using ClientAvalonia.GlobalState;
 namespace ClientAvalonia.Session;
 
 /// <summary>
-/// 遭遇战会话默认实现：私有持有 <see cref="LobbyPlayerSlot"/> 数组，对外暴露 <see cref="ISkirmishSession"/>。
+/// 遭遇战会话默认实现：槽位核心经 <see cref="GameSessionBase"/> 共享，
+/// 本类保留遭遇战专有职责（设置持久化 / 默认装载）。
 /// </summary>
-public sealed class SkirmishSession : ISkirmishSession
+public sealed class SkirmishSession : GameSessionBase, ISkirmishSession
 {
-    private readonly LobbyPlayerSlot[] _slots = Enumerable.Range(0, LobbyPlayerSlot.MaxSlots)
-        .Select(_ => new LobbyPlayerSlot())
-        .ToArray();
-
     private IMapResource? _map;
     private GameSessionState _state = GameSessionState.Lobby;
-    private long _revision;
-
-    public SkirmishSession()
-    {
-        SlotSink = new LobbyPlayerSlotSink(
-            () => _slots,
-            () => BumpRevision());
-    }
-
-    private void BumpRevision()
-    {
-        _revision++;
-        StateChanged?.Invoke();
-    }
 
     /// <inheritdoc />
     public LobbyPlayerMode Mode => LobbyPlayerMode.Skirmish;
-
-    /// <inheritdoc />
-    public long Revision => _revision;
 
     /// <summary>可变游戏选项。</summary>
     public GameOptionsState Options { get; } = new();
@@ -55,10 +35,7 @@ public sealed class SkirmishSession : ISkirmishSession
     public string LastLoadedGameModeFilter { get; private set; } = string.Empty;
 
     /// <inheritdoc />
-    public IPlayerSlotSink SlotSink { get; }
-
-    /// <inheritdoc />
-    public void ResetSlotsForMap(int maxPlayers)
+    public override void ResetSlotsForMap(int maxPlayers)
     {
         IReadOnlyList<string> aiNames = ResolveCatalog().AiNames;
         try
@@ -74,7 +51,6 @@ public sealed class SkirmishSession : ISkirmishSession
         {
             LoadDefaultSkirmishSlots(maxPlayers);
         }
-        BumpRevision();
     }
 
     /// <inheritdoc />
@@ -84,15 +60,12 @@ public sealed class SkirmishSession : ISkirmishSession
         set
         {
             _map = value;
-            BumpRevision();
+            RaiseStateChanged();
         }
     }
 
-    /// <inheritdoc />
-    public IReadOnlyList<IPlayerSlot> PlayerSlots => _slots;
-
     /// <summary>具体槽位数组（供需要 <see cref="LobbyPlayerSlot"/> 的调用方）。</summary>
-    internal LobbyPlayerSlot[] Slots => _slots;
+    internal LobbyPlayerSlot[] Slots => CoreSlots;
 
     /// <inheritdoc />
     IGameOptionsState IGameSession.Options => Options;
@@ -107,46 +80,29 @@ public sealed class SkirmishSession : ISkirmishSession
                 return;
 
             _state = value;
-            BumpRevision();
+            RaiseStateChanged();
         }
     }
-
-    /// <inheritdoc />
-    public event Action? StateChanged;
-
-    /// <summary>通知 UI 刷新（槽位 / 选项变更后调用）。</summary>
-    public void NotifyStateChanged() => StateChanged?.Invoke();
 
     /// <summary>Legacy default: 1 human + 1 AI。</summary>
     public void LoadDefaultSkirmishSlots()
     {
-        ClearSlots();
         IReadOnlyList<string> aiNames = ResolveCatalog().AiNames;
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
 
-        _slots[0].Name = AppState.Environment.PlayerName;
-        _slots[0].IsHumanLocal = true;
-        _slots[0].SideIndex = 0;
-        _slots[0].ColorIndex = 0;
-        _slots[0].TeamIndex = 0;
-        _slots[0].StartIndex = 0;
+        grid[0].Name = AppState.Environment.PlayerName;
+        grid[0].IsHumanLocal = true;
 
-        if (aiNames.Count == 0)
+        if (aiNames.Count > 0)
         {
-            BumpRevision();
-            return;
+            grid[1].Name = aiNames[0];
+            grid[1].IsAi = true;
         }
 
-        _slots[1].Name = aiNames[0];
-        _slots[1].IsAi = true;
-        _slots[1].AiLevel = 0;
-        _slots[1].SideIndex = 0;
-        _slots[1].ColorIndex = 0;
-        _slots[1].TeamIndex = 0;
-        _slots[1].StartIndex = 0;
-        BumpRevision();
+        LobbySlotGrid.ApplyToSink(this, grid);
     }
 
-    /// <summary>Default skirmish slot layout for a specific map MaxPlayers。</summary>
+    /// <summary>Default skirmish slot layout for a specific map MaxPlayers.</summary>
     public void LoadDefaultSkirmishSlots(int maxPlayers)
     {
         Domain.Resources.IMultiplayerColorCatalog colors;
@@ -169,7 +125,6 @@ public sealed class SkirmishSession : ISkirmishSession
             playerName,
             colors,
             ResolveCatalog().AiNames);
-        BumpRevision();
     }
 
     public bool TryLoadSkirmishSettings()
@@ -179,14 +134,14 @@ public sealed class SkirmishSession : ISkirmishSession
         if (dto == null)
             return false;
 
-        ClearSlots();
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
 
         if (dto.Human is { } human)
         {
             human.Name = AppState.Environment.PlayerName;
             human.IsAi = false;
             ClampLoadedSlot(human, isAi: false);
-            _slots[0] = ToLobbySlot(human, isHumanLocal: true);
+            grid[0] = ToLobbySlot(human, isHumanLocal: true);
         }
 
         int aiSlot = 1;
@@ -196,11 +151,11 @@ public sealed class SkirmishSession : ISkirmishSession
                 break;
             ai.IsAi = true;
             ClampLoadedSlot(ai, isAi: true);
-            _slots[aiSlot] = ToLobbySlot(ai, isHumanLocal: false);
+            grid[aiSlot] = ToLobbySlot(ai, isHumanLocal: false);
             aiSlot++;
         }
 
-        BumpRevision();
+        LobbySlotGrid.ApplyToSink(this, grid);
         LastLoadedGameOptions = dto.GameOptions;
         LastLoadedMapSha1 = dto.MapSha1;
         LastLoadedGameModeFilter = dto.GameModeMapFilter;
@@ -260,12 +215,12 @@ public sealed class SkirmishSession : ISkirmishSession
     {
         ISkirmishSettingsService svc = ResolveSettingsService();
         var dto = new SkirmishSettingsDto();
-        LobbyPlayerSlot? human = _slots.FirstOrDefault(s => s.IsOccupied && !s.IsAi);
+        LobbyPlayerSlot? human = CoreSlots.FirstOrDefault(s => s.IsOccupied && !s.IsAi);
         if (human != null)
             dto.Human = ToDto(human, index: 0);
 
         int aiIndex = 0;
-        foreach (LobbyPlayerSlot slot in _slots.Where(s => s.IsOccupied && s.IsAi))
+        foreach (LobbyPlayerSlot slot in CoreSlots.Where(s => s.IsOccupied && s.IsAi))
         {
             dto.Ais.Add(ToDto(slot, aiIndex + 1));
             aiIndex++;
@@ -283,24 +238,11 @@ public sealed class SkirmishSession : ISkirmishSession
         svc.Save(dto);
     }
 
-    public void ClearSlots()
-    {
-        foreach (LobbyPlayerSlot slot in _slots)
-        {
-            slot.Name = string.Empty;
-            slot.IsAi = false;
-            slot.IsHumanLocal = false;
-            slot.SideIndex = 0;
-            slot.ColorIndex = 0;
-            slot.StartIndex = 0;
-            slot.TeamIndex = 0;
-            slot.AiLevel = 0;
-        }
-    }
+    public void ClearSlots() => SlotSink.ClearAll();
 
     /// <summary>Rebuild AI rows from UI starting at first AI row (XNA CopyPlayerDataFromUI).</summary>
     public void RebuildAiRowsFromUi(int firstAiRow)
-        => MultiplayerSlotLayout.RebuildAiRowsFromUi(_slots, firstAiRow);
+        => MultiplayerSlotLayout.RebuildAiRowsFromUi(CoreSlots, firstAiRow);
 
     private static ILobbyCatalogService ResolveCatalog()
     {

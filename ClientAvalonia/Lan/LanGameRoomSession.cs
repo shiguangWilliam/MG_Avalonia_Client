@@ -1,7 +1,6 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Domain.Resources;
 using ClientAvalonia.GlobalState;
-using ClientAvalonia.IniUi.Lobby;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
 
@@ -11,15 +10,10 @@ namespace ClientAvalonia.Lan;
 /// LAN game-room session: skirmish-shaped slots + host metadata (no tunnel/IRC).
 /// Network I/O lives in <see cref="LanGameRoomTransport"/>; this type owns lobby state.
 /// </summary>
-public sealed class LanGameRoomSession : ILANGameSession
+public sealed class LanGameRoomSession : GameSessionBase, ILANGameSession
 {
-    private readonly LobbyPlayerSlot[] _slots = Enumerable.Range(0, LobbyPlayerSlot.MaxSlots)
-        .Select(_ => new LobbyPlayerSlot())
-        .ToArray();
-
     private IMapResource? _map;
     private GameSessionState _state = GameSessionState.Lobby;
-    private long _revision;
 
     public LanGameRoomSession(string hostName, bool isHost, string localPlayerName)
     {
@@ -28,10 +22,6 @@ public sealed class LanGameRoomSession : ILANGameSession
         LocalPlayerName = localPlayerName;
         UniqueGameId = GenerateGameId();
         Locked = false;
-
-        SlotSink = new LobbyPlayerSlotSink(
-            () => _slots,
-            () => BumpRevision());
 
         if (isHost)
             SeedHostSlots(localPlayerName);
@@ -46,17 +36,10 @@ public sealed class LanGameRoomSession : ILANGameSession
     public string LoadedGameId { get; set; } = "0";
 
     public LobbyPlayerMode Mode => LobbyPlayerMode.Multiplayer;
-    public long Revision => _revision;
     public GameOptionsState Options { get; } = new();
     IGameOptionsState IGameSession.Options => Options;
 
-    /// <inheritdoc />
-    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
-        = new Dictionary<string, string>();
-
-    public IPlayerSlotSink SlotSink { get; }
-    public IReadOnlyList<IPlayerSlot> PlayerSlots => _slots;
-    internal LobbyPlayerSlot[] Slots => _slots;
+    internal LobbyPlayerSlot[] Slots => CoreSlots;
 
     public IMapResource? Map
     {
@@ -64,7 +47,7 @@ public sealed class LanGameRoomSession : ILANGameSession
         set
         {
             _map = value;
-            BumpRevision();
+            RaiseStateChanged();
         }
     }
 
@@ -76,46 +59,35 @@ public sealed class LanGameRoomSession : ILANGameSession
             if (_state == value)
                 return;
             _state = value;
-            BumpRevision();
+            RaiseStateChanged();
         }
     }
 
-    public event Action? StateChanged;
-
-    public void NotifyStateChanged() => StateChanged?.Invoke();
-
-    public void ResetSlotsForMap(int maxPlayers)
+    public override void ResetSlotsForMap(int maxPlayers)
     {
         if (!IsHost)
             return;
 
-        // Mirror CnCNet semantics: keep every human, drop AI so the host re-picks
-        // per the new map capacity. AutoFillToMapCapacity is skirmish-only
-        // (it wipes remote humans too).
-        int humanCount = _slots.Count(s => s.IsOccupied && !s.IsAi);
+        int humanCount = CoreSlots.Count(s => s.IsOccupied && !s.IsAi);
         int maxSlots = Math.Clamp(maxPlayers, 1, LobbyPlayerSlot.MaxSlots);
         if (humanCount > maxSlots)
             humanCount = maxSlots;
 
-        // Compact humans to the front, then clear everything else (AI rows and overflow).
         var preserved = new List<LobbyPlayerSlot>();
-        for (int i = 0; i < _slots.Length && preserved.Count < humanCount; i++)
+        for (int i = 0; i < CoreSlots.Length && preserved.Count < humanCount; i++)
         {
-            if (_slots[i].IsOccupied && !_slots[i].IsAi)
-                preserved.Add(_slots[i].Clone());
+            if (CoreSlots[i].IsOccupied && !CoreSlots[i].IsAi)
+                preserved.Add(CoreSlots[i].Clone());
         }
 
-        for (int i = 0; i < _slots.Length; i++)
-            ClearSlot(_slots[i]);
-
-        for (int i = 0; i < preserved.Count && i < _slots.Length; i++)
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
+        for (int i = 0; i < preserved.Count && i < grid.Count; i++)
         {
             LobbyPlayerSlot kept = preserved[i];
-            LobbyPlayerSlot slot = _slots[i];
+            LobbyPlayerSlot slot = grid[i];
             slot.Name = kept.Name;
             slot.IsHumanLocal = kept.IsHumanLocal;
             slot.IsAi = false;
-            slot.AiLevel = 0;
             slot.SideIndex = kept.SideIndex;
             slot.ColorIndex = kept.ColorIndex;
             slot.TeamIndex = kept.TeamIndex;
@@ -123,27 +95,26 @@ public sealed class LanGameRoomSession : ILANGameSession
             slot.Ready = kept.Ready;
         }
 
-        BumpRevision();
+        LobbySlotGrid.ApplyToSink(this, grid);
     }
 
     public IReadOnlyList<string> OccupiedHumanNames()
-        => _slots.Where(s => s.IsOccupied && !s.IsAi)
+        => CoreSlots.Where(s => s.IsOccupied && !s.IsAi)
             .Select(s => s.Name)
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .ToArray();
 
+    /// <summary>入站 POPTS：经 sink 写入，不触发 <see cref="OnLocalSlotMutated"/>（反回声）。</summary>
     public void ApplyRemotePlayerOptions(IReadOnlyList<LanPlayerOptionRow> rows)
     {
-        for (int i = 0; i < _slots.Length; i++)
-            ClearSlot(_slots[i]);
-
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
         int index = 0;
         foreach (LanPlayerOptionRow row in rows)
         {
-            if (index >= _slots.Length)
+            if (index >= grid.Count)
                 break;
 
-            LobbyPlayerSlot slot = _slots[index++];
+            LobbyPlayerSlot slot = grid[index++];
             slot.Name = row.Name;
             slot.SideIndex = row.SideId;
             slot.ColorIndex = row.ColorId;
@@ -162,13 +133,13 @@ public sealed class LanGameRoomSession : ILANGameSession
             }
         }
 
-        BumpRevision();
+        SlotSink.CopyFrom(grid);
     }
 
     public IReadOnlyList<LanPlayerOptionRow> SnapshotPlayerOptions()
     {
         var rows = new List<LanPlayerOptionRow>();
-        foreach (LobbyPlayerSlot slot in _slots.Where(s => s.IsOccupied))
+        foreach (LobbyPlayerSlot slot in CoreSlots.Where(s => s.IsOccupied))
         {
             rows.Add(new LanPlayerOptionRow(
                 slot.Name,
@@ -186,58 +157,15 @@ public sealed class LanGameRoomSession : ILANGameSession
 
     private void SeedHostSlots(string localPlayerName)
     {
-        ClearAndSeed(localPlayerName);
-        BumpRevision();
-    }
-
-    private void ClearAndSeed(string localPlayerName)
-    {
-        foreach (LobbyPlayerSlot slot in _slots)
-            ClearSlot(slot);
-
-        _slots[0].Name = localPlayerName;
-        _slots[0].IsHumanLocal = true;
-        _slots[0].SideIndex = 0;
-        _slots[0].ColorIndex = 0;
-        _slots[0].TeamIndex = 0;
-        _slots[0].StartIndex = 0;
-        _slots[0].Ready = true;
-    }
-
-    private static void ClearSlot(LobbyPlayerSlot slot)
-    {
-        slot.Name = string.Empty;
-        slot.IsHumanLocal = false;
-        slot.IsAi = false;
-        slot.AiLevel = 0;
-        slot.SideIndex = 0;
-        slot.ColorIndex = 0;
-        slot.TeamIndex = 0;
-        slot.StartIndex = 0;
-        slot.Ready = false;
-    }
-
-    private void BumpRevision()
-    {
-        _revision++;
-        StateChanged?.Invoke();
-    }
-
-    private static IReadOnlyList<string> ResolveAiNames()
-    {
-        try
-        {
-            return LobbyCatalogService.Instance.AiNames;
-        }
-        catch
-        {
-            return AppState.Environment.AiPlayerNames;
-        }
+        List<LobbyPlayerSlot> grid = LobbySlotGrid.CreateEmpty();
+        grid[0].Name = localPlayerName;
+        grid[0].IsHumanLocal = true;
+        grid[0].Ready = true;
+        LobbySlotGrid.ApplyToSink(this, grid);
     }
 
     private static int GenerateGameId()
     {
-        // DX MultiplayerGameLobby.GenerateGameID-ish: time-based int.
         DateTime now = DateTime.Now;
         return now.Day * 1000000 + now.Month * 10000 + now.Hour * 100 + now.Minute;
     }

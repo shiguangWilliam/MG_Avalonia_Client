@@ -215,6 +215,10 @@ public sealed class Phase2ProductionMigrationTests
 
         public void ResetSlotsForMap(int maxPlayers) => throw new NotImplementedException();
 
+        public void NotifyStateChanged()
+        {
+        }
+
         internal void SetSlot(int idx, string name, bool isAi = false, bool isHumanLocal = false,
             int side = 0, int color = 0, int team = 0, int start = 0, int aiLevel = 0)
         {
