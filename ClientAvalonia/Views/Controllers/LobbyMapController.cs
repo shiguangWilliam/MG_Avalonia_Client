@@ -100,6 +100,7 @@ internal sealed class LobbyMapController
     {
         _ctx.GameResources.EnsureLoaded();
         ResourceResolver resources = _ctx.GetMainResources();
+        bool skirmishSettingsLoaded = false;
 
         if (MainWindowContext.IsGameLobbyWindow(windowName))
         {
@@ -136,6 +137,21 @@ internal sealed class LobbyMapController
                 LobbyPlayerSlotUiRules.ConfigureForSkirmish(_ctx.LobbySession, _ctx.SkirmishSession);
                 if (_ctx.SkirmishSession.TryLoadSkirmishSettings())
                 {
+                    skirmishSettingsLoaded = true;
+
+                    // Slot clamp deferred until after ApplyLobby + map re-selection — the
+                    // capacity map comes from [Settings] Map=<SHA1> (or the list selection
+                    // for legacy saves that pre-date our map persistence).
+
+                    // DX SkirmishLobby.LoadSettings: restore [GameOptions] onto the
+                    // lobby controls so saved choices survive re-entering the lobby.
+                    // Controls forced by the game mode are skipped (DX parity).
+                    GameModeEntry? currentMode = _ctx.GameResources.GetGameModeForFilterIndex(
+                        _ctx.LobbySession.FilterIndex);
+                    SkirmishGameOptionsSnapshot.Apply(
+                        root,
+                        _ctx.SkirmishSession.LastLoadedGameOptions,
+                        currentMode);
                 }
                 else if (_ctx.GameResources.Maps.Count > 0)
                 {
@@ -193,6 +209,20 @@ internal sealed class LobbyMapController
             defaultFilter,
             _ctx.ResolveActiveLobbySlots());
 
+        // DX LoadSettings: after the map list is populated, re-select the map that was
+        // saved with the session ([Settings] Map=<SHA1>). Without this the lobby always
+        // reopened on the first-listed map, discarding the player's last map choice.
+        if (MainWindowContext.IsSkirmishWindow(windowName)
+            && !string.IsNullOrEmpty(_ctx.SkirmishSession.LastLoadedMapSha1))
+        {
+            RestoreSavedMapSelection(root);
+        }
+
+        if (MainWindowContext.IsSkirmishWindow(windowName) && skirmishSettingsLoaded)
+        {
+            FinalizeSkirmishSettingsRestore(root, resources);
+        }
+
         UiNodeViewModel? ddGameMode = MainWindowContext.FindVm(root, "ddGameMode");
         if (ddGameMode != null)
             ddGameMode.SelectionChanged += RefreshLobbyMapList;
@@ -207,10 +237,13 @@ internal sealed class LobbyMapController
                 {
                     if (MainWindowContext.IsSkirmishWindow(windowName))
                     {
-                        DefaultAiSlotPolicy.AutoFillToMapCapacity(
+                        // Requirement: switching maps must remember prior AI adjustments —
+                        // keep rows when capacity matches, drop tail when it shrinks,
+                        // append defaults when it grows. (DefaultAiSlotPolicy stays for
+                        // first entry / fresh fills.)
+                        PreserveAiSlotPolicy.ResizeToMapCapacity(
                             _ctx.SkirmishSession,
                             newMap.MaxPlayers,
-                            MainWindowContext.ResolvePlayerName(),
                             MainWindowContext.ResolveColorCatalog(),
                             LobbyCatalogService.Instance.AiNames);
                     }
@@ -498,6 +531,125 @@ internal sealed class LobbyMapController
             return null;
         UiNodeViewModel? lbMapList = MainWindowContext.FindVm(_ctx.ActiveRoot, "lbMapList");
         return _ctx.LobbySession.GetSelectedMap(lbMapList?.SelectedIndex ?? 0);
+    }
+
+    /// <summary>
+    /// Post-<see cref="GameDataBindingApplier.ApplyLobby"/> step for a restored skirmish
+    /// session: clamp AI rows to the saved map's capacity (or the currently selected map
+    /// for legacy saves), then refresh player rows + start markers.
+    /// </summary>
+    private void FinalizeSkirmishSettingsRestore(UiNodeViewModel root, ResourceResolver resources)
+    {
+        MapEntry? capacityMap = ResolveSavedMap() ?? GetCurrentLobbyMap();
+        if (capacityMap != null)
+        {
+            PreserveAiSlotPolicy.ResizeToMapCapacity(
+                _ctx.SkirmishSession,
+                capacityMap.MaxPlayers,
+                MainWindowContext.ResolveColorCatalog(),
+                LobbyCatalogService.Instance.AiNames,
+                fillToCapacity: false);
+        }
+
+        LobbyPlayerBindingApplier.Apply(
+            root,
+            _ctx.SkirmishSession,
+            _ctx.LobbySession,
+            LobbyCatalogService.Instance,
+            resources,
+            _ctx.MainBehaviors,
+            gameRoomProvider: () => _ctx.CnCNet.GameRoom,
+            onSlotsMutated: () => _ctx.OnLobbySlotsMutated());
+
+        RefreshCurrentMapStartMarkers();
+    }
+
+    /// <summary>
+    /// Resolves the map saved with the skirmish session ([Settings] Map=SHA1) from the
+    /// full catalog — independent of which filter is currently applied, so the capacity
+    /// clamp uses the map the player actually played on.
+    /// </summary>
+    private MapEntry? ResolveSavedMap()
+    {
+        string sha1 = _ctx.SkirmishSession.LastLoadedMapSha1;
+        if (string.IsNullOrEmpty(sha1))
+            return null;
+
+        return _ctx.GameResources.Maps.FirstOrDefault(m =>
+            m.Sha1.Equals(sha1, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Re-selects the saved map (and its game-mode filter) after the map list has been
+    /// populated. DX LoadSettings: filter → list index → scroll into view.
+    /// </summary>
+    private void RestoreSavedMapSelection(UiNodeViewModel root)
+    {
+        MapEntry? savedMap = ResolveSavedMap();
+        if (savedMap == null)
+            return;
+
+        // Prefer the saved game-mode filter so the map is visible in the list.
+        string savedFilter = _ctx.SkirmishSession.LastLoadedGameModeFilter;
+        if (!string.IsNullOrEmpty(savedFilter))
+        {
+            UiNodeViewModel? ddGameMode = MainWindowContext.FindVm(root, "ddGameMode");
+            if (ddGameMode != null)
+            {
+                for (int i = 0; i < ddGameMode.ComboItems.Count; i++)
+                {
+                    if (ddGameMode.ComboItems[i].Equals(savedFilter, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ddGameMode.SetSelectedIndexSilent(i);
+                        _ctx.LobbySession.FilterIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Refresh the list for the (possibly changed) filter, then select the map.
+        _ctx.LobbySession.MapSearchText = string.Empty;
+        UiNodeViewModel? tbMapSearch = MainWindowContext.FindVm(root, "tbMapSearch");
+        if (tbMapSearch != null)
+            tbMapSearch.InputText = string.Empty;
+
+        GameDataBindingApplier.ApplyLobbyMapList(
+            root,
+            _ctx.GameResources,
+            _ctx.LobbySession,
+            _ctx.GetMainResources(),
+            _ctx.LobbySession.FilterIndex,
+            _ctx.ResolveActiveLobbySlots());
+
+        UiNodeViewModel? lbMapList = MainWindowContext.FindVm(root, "lbMapList");
+        if (lbMapList == null)
+            return;
+
+        for (int i = 0; i < _ctx.LobbySession.VisibleMaps.Count; i++)
+        {
+            if (_ctx.LobbySession.VisibleMaps[i].Sha1.Equals(savedMap.Sha1, StringComparison.OrdinalIgnoreCase))
+            {
+                // Silent: slot clamping already happened against this exact map.
+                lbMapList.SetSelectedIndexSilent(i);
+
+                ResourceResolver resources = _ctx.GetMainResources();
+                GameDataBindingApplier.ResolveStartInteractionFlags(
+                    _ctx.LobbySession.UIMode,
+                    _ctx.LobbySession.AllowHostPlayerOptions,
+                    out bool canAssign,
+                    out bool canSelectLocal);
+                GameDataBindingApplier.UpdateMapSelectionDisplay(
+                    root,
+                    _ctx.LobbySession.VisibleMaps,
+                    i,
+                    resources,
+                    _ctx.ResolveActiveLobbySlots(),
+                    canAssign,
+                    canSelectLocal);
+                break;
+            }
+        }
     }
 
     private void OnLobbyMapSearchChanged()

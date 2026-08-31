@@ -471,6 +471,10 @@ public sealed class CnCNetGameRoomSession : ICnCNetGameSession
     IGameOptionsState IGameSession.Options => _sessionOptions;
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
+        = new Dictionary<string, string>();
+
+    /// <inheritdoc />
     public GameSessionState State
     {
         get => _sessionState;

@@ -47,7 +47,7 @@ public static class DxThemeManager
         }
 
         _userAccent = accent;
-        Apply(style, animate: false);
+        Apply(NormalizeStyle(style), animate: false);
     }
 
     /// <summary>Swaps the last merged dictionary (the theme layer) and refreshes derived brushes.

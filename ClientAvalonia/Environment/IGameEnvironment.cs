@@ -35,9 +35,9 @@ public interface IGameEnvironment
     string ResourcesPath { get; }
 
     /// <summary>
-    /// Base 资源目录 = ResourcesPath/Base。
-    /// 对应 ProgramConstants.GetBaseResourcePath()。
-    /// 跨 mod 共享的兜底资源（GameOptions.ini、MPMaps.ini 模板等）放这里。
+    /// Base 资源目录 = GamePath/Resources（与 ProgramConstants.GetBaseResourcePath 一致）。
+    /// Renderers.ini、Compatibility\DLL、GameOptions.ini、ClientDefinitions.ini 等跨主题共享文件在此。
+    /// 旧 DTA 布局若把文件放在 Resources/Base，由调用方做额外兜底搜索。
     /// </summary>
     string BaseResourcesPath { get; }
 

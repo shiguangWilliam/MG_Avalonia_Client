@@ -195,6 +195,11 @@ public static class GameAssetResolver
             vm.SetButtonTextures(idle, hover);
             return;
         }
+
+        // MG ThemeMG provides button.png / button_c.png instead of 92pxbtn.png.
+        Bitmap? mgIdle = resources.LoadBitmap("button.png");
+        if (mgIdle != null)
+            vm.SetButtonTextures(mgIdle, resources.LoadBitmap("button_c.png"));
     }
 
     public static void ApplyCampaignSideIcons(UiNodeViewModel root, ResourceResolver resources)

@@ -1,5 +1,6 @@
 using ClientAvalonia.Domain;
 using ClientAvalonia.Session;
+using ClientAvalonia.Services;
 
 namespace ClientAvalonia.Services;
 
@@ -15,8 +16,11 @@ public static class SkirmishLaunchValidator
         IReadOnlyList<IPlayerSlot> slots,
         int sideCount)
     {
-        int randomSideIndex = Math.Max(0, sideCount - 1);
-        int totalPlayers = slots.Count(s => s.IsOccupied && s.SideIndex < randomSideIndex);
+        // DX: Players.Count(p => p.SideId < ddPlayerSides[0].Items.Count - 1) — spectators
+        // (the last side entry) are NOT players. Mirror that explicitly instead of relying
+        // on the caller passing a count whose last item happens to be Spectator.
+        int spectatorSideIndex = LobbySideCatalog.SpectatorSideIndex;
+        int totalPlayers = slots.Count(s => s.IsOccupied && s.SideIndex != spectatorSideIndex);
 
         if (gameMode.MultiplayerOnly)
         {

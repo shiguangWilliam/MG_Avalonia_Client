@@ -15,6 +15,13 @@ public static class LobbyPlayerHouseResolver
         public int GameColorIndex { get; init; }
 
         public bool IsSpectator { get; init; }
+
+        /// <summary>
+        /// DX PlayerHouseInfo.RandomizeStart outcome: N-1 for an explicitly picked
+        /// start (Slot.StartIndex is 1-based), 90 for spectators, -1 for "let the
+        /// game randomize" (unset). Consumed by [SpawnLocations] writers.
+        /// </summary>
+        public int StartingWaypoint { get; init; }
     }
 
     /// <summary>
@@ -52,10 +59,24 @@ public static class LobbyPlayerHouseResolver
                 InternalSideIndex = ToInternalSideIndex(sideIndex, isSpectator),
                 GameColorIndex = colorIndex,
                 IsSpectator = isSpectator,
+                StartingWaypoint = ResolveStartingWaypoint(slot.StartIndex, isSpectator),
             });
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// DX PlayerHouseInfo.RandomizeStart (client-managed branch): an explicit pick
+    /// becomes waypoint = pick - 1; spectators pin to 90 (spawner observer waypoint);
+    /// unset (0) stays -1 so the game's own placement logic runs.
+    /// </summary>
+    private static int ResolveStartingWaypoint(int startIndex, bool isSpectator)
+    {
+        if (isSpectator)
+            return 90;
+
+        return startIndex > 0 ? startIndex - 1 : -1;
     }
 
     private static int ResolveSideIndex(

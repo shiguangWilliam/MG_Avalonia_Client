@@ -11,4 +11,11 @@ public interface ISkirmishSession : IGameSession
 {
     // 单人本地，无额外网络元数据。
     // 共享逻辑（若有）用扩展方法，不用抽象基类（见 global-state-refactor.md §6.3）。
+
+    /// <summary>
+    /// 最近一次 <c>TryLoadSkirmishSettings</c> 读到的游戏选项快照
+    /// （id → "True/False" | index；DX SkirmishLobby LoadSettings 的 [GameOptions]）。
+    /// View 层负责把它回填到 UI；Session 本身不解析。
+    /// </summary>
+    IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; }
 }

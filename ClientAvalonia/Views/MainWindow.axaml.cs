@@ -46,6 +46,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     private readonly Stack<string> _navStack = new();
     private UiViewModelFactory? _mainViewModelFactory;
     private bool _restoreWindowAfterGame;
+    private bool _reopenOptionsAfterStyleSwitch;
 
     public string CurrentWindow
     {
@@ -508,7 +509,15 @@ public partial class MainWindow : Window, IUiNavigationHost
                 // which used to reload the tree under the OLD style — the root cause
                 // of the Classic/Tactical styles appearing swapped after a switch.
                 Themes.DxThemeManager.Apply(targetStyle);
-                UserINISettings.Instance.VisualStyle.Value = targetStyle;
+                UserINISettings.Instance.VisualStyle.Value = Themes.DxThemeManager.NormalizeStyle(targetStyle);
+                try
+                {
+                    UserINISettings.Instance.SaveSettings();
+                }
+                catch (Exception saveEx)
+                {
+                    Logger.Log($"VisualStyle SaveSettings failed: {saveEx}");
+                }
             }
             catch (Exception ex)
             {
@@ -536,9 +545,16 @@ public partial class MainWindow : Window, IUiNavigationHost
             // Style changed: already-built trees still hold the old style's bitmaps
             // (Tactical drops all PNG chrome). Reload the current window so the
             // switch is visible immediately without a manual re-navigation.
-            if (IsOptionsOverlayOpen)
+            // Reopen Options afterward so Display tab values follow the new style.
+            _reopenOptionsAfterStyleSwitch = IsOptionsOverlayOpen;
+            if (_reopenOptionsAfterStyleSwitch)
                 CloseFloatingOverlaySilently();
             ReloadMainWindowUnderNewStyle();
+            if (_reopenOptionsAfterStyleSwitch)
+            {
+                _reopenOptionsAfterStyleSwitch = false;
+                OpenFloatingOverlay("OptionsWindow");
+            }
         }
 
         PART_ThemeLoadingHost.IsVisible = false;

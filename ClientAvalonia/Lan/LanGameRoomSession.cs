@@ -49,6 +49,11 @@ public sealed class LanGameRoomSession : ILANGameSession
     public long Revision => _revision;
     public GameOptionsState Options { get; } = new();
     IGameOptionsState IGameSession.Options => Options;
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
+        = new Dictionary<string, string>();
+
     public IPlayerSlotSink SlotSink { get; }
     public IReadOnlyList<IPlayerSlot> PlayerSlots => _slots;
     internal LobbyPlayerSlot[] Slots => _slots;

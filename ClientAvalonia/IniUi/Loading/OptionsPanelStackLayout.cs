@@ -23,6 +23,7 @@ internal static class OptionsPanelStackLayout
         "lblClientResolution", "ddClientResolution",
         "chkBorderlessClient",
         "lblClientTheme", "ddClientTheme",
+        "lblVisualStyle", "ddVisualStyle",
         "chkMEDDraw",
         "chkStretchMovies",
         "lblReShade", "ddReShade",

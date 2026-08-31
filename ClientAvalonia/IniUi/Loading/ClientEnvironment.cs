@@ -238,7 +238,7 @@ public sealed class ClientEnvironment
 
         yield return ThemeResourceDirectory;
         yield return ResourcesDirectory;
-        // XNA base resource directory (AppState.Environment.BaseResourcesPath == Resources/Base).
+        // Legacy DTA layouts may still ship shared files under Resources/Base.
         yield return Path.Combine(ResourcesDirectory, "Base");
         // Backward compat: published DTA resource bundles (pre-2.12 standard) ship under Resources/DTA/.
         yield return Path.Combine(ResourcesDirectory, "DTA");

@@ -108,8 +108,8 @@ public sealed class Phase3ProductionMigrationTests
             new LobbyPlayerSlot { Name = "Alice" },
             new LobbyPlayerSlot { Name = "EasyAI", IsAi = true },
         };
-        // 补齐 8 个槽位
-        var fullSlots = slots.Concat(Enumerable.Range(0, 6).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
+        // 补齐 MaxSlots 个槽位
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 2).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         LobbyPlayerSlotUiRules.GetUiRowKind(0, fullSlots, LobbyPlayerMode.Skirmish, allowHostPlayerOptions: true)
             .Should().Be(LobbyPlayerRowKind.Human);
@@ -127,7 +127,7 @@ public sealed class Phase3ProductionMigrationTests
         {
             new LobbyPlayerSlot { Name = "Alice" },
         };
-        var fullSlots = slots.Concat(Enumerable.Range(0, 7).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 1).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         LobbyPlayerSlotUiRules.GetUiRowKind(1, fullSlots, LobbyPlayerMode.Multiplayer, allowHostPlayerOptions: true)
             .Should().Be(LobbyPlayerRowKind.Open, "host multiplayer: rows after humans are Open");
@@ -147,7 +147,7 @@ public sealed class Phase3ProductionMigrationTests
             new LobbyPlayerSlot { Name = "Alice" },
             new LobbyPlayerSlot { Name = "EasyAI", IsAi = true },
         };
-        var fullSlots = slots.Concat(Enumerable.Range(0, 6).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
+        var fullSlots = slots.Concat(Enumerable.Range(0, LobbyPlayerSlot.MaxSlots - 2).Select(_ => (IPlayerSlot)new LobbyPlayerSlot())).ToArray();
 
         for (int i = 0; i < LobbyPlayerSlot.MaxSlots; i++)
         {

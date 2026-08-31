@@ -18,7 +18,6 @@ public static class OptionsOverlayBehaviors
                 return;
 
             host.CommitSettings();
-            host.ShowStatus("设置已保存");
         });
 
         RegisterClose(registry, host, "btnOK", commit: true);

@@ -65,7 +65,21 @@ internal sealed class GameLaunchController
             return false;
         }
 
-        _ctx.SkirmishSession.SaveSkirmishSettings();
+        // DX SkirmishLobby.SaveSettings persists the map SHA1 + mode filter so the
+        // next session restores the map selection AND clamps AI rows to THAT map's
+        // capacity (previously only slots/options were saved — restore clamped
+        // against whichever map happened to sort first, silently dropping the 9th
+        // slot on restore whenever the first map had fewer players).
+        UiNodeViewModel? ddGameModeForSave = MainWindowContext.FindVm(_ctx.ActiveRoot, "ddGameMode");
+        string gameModeFilterName = ddGameModeForSave != null
+            && ddGameModeForSave.SelectedIndex >= 0
+            && ddGameModeForSave.SelectedIndex < ddGameModeForSave.ComboItems.Count
+                ? ddGameModeForSave.ComboItems[ddGameModeForSave.SelectedIndex]
+                : string.Empty;
+        _ctx.SkirmishSession.SaveSkirmishSettings(
+            SkirmishGameOptionsSnapshot.Collect(_ctx.ActiveRoot),
+            map.Sha1,
+            gameModeFilterName);
 
         var request = new SkirmishLaunchRequest
         {

@@ -560,16 +560,16 @@ public class TacticalGlobeView : Panel
 
         if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
         {
-            // Inverse camera orbit: dragging right feels like spinning the globe left.
-            SolarSystemDirector.NudgeCameraOrbit(-dx * DragSensitivity, dy * DragSensitivity * 0.55);
-            SolarSystemDirector.SetCameraOrbitInertia(-_inertiaYaw, dy * DragSensitivity * 0.55);
+            // Same-direction drag: pointer right/down moves the view the same way.
+            SolarSystemDirector.NudgeCameraOrbit(dx * DragSensitivity, -dy * DragSensitivity * 0.55);
+            SolarSystemDirector.SetCameraOrbitInertia(_inertiaYaw, -dy * DragSensitivity * 0.55);
             _overlay.InvalidateVisual();
             e.Handled = true;
             return;
         }
 
-        Yaw += dx * DragSensitivity;
-        Pitch = Math.Clamp(Pitch - dy * DragSensitivity * 0.6, -40.0, 40.0);
+        Yaw -= dx * DragSensitivity;
+        Pitch = Math.Clamp(Pitch + dy * DragSensitivity * 0.6, -40.0, 40.0);
         InvalidatePose();
         e.Handled = true;
     }
@@ -593,7 +593,7 @@ public class TacticalGlobeView : Panel
         }
         else if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
         {
-            SolarSystemDirector.SetCameraOrbitInertia(-_inertiaYaw, 0);
+            SolarSystemDirector.SetCameraOrbitInertia(_inertiaYaw, 0);
         }
 
         e.Handled = true;

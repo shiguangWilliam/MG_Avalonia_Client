@@ -84,14 +84,14 @@ public class DirectDrawWrapper
 
     public void Apply()
     {
-        string ddrawDllSourcePath = SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, _ddrawDllPath);
         string ddrawDllTargetPath = SafePath.CombineFilePath(AppState.Environment.GamePath, "ddraw.dll");
 
         if (!string.IsNullOrEmpty(_ddrawDllPath))
         {
-            if (!File.Exists(ddrawDllSourcePath))
+            string? ddrawDllSourcePath = ResolveResourceFile(_ddrawDllPath);
+            if (ddrawDllSourcePath == null)
             {
-                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' DLL missing at {ddrawDllSourcePath}.");
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' DLL missing: {_ddrawDllPath}");
                 return;
             }
 
@@ -110,18 +110,62 @@ public class DirectDrawWrapper
             && !string.IsNullOrEmpty(_resConfigFileName)
             && !SafePath.GetFile(AppState.Environment.GamePath, ConfigFileName).Exists)
         {
-            File.Copy(
-                SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, _resConfigFileName),
-                SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName)));
+            string? configSource = ResolveResourceFile(_resConfigFileName);
+            if (configSource != null)
+            {
+                File.Copy(
+                    configSource,
+                    SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(ConfigFileName)));
+            }
+            else
+            {
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' config missing: {_resConfigFileName}");
+            }
         }
 
         foreach (string file in _filesToCopy)
         {
+            string? source = ResolveResourceFile(file);
+            if (source == null)
+            {
+                Logger.Log($"DirectDrawWrapper: renderer '{InternalName}' additional file missing: {file}");
+                continue;
+            }
+
             File.Copy(
-                SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, file),
+                source,
                 SafePath.CombineFilePath(AppState.Environment.GamePath, Path.GetFileName(file)),
                 true);
         }
+    }
+
+    /// <summary>
+    /// Resolve a Resources-relative path against base Resources, then legacy Resources\Base.
+    /// </summary>
+    private static string? ResolveResourceFile(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        foreach (string root in EnumerateResourceRoots())
+        {
+            string candidate = SafePath.CombineFilePath(root, relativePath);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateResourceRoots()
+    {
+        string baseResources = AppState.Environment.BaseResourcesPath;
+        string resources = AppState.Environment.ResourcesPath;
+
+        yield return baseResources;
+        if (!baseResources.Equals(resources, StringComparison.OrdinalIgnoreCase))
+            yield return resources;
+        yield return Path.Combine(resources, "Base");
     }
 
     public void Clean()

@@ -103,6 +103,9 @@ namespace ClientCore
 
             IngameScreenWidth = new IntSetting(iniFile, VIDEO, "ScreenWidth", 1024);
             IngameScreenHeight = new IntSetting(iniFile, VIDEO, "ScreenHeight", 768);
+            // Avalonia Options "Client resolution" — must be constructed or DisplayOptionsApplier.Apply NRE-aborts.
+            ClientResolutionX = new IntSetting(iniFile, VIDEO, "ClientResolutionX", 0);
+            ClientResolutionY = new IntSetting(iniFile, VIDEO, "ClientResolutionY", 0);
             ClientTheme = new StringSetting(iniFile, MULTIPLAYER, "Theme", ClientConfiguration.Instance.GetThemeInfoFromIndex(0).Name);
             Translation = new StringSetting(iniFile, OPTIONS, "Translation", I18N.Translation.GetDefaultTranslationLocaleCode());
             DetailLevel = new IntSetting(iniFile, OPTIONS, "DetailLevel", 2);

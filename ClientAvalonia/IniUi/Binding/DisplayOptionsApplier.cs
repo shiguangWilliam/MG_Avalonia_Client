@@ -30,22 +30,38 @@ public static class DisplayOptionsApplier
         {
             ClientCoreBootstrap.TryEnsureInitialized(null, out _);
             GameRendererBootstrap.Manager.ReloadSelectedRendererFromSettings();
-            LoadRendererDropdown(optionsRoot);
-            LoadIngameResolution(optionsRoot);
-            LoadClientResolution(optionsRoot);
-            LoadBackBuffer(optionsRoot);
-            LoadVisualStyleDropdown(optionsRoot);
-            SyncWindowedControlsFromRenderer(optionsRoot, GameRendererBootstrap.Manager.SelectedRenderer);
         }
         catch (Exception ex)
         {
-            Logger.Log("DisplayOptionsApplier.Apply failed: " + ex);
+            Logger.Log("DisplayOptionsApplier.Apply bootstrap failed: " + ex);
+        }
+
+        // Isolate each step — one null setting must not skip VisualStyle / renderer UI.
+        TryLoad("renderer", () => LoadRendererDropdown(optionsRoot));
+        TryLoad("ingameResolution", () => LoadIngameResolution(optionsRoot));
+        TryLoad("clientResolution", () => LoadClientResolution(optionsRoot));
+        TryLoad("backBuffer", () => LoadBackBuffer(optionsRoot));
+        TryLoad("visualStyle", () => LoadVisualStyleDropdown(optionsRoot));
+        TryLoad("windowedSync", () =>
+            SyncWindowedControlsFromRenderer(optionsRoot, GameRendererBootstrap.Manager.SelectedRenderer));
+    }
+
+    private static void TryLoad(string step, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"DisplayOptionsApplier.Apply[{step}] failed: " + ex);
         }
     }
 
     /// <summary>Persist display options and deploy ddraw files (DX options save + Apply).</summary>
     public static void Save(UiNodeViewModel optionsRoot)
     {
+        LastSaveError = null;
         try
         {
             DirectDrawWrapperManager manager = GameRendererBootstrap.Manager;
@@ -56,6 +72,7 @@ public static class DisplayOptionsApplier
             SaveIngameResolution(optionsRoot);
             SaveClientResolution(optionsRoot);
             SaveBackBuffer(optionsRoot);
+            SaveVisualStyle(optionsRoot);
 
             if (targetRenderer.UsesCustomWindowedOption())
             {
@@ -71,8 +88,19 @@ public static class DisplayOptionsApplier
 
             string internalName = targetRenderer.InternalName;
             UserINISettings.Instance.Renderer.Value = internalName;
-            manager.ApplyRenderer(internalName);
+
+            // Persist INI first so VisualStyle / resolutions survive even if hardlinks fail.
             UserINISettings.Instance.SaveSettings();
+
+            try
+            {
+                manager.ApplyRenderer(internalName);
+            }
+            catch (Exception rendererEx)
+            {
+                Logger.Log("DisplayOptionsApplier.ApplyRenderer failed (settings still saved): " + rendererEx);
+                LastSaveError = rendererEx.Message;
+            }
 
             Logger.Log($"DisplayOptionsApplier: saved renderer={internalName}, windowed={windowed}, borderless={borderlessWindowed}, UseQres={GameProcessLauncher.UseQres}.");
         }
@@ -86,6 +114,12 @@ public static class DisplayOptionsApplier
 
     /// <summary>Last renderer-related failure shown in the status bar (null = clean save).</summary>
     public static string? LastSaveError { get; private set; }
+
+    private static void SaveVisualStyle(UiNodeViewModel optionsRoot)
+    {
+        string style = ReadSelectedVisualStyle(optionsRoot);
+        UserINISettings.Instance.VisualStyle.Value = Themes.DxThemeManager.NormalizeStyle(style);
+    }
 
     private static void LoadRendererDropdown(UiNodeViewModel optionsRoot)
     {
@@ -206,11 +240,19 @@ public static class DisplayOptionsApplier
         if (dd.ComboItems.Count == 0)
             return;
 
-        string current = $"{UserINISettings.Instance.ClientResolutionX.Value}x{UserINISettings.Instance.ClientResolutionY.Value}";
-        int index = dd.ComboItems.ToList().FindIndex(i =>
-            i.Equals(current, StringComparison.OrdinalIgnoreCase));
+        IntSetting? resX = UserINISettings.Instance.ClientResolutionX;
+        IntSetting? resY = UserINISettings.Instance.ClientResolutionY;
+        string current = resX != null && resY != null
+            ? $"{resX.Value}x{resY.Value}"
+            : string.Empty;
 
-        if (index < 0 && dd.ComboItems.Count > 0 && dd.ComboItems[0].StartsWith('('))
+        int index = string.IsNullOrEmpty(current)
+            ? -1
+            : dd.ComboItems.ToList().FindIndex(i =>
+                i != null && i.Equals(current, StringComparison.OrdinalIgnoreCase));
+
+        string? first = dd.ComboItems[0];
+        if (index < 0 && first != null && first.StartsWith('('))
             index = 0;
 
         dd.SetSelectedIndexSilent(index >= 0 ? index : 0);
@@ -222,11 +264,15 @@ public static class DisplayOptionsApplier
         if (dd == null || dd.SelectedIndex < 0 || dd.SelectedIndex >= dd.ComboItems.Count)
             return;
 
-        string item = dd.ComboItems[dd.SelectedIndex];
-        if (item.StartsWith('('))
+        string? item = dd.ComboItems[dd.SelectedIndex];
+        if (string.IsNullOrEmpty(item) || item.StartsWith('('))
             return;
 
         if (!TryParseResolution(item, out int width, out int height))
+            return;
+
+        if (UserINISettings.Instance.ClientResolutionX == null
+            || UserINISettings.Instance.ClientResolutionY == null)
             return;
 
         UserINISettings.Instance.ClientResolutionX.Value = width;

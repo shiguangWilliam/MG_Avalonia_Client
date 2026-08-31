@@ -42,6 +42,19 @@ public sealed class SkirmishSession : ISkirmishSession
     public GameOptionsState Options { get; } = new();
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> LastLoadedGameOptions { get; private set; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// 最近一次 <c>TryLoadSkirmishSettings</c> 读到的选中地图 SHA1 与模式过滤名
+    /// （DX [Settings] Map / GameModeMapFilter）。View 层用它恢复地图选中，
+    /// 再按该地图容量钳制恢复的 AI 行。
+    /// </summary>
+    public string LastLoadedMapSha1 { get; private set; } = string.Empty;
+
+    public string LastLoadedGameModeFilter { get; private set; } = string.Empty;
+
+    /// <inheritdoc />
     public IPlayerSlotSink SlotSink { get; }
 
     /// <inheritdoc />
@@ -172,6 +185,7 @@ public sealed class SkirmishSession : ISkirmishSession
         {
             human.Name = AppState.Environment.PlayerName;
             human.IsAi = false;
+            ClampLoadedSlot(human, isAi: false);
             _slots[0] = ToLobbySlot(human, isHumanLocal: true);
         }
 
@@ -181,15 +195,68 @@ public sealed class SkirmishSession : ISkirmishSession
             if (aiSlot >= LobbyPlayerSlot.MaxSlots)
                 break;
             ai.IsAi = true;
+            ClampLoadedSlot(ai, isAi: true);
             _slots[aiSlot] = ToLobbySlot(ai, isHumanLocal: false);
             aiSlot++;
         }
 
         BumpRevision();
+        LastLoadedGameOptions = dto.GameOptions;
+        LastLoadedMapSha1 = dto.MapSha1;
+        LastLoadedGameModeFilter = dto.GameModeMapFilter;
         return true;
     }
 
+    /// <summary>
+    /// DX CheckLoadedPlayerVariableBounds：历史 SideIndex/ColorIndex/TeamIndex/StartIndex
+    /// 越界时回退默认，防止旧脏数据（如误存的 Spectator 索引）每次启动复现旁观局。
+    /// </summary>
+    private static void ClampLoadedSlot(SkirmishPlayerDto slot, bool isAi)
+    {
+        Services.LobbySideCatalogSnapshot sides = Services.LobbySideCatalog.GetSnapshot();
+        int maxSide = sides.SpectatorSideIndex - (isAi ? 1 : 0);
+
+        if (slot.SideIndex < 0 || slot.SideIndex > maxSide)
+            slot.SideIndex = 0;
+
+        if (slot.ColorIndex < 0)
+            slot.ColorIndex = 0;
+
+        // TeamIndex: 0 = none, 1..4 = A..D (DX ddPlayerTeams items count).
+        if (slot.TeamIndex < 0 || slot.TeamIndex > 4)
+            slot.TeamIndex = 0;
+
+        // StartIndex: 0 = unset/random, 1..MaxPlayers per map; clamp to slot capacity.
+        if (slot.StartIndex < 0 || slot.StartIndex > LobbyPlayerSlot.MaxSlots)
+            slot.StartIndex = 0;
+    }
+
     public void SaveSkirmishSettings()
+        => SaveCore(gameOptions: null, mapSha1: null, gameModeFilter: null);
+
+    /// <summary>
+    /// Persists slots plus game-option control values (DX SkirmishLobby.SaveSettings
+    /// under <c>SaveSkirmishGameOptions</c>). The snapshot is supplied by the View layer
+    /// so the session stays free of UI dependencies.
+    /// </summary>
+    public void SaveSkirmishSettings(IReadOnlyDictionary<string, string> gameOptions)
+        => SaveCore(gameOptions, mapSha1: null, gameModeFilter: null);
+
+    /// <summary>
+    /// Full save (DX parity): slots + [GameOptions] + selected map SHA1 / game-mode
+    /// filter. The map identity is what makes restore correct — the restored map's
+    /// MaxPlayers decides how many saved AI rows are valid.
+    /// </summary>
+    public void SaveSkirmishSettings(
+        IReadOnlyDictionary<string, string> gameOptions,
+        string mapSha1,
+        string gameModeFilter)
+        => SaveCore(gameOptions, mapSha1, gameModeFilter);
+
+    private void SaveCore(
+        IReadOnlyDictionary<string, string>? gameOptions,
+        string? mapSha1,
+        string? gameModeFilter)
     {
         ISkirmishSettingsService svc = ResolveSettingsService();
         var dto = new SkirmishSettingsDto();
@@ -203,6 +270,15 @@ public sealed class SkirmishSession : ISkirmishSession
             dto.Ais.Add(ToDto(slot, aiIndex + 1));
             aiIndex++;
         }
+
+        if (gameOptions != null)
+        {
+            foreach (System.Collections.Generic.KeyValuePair<string, string> pair in gameOptions)
+                dto.GameOptions[pair.Key] = pair.Value;
+        }
+
+        dto.MapSha1 = mapSha1 ?? string.Empty;
+        dto.GameModeMapFilter = gameModeFilter ?? string.Empty;
 
         svc.Save(dto);
     }

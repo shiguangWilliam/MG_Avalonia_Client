@@ -103,9 +103,13 @@ public static class LobbyPlayerBindingApplier
         var sideItems = BuildSideItems(sideEntries, resources);
         var teamItems = BuildTeamItems(teamNames);
         var colorItems = BuildColorItems(resources);
-        // Combo SelectedIndex is 0-7; labels are 1-8 (DX GameLobbyBase ddPlayerStart).
-        // Slot.StartIndex stays 1-based (0 = unset/random), matching map markers.
-        var startItems = Enumerable.Range(1, 8).Select(i => i.ToString()).ToArray();
+        // Combo index 0 = "-" (unset / random assignment by the engine from free
+        // waypoints); k = start k. DX ships only 1..8 with the unset state kept
+        // out-of-band (StartingLocation=0 shown as empty); MG exposes it as an
+        // explicit "-" entry so users can return to random after picking a spot.
+        var startItems = new[] { "-" }
+            .Concat(Enumerable.Range(1, LobbyPlayerSlot.MaxSlots).Select(i => i.ToString()))
+            .ToArray();
 
         UiNodeViewModel? firstName = null;
         UiNodeViewModel? firstSide = null;
@@ -172,7 +176,7 @@ public static class LobbyPlayerBindingApplier
                 panel.Children.Add(ddStart);
         }
 
-        EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
+        EnsureColumnCaptions(root, panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
 
         panel.Node.Props["LobbyPlayerSlotsBuilt"] = true;
         SyncUiFromState(panel, slots, mode, allowHost, aiNames, shield);
@@ -237,7 +241,7 @@ public static class LobbyPlayerBindingApplier
         }
 
         if (firstName != null && firstSide != null && firstColor != null && firstTeam != null)
-            EnsureColumnCaptions(panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
+            EnsureColumnCaptions(root, panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
     }
 
     private static void ApplyColumnGeometry(UiNodeViewModel vm, double x, double y, double width)
@@ -284,6 +288,7 @@ public static class LobbyPlayerBindingApplier
     }
 
     private static void EnsureColumnCaptions(
+        UiNodeViewModel root,
         UiNodeViewModel panel,
         PlayerOptionLayout layout,
         UiNodeViewModel? ddName,
@@ -297,28 +302,36 @@ public static class LobbyPlayerBindingApplier
         if (ddName == null || ddSide == null || ddColor == null || ddTeam == null)
             return;
 
-        EnsureCaption(panel, "lblName", "PLAYER", ddName.CanvasLeft, layout.CaptionY, resources, behaviors);
-        EnsureCaption(panel, "lblSide", "SIDE", ddSide.CanvasLeft, layout.CaptionY, resources, behaviors);
-        EnsureCaption(panel, "lblColor", "COLOR", ddColor.CanvasLeft, layout.CaptionY, resources, behaviors);
-        EnsureCaption(panel, "lblTeam", "TEAM", ddTeam.CanvasLeft, layout.CaptionY, resources, behaviors);
+        EnsureCaption(root, panel, "lblName", "PLAYER", ddName.CanvasLeft, layout.CaptionY, resources, behaviors);
+        EnsureCaption(root, panel, "lblSide", "SIDE", ddSide.CanvasLeft, layout.CaptionY, resources, behaviors);
+        EnsureCaption(root, panel, "lblColor", "COLOR", ddColor.CanvasLeft, layout.CaptionY, resources, behaviors);
+        EnsureCaption(root, panel, "lblTeam", "TEAM", ddTeam.CanvasLeft, layout.CaptionY, resources, behaviors);
 
         if (ddStart != null)
-            EnsureCaption(panel, "lblStart", "START", ddStart.CanvasLeft, layout.CaptionY, resources, behaviors);
+            EnsureCaption(root, panel, "lblStart", "START", ddStart.CanvasLeft, layout.CaptionY, resources, behaviors);
     }
 
+    /// <summary>
+    /// DX parity: ReadINIForControl(lbl) keeps the INI/localized text — only the
+    /// geometry is ours. A caption adopted from the theme INI (e.g. MG's 玩家/阵营/
+    /// 颜色/小队) must keep its Text; only synthesize + translate when absent.
+    /// Search the whole tree so captions adopted at the window root are re-parented
+    /// into the panel instead of being left hidden by HideOrphanPlayerControls.
+    /// </summary>
     private static void EnsureCaption(
+        UiNodeViewModel root,
         UiNodeViewModel panel,
         string id,
-        string text,
+        string fallbackText,
         double x,
         double y,
         ResourceResolver resources,
         BehaviorRegistry behaviors)
     {
-        UiNodeViewModel? existing = FindVm(panel, id);
+        UiNodeViewModel? existing = FindVm(panel, id) ?? FindVm(root, id);
         if (existing != null)
         {
-            existing.SetDisplayText(text);
+            DetachFromCurrentParent(root, existing, panel);
             existing.SetCanvasPosition(x, y);
             existing.IsVisible = true;
             return;
@@ -333,11 +346,37 @@ public static class LobbyPlayerBindingApplier
         node.Props["CanvasLeft"] = x;
         node.Props["CanvasTop"] = y;
         node.Props["IsVisible"] = true;
-        node.Props["Text"] = text;
+        node.Props["Text"] = fallbackText;
         node.Props["FontIndex"] = 1;
 
         var vm = new UiNodeViewModel(node, resources, behaviors);
         panel.Children.Add(vm);
+    }
+
+    /// <summary>Move <paramref name="vm"/> into <paramref name="panel"/> unless already there.</summary>
+    private static void DetachFromCurrentParent(UiNodeViewModel root, UiNodeViewModel vm, UiNodeViewModel panel)
+    {
+        UiNodeViewModel? parent = FindParent(root, vm);
+        if (parent == null || ReferenceEquals(parent, panel))
+            return;
+
+        parent.Children.Remove(vm);
+        panel.Children.Add(vm);
+    }
+
+    private static UiNodeViewModel? FindParent(UiNodeViewModel node, UiNodeViewModel target)
+    {
+        foreach (UiNodeViewModel child in node.Children)
+        {
+            if (ReferenceEquals(child, target))
+                return node;
+
+            UiNodeViewModel? found = FindParent(child, target);
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -427,10 +466,18 @@ public static class LobbyPlayerBindingApplier
                 ? (current.IsAi ? LobbyPlayerRowKind.Ai : LobbyPlayerRowKind.Human)
                 : LobbyPlayerRowKind.Open;
 
-        int side = ddSide?.SelectedIndex >= 0 ? ddSide.SelectedIndex : 0;
-        int color = ddColor?.SelectedIndex >= 0 ? ddColor.SelectedIndex : 0;
-        int team = ddTeam?.SelectedIndex >= 0 ? ddTeam.SelectedIndex : 0;
-        int start = StartIndexFromCombo(ddStart);
+        // Rebuild-safe per-field reads: while Items are being rebuilt the ComboBox
+        // TwoWay binding pushes -1 / stale indices. An INVALID dropdown state falls
+        // back to the session's current value for that field — but a valid selection
+        // always wins. NOTE: ddStart.SelectedIndex == -1 is the legitimate "unset /
+        // random" state (DX StartingLocation=0), NOT a rebuild artifact, so it must
+        // never veto the whole row (that was the always-spectator regression).
+        int side = ResolveComboValue(ddSide, current.SideIndex);
+        int color = ResolveComboValue(ddColor, current.ColorIndex);
+        int team = ResolveComboValue(ddTeam, current.TeamIndex);
+        // Combo layout: 0 = "-" (random), k = start k. An invalid dropdown (rebuild
+        // transient) falls back to the session value; "-" is a VALID pick → StartIndex 0.
+        int start = HasValidSelection(ddStart) ? ddStart.SelectedIndex : current.StartIndex;
 
         if (rowKind == LobbyPlayerRowKind.Human)
         {
@@ -747,16 +794,20 @@ public static class LobbyPlayerBindingApplier
     }
 
     /// <summary>
-    /// Slot.StartIndex (0 = unset, 1-8 = spawn) → combo SelectedIndex (0-7), or -1 when unset.
+    /// Slot.StartIndex (0 = "-"/random, 1-9 = spawn) → combo SelectedIndex
+    /// (0 = "-", k = start k). Every valid state maps to a visible entry now.
     /// </summary>
     private static int StartIndexToCombo(int startIndex)
-        => startIndex >= 1 && startIndex <= 8 ? startIndex - 1 : -1;
+        => startIndex >= 0 && startIndex <= 9 ? startIndex : -1;
 
     /// <summary>
-    /// Combo SelectedIndex (0-7 showing labels 1-8) → Slot.StartIndex (1-8), or 0 when unset.
+    /// True when the dropdown currently holds a real selection (>= 0, in range).
+    /// ddStart's -1 ("unset / random") is a valid state handled by the caller.
     /// </summary>
-    private static int StartIndexFromCombo(UiNodeViewModel? ddStart)
-        => ddStart?.SelectedIndex >= 0 ? ddStart.SelectedIndex + 1 : 0;
+    private static bool HasValidSelection(UiNodeViewModel? dropdown)
+        => dropdown != null
+           && dropdown.SelectedIndex >= 0
+           && dropdown.SelectedIndex < dropdown.ComboItems.Count;
 
     /// <summary>Maps slot index to combo index; -1 clears selection (XNA unused slots).</summary>
     private static int ResolveSelectedIndex(UiNodeViewModel dropdown, int index)
@@ -774,6 +825,20 @@ public static class LobbyPlayerBindingApplier
 
         return dropdown.ComboItems[dropdown.SelectedIndex];
     }
+
+    /// <summary>
+    /// True while a dropdown is mid-rebuild (empty items or out-of-range selection).
+    /// Such states must never be written back to the session.
+    /// </summary>
+    private static bool IsComboTransient(UiNodeViewModel? dropdown)
+        => dropdown == null
+           || dropdown.ComboItems.Count == 0
+           || dropdown.SelectedIndex < 0
+           || dropdown.SelectedIndex >= dropdown.ComboItems.Count;
+
+    /// <summary>Combo value when valid; falls back to the session's current value otherwise.</summary>
+    private static int ResolveComboValue(UiNodeViewModel? dropdown, int fallback)
+        => dropdown != null && !IsComboTransient(dropdown) ? dropdown.SelectedIndex : fallback;
 
     /// <summary>
     /// 纯参数版本——直接吃 <see cref="IReadOnlyList{LobbySideEntry}"/>。
@@ -826,7 +891,50 @@ public static class LobbyPlayerBindingApplier
             StartWidth = ReadInt(root, "StartWidth", DefaultStartWidth),
         };
 
+        layout = FitRowsToPanelHeight(layout, root);
         return NormalizeColumnWidths(layout, root);
+    }
+
+    /// <summary>
+    /// Vertical auto-fit: with 9 slots the INI row pitch (21 + VerticalMargin) can
+    /// exceed the PlayerOptionsPanel height (MG: 270px, pitch 30 → 286px needed),
+    /// pushing slot 9 under the content below the panel. Compress the margin so the
+    /// last row's bottom fits; floor at 24px pitch (21px control + 3px gap) so rows
+    /// never visually collide. INI-defined pitches that already fit are untouched.
+    /// </summary>
+    private static PlayerOptionLayout FitRowsToPanelHeight(PlayerOptionLayout layout, UiNodeViewModel root)
+    {
+        UiNodeViewModel? panel = FindVm(root, "PlayerOptionsPanel");
+        if (panel == null || panel.Height <= 0)
+            return layout;
+
+        // Reserve a few px below the last row (mirrors the INI's own bottom breathing room).
+        int available = (int)panel.Height - layout.LocationY - 4;
+        int rows = LobbyPlayerSlot.MaxSlots;
+        int requiredPitch = DropDownHeight + layout.VerticalMargin;
+        int needed = requiredPitch * (rows - 1) + DropDownHeight;
+
+        if (needed <= available)
+            return layout;
+
+        int maxPitch = Math.Max(DropDownHeight + 3, (available - DropDownHeight) / (rows - 1));
+        int fittedMargin = Math.Max(3, maxPitch - DropDownHeight);
+        if (fittedMargin >= layout.VerticalMargin)
+            return layout;
+
+        return new PlayerOptionLayout
+        {
+            LocationX = layout.LocationX,
+            LocationY = layout.LocationY,
+            VerticalMargin = fittedMargin,
+            HorizontalMargin = layout.HorizontalMargin,
+            CaptionY = layout.CaptionY,
+            NameWidth = layout.NameWidth,
+            SideWidth = layout.SideWidth,
+            ColorWidth = layout.ColorWidth,
+            TeamWidth = layout.TeamWidth,
+            StartWidth = layout.StartWidth,
+        };
     }
 
     /// <summary>MG theme INI uses wide name + narrow team/start; fit within PlayerOptionsPanel.</summary>

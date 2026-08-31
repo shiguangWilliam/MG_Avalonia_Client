@@ -223,7 +223,7 @@ public sealed class DirectDrawWrapperManager
     private static List<DirectDrawWrapper> LoadRenderers(out string defaultRenderer)
     {
         var renderers = new List<DirectDrawWrapper>();
-        var renderersIni = new IniFile(SafePath.CombineFilePath(AppState.Environment.BaseResourcesPath, RenderersIni));
+        IniFile renderersIni = OpenRenderersIni();
 
         IReadOnlyList<string>? keys = renderersIni.GetSectionKeys("Renderers");
         if (keys == null)
@@ -263,7 +263,56 @@ public sealed class DirectDrawWrapperManager
             defaultRenderer = renderers[0].InternalName;
         }
 
+        Logger.Log($"DirectDrawWrapperManager: loaded {renderers.Count} renderer(s), default={defaultRenderer}.");
         return renderers;
+    }
+
+    /// <summary>
+    /// Resolve Renderers.ini from the DX base Resources folder, with legacy Resources\Base fallback.
+    /// </summary>
+    private static IniFile OpenRenderersIni()
+    {
+        foreach (string path in EnumerateRendererIniCandidates())
+        {
+            if (!File.Exists(path))
+                continue;
+
+            Logger.Log($"DirectDrawWrapperManager: using Renderers.ini at {path}");
+            return new IniFile(path);
+        }
+
+        string primary = EnumerateRendererIniCandidates().First();
+        Logger.Log($"DirectDrawWrapperManager: Renderers.ini not found (tried base Resources and Resources\\Base). Opening empty at {primary}.");
+        return new IniFile(primary);
+    }
+
+    private static IEnumerable<string> EnumerateRendererIniCandidates()
+    {
+        string resources = AppState.Environment.ResourcesPath;
+        string baseResources = AppState.Environment.BaseResourcesPath;
+
+        var paths = new List<string>
+        {
+            SafePath.CombineFilePath(baseResources, RenderersIni),
+        };
+
+        if (!baseResources.Equals(resources, StringComparison.OrdinalIgnoreCase))
+            paths.Add(SafePath.CombineFilePath(resources, RenderersIni));
+
+        paths.Add(SafePath.CombineFilePath(resources, "Base", RenderersIni));
+
+        try
+        {
+            string programBase = ProgramConstants.GetBaseResourcePath();
+            if (!string.IsNullOrWhiteSpace(programBase))
+                paths.Add(SafePath.CombineFilePath(programBase, RenderersIni));
+        }
+        catch
+        {
+            // ProgramConstants may be unbound in unit tests.
+        }
+
+        return paths.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Minimal no-op renderer used when Renderers.ini is unavailable.</summary>

@@ -16,7 +16,7 @@ public sealed class MockGameEnvironmentTests
         };
 
         env.ResourcesPath.Should().Be(Path.Combine(@"D:\Games\MG", "Resources"));
-        env.BaseResourcesPath.Should().Be(Path.Combine(env.ResourcesPath, "Base"));
+        env.BaseResourcesPath.Should().Be(env.ResourcesPath);
     }
 
     [Fact]

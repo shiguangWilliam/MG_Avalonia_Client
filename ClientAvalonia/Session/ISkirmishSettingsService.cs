@@ -40,6 +40,22 @@ public sealed class SkirmishSettingsDto
     public SkirmishPlayerDto? Human { get; set; }
     public System.Collections.Generic.List<SkirmishPlayerDto> Ais { get; } = new();
 
+    /// <summary>
+    /// Game-option control values (id → "True/False" for checkboxes,
+    /// selected index for dropdowns). Mirrors DX SkirmishLobby [GameOptions].
+    /// </summary>
+    public System.Collections.Generic.Dictionary<string, string> GameOptions { get; } = new();
+
+    /// <summary>
+    /// Selected map SHA1 (DX SkirmishLobby SaveSettings: [Settings] Map=).
+    /// Drives the map-capacity clamp on restore — the restored map decides how
+    /// many saved AI rows are valid, not whichever map happens to sort first.
+    /// </summary>
+    public string MapSha1 { get; set; } = string.Empty;
+
+    /// <summary>Game-mode filter display name ([Settings] GameModeMapFilter).</summary>
+    public string GameModeMapFilter { get; set; } = string.Empty;
+
     public bool HasContent => Human != null || Ais.Count > 0;
 }
 
@@ -117,6 +133,20 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
             }
         }
 
+        System.Collections.Generic.List<string>? gameOptionKeys = ini.GetSectionKeys("GameOptions");
+        if (gameOptionKeys != null)
+        {
+            foreach (string key in gameOptionKeys)
+            {
+                string value = ini.GetStringValue("GameOptions", key, string.Empty);
+                if (!string.IsNullOrEmpty(value))
+                    dto.GameOptions[key] = value;
+            }
+        }
+
+        dto.MapSha1 = ini.GetStringValue("Settings", "Map", string.Empty);
+        dto.GameModeMapFilter = ini.GetStringValue("Settings", "GameModeMapFilter", string.Empty);
+
         return dto.HasContent ? dto : null;
     }
 
@@ -134,6 +164,23 @@ public sealed class SkirmishSettingsService : ISkirmishSettingsService
 
         for (int i = 0; i < dto.Ais.Count; i++)
             ini.SetStringValue("AIPlayers", i.ToString(), dto.Ais[i].ToString());
+
+        // DX SkirmishLobby.SaveSettings: game-option values go to [GameOptions].
+        // Drop stale keys from previous sessions by erasing the section first.
+        if (dto.GameOptions.Count > 0)
+        {
+            ini.EraseSectionKeys("GameOptions");
+            foreach (System.Collections.Generic.KeyValuePair<string, string> pair in dto.GameOptions)
+                ini.SetStringValue("GameOptions", pair.Key, pair.Value);
+        }
+
+        // DX SkirmishLobby.SaveSettings: [Settings] Map=<SHA1> + GameModeMapFilter
+        // so the next session restores the map selection (and clamps AI rows to
+        // THAT map's capacity, not whichever map sorts first).
+        if (!string.IsNullOrEmpty(dto.MapSha1))
+            ini.SetStringValue("Settings", "Map", dto.MapSha1);
+        if (!string.IsNullOrEmpty(dto.GameModeMapFilter))
+            ini.SetStringValue("Settings", "GameModeMapFilter", dto.GameModeMapFilter);
 
         ini.WriteIniFile();
     }

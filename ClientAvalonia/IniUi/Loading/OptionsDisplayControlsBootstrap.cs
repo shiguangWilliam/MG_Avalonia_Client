@@ -1,5 +1,6 @@
 using ClientAvalonia.IniUi.Models;
 using ClientCore.Extensions;
+using System.Linq;
 
 namespace ClientAvalonia.IniUi.Loading;
 
@@ -32,6 +33,8 @@ internal static class OptionsDisplayControlsBootstrap
         UiNode? panel = tree.FindNode("DisplayOptionsPanel");
         if (panel == null)
             return;
+
+        EnsureLabel(panel, "lblVisualStyle", "视觉风格:");
 
         foreach (DropdownDef def in DisplayDropdowns)
         {
@@ -177,5 +180,30 @@ internal static class OptionsDisplayControlsBootstrap
         node.Parent = panel;
         if (!panel.Children.Contains(node))
             panel.Children.Add(node);
+    }
+
+    private static void EnsureLabel(UiNode panel, string id, string text)
+    {
+        UiNode? existing = panel.Children.FirstOrDefault(c =>
+            c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            if (!HasDisplayText(existing))
+                existing.Props["Text"] = text;
+            return;
+        }
+
+        var node = new UiNode
+        {
+            Id = id,
+            ControlType = "XNALabel",
+            TemplateKey = "DxLabel",
+            WindowName = "OptionsWindow",
+            Parent = panel,
+        };
+        node.Props["Text"] = text;
+        node.Props["Width"] = 228.0;
+        node.Props["Height"] = 20.0;
+        panel.Children.Add(node);
     }
 }

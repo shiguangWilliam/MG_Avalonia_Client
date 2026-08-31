@@ -121,13 +121,57 @@ public static class SkirmishSpawnWriter
             otherId++;
         }
 
+        // DX WriteSpawnIni: the spawner assigns players to MultiN houses in game-color
+        // order, so AI HouseCountries/HouseColors keys must follow that same mapping
+        // instead of the raw slot order (previous write used aiId + 2, which silently
+        // desynced AI sides/colors whenever the human's color sorted after an AI's).
+        List<MultiplayerColorCatalog.MultiplayerColorEntry> sortedColors =
+            MultiplayerColorCatalog.Load().OrderBy(mpc => mpc.GameColorIndex).ToList();
+
+        var multiCmbIndexes = new List<int>();
+        for (int cId = 0; cId < sortedColors.Count; cId++)
+        {
+            for (int pId = 0; pId < humans.Count; pId++)
+            {
+                if (houses[pId].GameColorIndex == sortedColors[cId].GameColorIndex)
+                    multiCmbIndexes.Add(pId);
+            }
+        }
+
         for (int aiId = 0; aiId < ais.Count; aiId++)
         {
             LobbyPlayerHouseResolver.ResolvedHouse house = houses[humans.Count + aiId];
-            string keyName = "Multi" + (aiId + 2);
+            string keyName = "Multi" + (multiCmbIndexes.Count + aiId + 1);
             spawnIni.SetIntValue("HouseHandicaps", keyName, LobbyPlayerHouseResolver.HouseHandicapFromAiLevel(ais[aiId].AiLevel));
             spawnIni.SetIntValue("HouseCountries", keyName, house.InternalSideIndex);
             spawnIni.SetIntValue("HouseColors", keyName, house.GameColorIndex);
+        }
+
+        // Spectator houses flagged per MultiN (DX parity; the game only honors this form).
+        for (int multiId = 0; multiId < multiCmbIndexes.Count; multiId++)
+        {
+            if (houses[multiCmbIndexes[multiId]].IsSpectator)
+                spawnIni.SetBooleanValue("IsSpectator", "Multi" + (multiId + 1), true);
+        }
+
+        // Teams → MultiN_Alliances (DX AllianceHolder; previously missing entirely).
+        var startingWaypoints = houses.Select(h => h.StartingWaypoint).ToList();
+        SpawnAllianceWriter.WriteAlliances(humans, ais, multiCmbIndexes, startingWaypoints, spawnIni);
+
+        // Explicit start picks / spectator waypoints → [SpawnLocations] (DX parity;
+        // -1 leaves placement to the game's own logic).
+        for (int multiId = 0; multiId < multiCmbIndexes.Count; multiId++)
+        {
+            int startingWaypoint = houses[multiCmbIndexes[multiId]].StartingWaypoint;
+            if (startingWaypoint > -1)
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiId + 1), startingWaypoint);
+        }
+
+        for (int aiId = 0; aiId < ais.Count; aiId++)
+        {
+            int startingWaypoint = houses[humans.Count + aiId].StartingWaypoint;
+            if (startingWaypoint > -1)
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiCmbIndexes.Count + aiId + 1), startingWaypoint);
         }
 
         SpawnIniApplier.ApplySpawnDefaults(spawnIni);
