@@ -143,8 +143,12 @@ internal sealed class CnCNetGameRoomController
     public void WireCnCNetGameOptionsBridge()
     {
         CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_ctx.CnCNet).Service;
-        session.GameOptionsControlCounts = () => CnCNetGameOptionsUiBridge.GetControlCounts(_ctx.ActiveRoot);
-        session.GameOptionsProvider = CollectCnCNetGameOptions;
+        // 并发治理方案 §4 阶段 5：Provider/ControlCounts 由 IRC 读线程调用（GO 广播），
+        // 而它们枚举 UI 树——必须 marshal 回 UI 线程；Provider 结果走 volatile 快照缓存，
+        // 使 IRC 线程在 UI 忙时也能同步取到最近一次状态而不阻塞过久。
+        session.GameOptionsControlCounts = MarshalToUi(
+            () => CnCNetGameOptionsUiBridge.GetControlCounts(_ctx.ActiveRoot));
+        session.GameOptionsProvider = MarshalProviderSnapshot;
         session.GameOptionsReceiver = ApplyCnCNetGameOptionsFromHost;
         WireHostGameOptionChangeBroadcast();
         session.GameRoom?.TryFlushPendingGameOptions();
@@ -157,7 +161,30 @@ internal sealed class CnCNetGameRoomController
         session.GameOptionsControlCounts = null;
         session.GameOptionsProvider = null;
         session.GameOptionsReceiver = null;
+        _lastProviderSnapshot = null;
     }
+
+    private volatile CnCNetGameOptionsState? _lastProviderSnapshot;
+
+    private CnCNetGameOptionsState MarshalProviderSnapshot()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            _lastProviderSnapshot = CollectCnCNetGameOptions();
+            return _lastProviderSnapshot;
+        }
+
+        // Already on UI thread once: reuse cached snapshot (races cost one stale broadcast,
+        // next option change re-syncs — preferable to re-posting while UI is busy).
+        _lastProviderSnapshot ??= Dispatcher.UIThread.InvokeAsync(CollectCnCNetGameOptions)
+            .GetAwaiter().GetResult();
+        return _lastProviderSnapshot;
+    }
+
+    private static Func<T> MarshalToUi<T>(Func<T> read)
+        => () => Dispatcher.UIThread.CheckAccess()
+            ? read()
+            : Dispatcher.UIThread.InvokeAsync(read).GetAwaiter().GetResult();
 
     private void WireHostGameOptionChangeBroadcast()
     {

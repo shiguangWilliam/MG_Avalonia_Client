@@ -27,6 +27,12 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
     private readonly List<CnCNetGameRoomPlayer> _players = [];
     private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
     private readonly GameOptionsState _sessionOptions = new();
+
+    /// <summary>
+    /// 槽位写入锁根：UI 线程 sink 写与 IRC 读线程入站写（PO/OR apply）共享 _sync
+    /// （并发治理方案 §4 阶段 1）。
+    /// </summary>
+    protected override object? SlotSyncRoot => _sync;
     private IMapResource? _sessionMap;
     private GameSessionState _sessionState = GameSessionState.Lobby;
 
@@ -65,6 +71,16 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
     public Action<CnCNetGameOptionsState>? GameOptionsReceiver { get; set; }
 
     public Func<(int CheckBoxCount, int DropDownCount)>? GameOptionsControlCounts { get; set; }
+
+    /// <summary>
+    /// 有界拉取：UI 线程读 _players.Count 等标量时若已持锁则免二次加锁（锁可重入，
+    /// 但本 helper 让锁段外的快照读显式化，见并发治理方案 §4 阶段 2）。
+    /// </summary>
+    internal T Snapshot<T>(Func<T> reader)
+    {
+        lock (_sync)
+            return reader();
+    }
 
     public Func<IReadOnlyList<CnCNetTunnel>>? AvailableTunnelsProvider { get; set; }
 
@@ -131,12 +147,24 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
 
     public bool IsHost => Room.IsHost;
 
-    public string HostName { get; private set; }
+    public string HostName { get => HostNameValue; private set => HostNameValue = value; }
+
+    private string HostNameValue
+    {
+        get { lock (_sync) return _hostName; }
+        set { lock (_sync) _hostName = value; }
+    }
+
+    private string _hostName = string.Empty;
 
     /// <summary>ICnCNetGameSession.RoomName — 转发到底层 Room。</summary>
     public string RoomName => Room.RoomName;
 
-    public bool Locked => _locked;
+    public bool Locked
+    {
+        get { lock (_sync) return _locked; }
+        private set { lock (_sync) _locked = value; }
+    }
 
     public int UniqueGameId => _uniqueGameId;
 
@@ -638,7 +666,7 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
                 int humanCount = _players.Count(p => !p.IsAi);
                 if (!name.Equals(_localNick, StringComparison.OrdinalIgnoreCase)
                     && humanCount >= Room.MaxPlayers
-                    && !_locked)
+                    && !Locked)
                 {
                     SetLocked(true, autoPlayerLimit: true);
                 }
@@ -998,7 +1026,7 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
         if (!IsHost || _connection == null)
             return;
 
-        int occupiedCount = _players.Count;
+        int occupiedCount = Snapshot(() => _players.Count);
         if (!GameLobbySettingsRules.CanSetMaxPlayers(maxPlayers, occupiedCount, out string? reject))
         {
             LogNotice(reject!);
@@ -1169,7 +1197,7 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
             return false;
         }
 
-        if (!_locked)
+        if (!Locked)
         {
             message = "The host needs to lock the game room before launching the game.";
             return false;
@@ -1265,7 +1293,7 @@ public sealed class CnCNetGameRoomSession : GameSessionBase, ICnCNetGameSession
     {
         try
         {
-            if (!IsHost || _connection == null || !_connection.IsConnected || !_locked)
+            if (!IsHost || _connection == null || !_connection.IsConnected || !Locked)
             {
                 AddRoomNotice("Game launch cancelled.");
                 return;

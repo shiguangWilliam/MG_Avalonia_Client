@@ -11,7 +11,9 @@ namespace ClientAvalonia.Session;
 /// <item>不持有自己的数组——通过 <c>slotsAccessor</c> 委托每次访问最新数组，
 /// 避免与 owning Session 的数组生命周期脱钩。</item>
 /// <item>静默 vs 非静默由 <c>silent</c> 参数控制；非静默写入后调用 <c>onChanged</c>。</item>
-/// <item>无锁——并发安全由 owning Session 保证（如 CnCNetGameRoomSession 内的 _sync）。</item>
+/// <item>线程安全：传入 <c>syncRoot</c>（如 CnCNet 的 <c>_sync</c>）时所有写入持锁执行，
+/// 使 UI 线程 sink 写与 IRC 读线程的入站写共享同一把锁；单线程会话（Skirmish/LAN）
+/// 传 null 保持零开销。注意 <c>onChanged</c> 回调在锁内执行——实现方不得再取同锁。</item>
 /// </list>
 ///
 /// 使用方式（在 Session 构造时）：
@@ -23,13 +25,16 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
 {
     private readonly Func<IPlayerSlot[]> _slotsAccessor;
     private readonly Action? _onChanged;
+    private readonly object? _syncRoot;
 
     /// <param name="slotsAccessor">返回当前槽位数组的委托（每次调用返回最新引用）。</param>
     /// <param name="onChanged">非静默写入完成后的回调（用于触发 StateChanged）。</param>
-    public LobbyPlayerSlotSink(Func<IPlayerSlot[]> slotsAccessor, Action? onChanged = null)
+    /// <param name="syncRoot">可选锁根；多线程会话（CnCNet）传入使写入持锁，null 表示单线程。</param>
+    public LobbyPlayerSlotSink(Func<IPlayerSlot[]> slotsAccessor, Action? onChanged = null, object? syncRoot = null)
     {
         _slotsAccessor = slotsAccessor ?? throw new ArgumentNullException(nameof(slotsAccessor));
         _onChanged = onChanged;
+        _syncRoot = syncRoot;
     }
 
     /// <inheritdoc />
@@ -37,11 +42,14 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
-        IPlayerSlot[] slots = _slotsAccessor();
-        if ((uint)index >= (uint)slots.Length) return;
+        WithLock(() =>
+        {
+            IPlayerSlot[] slots = _slotsAccessor();
+            if ((uint)index >= (uint)slots.Length) return;
 
-        OverwriteSlotSilent(index, source);
-        _onChanged?.Invoke();
+            OverwriteSlotSilentCore(slots, index, source);
+            _onChanged?.Invoke();
+        });
     }
 
     /// <inheritdoc />
@@ -49,9 +57,17 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
-        IPlayerSlot[] slots = _slotsAccessor();
-        if ((uint)index >= (uint)slots.Length) return;
+        WithLock(() =>
+        {
+            IPlayerSlot[] slots = _slotsAccessor();
+            if ((uint)index >= (uint)slots.Length) return;
 
+            OverwriteSlotSilentCore(slots, index, source);
+        });
+    }
+
+    private static void OverwriteSlotSilentCore(IPlayerSlot[] slots, int index, IPlayerSlot source)
+    {
         IPlayerSlot target = slots[index];
         target.Name = source.Name;
         target.SideIndex = source.SideIndex;
@@ -77,11 +93,16 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
     {
         if (update.IsEmpty) return;
 
-        IPlayerSlot[] slots = _slotsAccessor();
-        if ((uint)index >= (uint)slots.Length) return;
+        // in-参数不能被 lambda 捕获；struct 拷贝成本可忽略。
+        SlotFieldUpdate captured = update;
+        WithLock(() =>
+        {
+            IPlayerSlot[] slots = _slotsAccessor();
+            if ((uint)index >= (uint)slots.Length) return;
 
-        WriteSlotSilent(index, in update);
-        _onChanged?.Invoke();
+            WriteSlotSilentCore(slots, index, in captured);
+            _onChanged?.Invoke();
+        });
     }
 
     /// <inheritdoc />
@@ -89,9 +110,18 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
     {
         if (update.IsEmpty) return;
 
-        IPlayerSlot[] slots = _slotsAccessor();
-        if ((uint)index >= (uint)slots.Length) return;
+        SlotFieldUpdate captured = update;
+        WithLock(() =>
+        {
+            IPlayerSlot[] slots = _slotsAccessor();
+            if ((uint)index >= (uint)slots.Length) return;
 
+            WriteSlotSilentCore(slots, index, in captured);
+        });
+    }
+
+    private static void WriteSlotSilentCore(IPlayerSlot[] slots, int index, in SlotFieldUpdate update)
+    {
         IPlayerSlot s = slots[index];
         if (update.Name != null) s.Name = update.Name;
         if (update.SideIndex.HasValue) s.SideIndex = update.SideIndex.Value;
@@ -115,33 +145,51 @@ public sealed class LobbyPlayerSlotSink : IPlayerSlotSink
     /// <inheritdoc />
     public void ClearSlot(int index)
     {
-        IPlayerSlot[] slots = _slotsAccessor();
-        if ((uint)index >= (uint)slots.Length) return;
+        WithLock(() =>
+        {
+            IPlayerSlot[] slots = _slotsAccessor();
+            if ((uint)index >= (uint)slots.Length) return;
 
-        ClearSlotCore(slots[index]);
-        _onChanged?.Invoke();
+            ClearSlotCore(slots[index]);
+            _onChanged?.Invoke();
+        });
     }
 
     /// <inheritdoc />
     public void ClearAll()
     {
-        foreach (IPlayerSlot s in _slotsAccessor())
-            ClearSlotCore(s);
-        _onChanged?.Invoke();
+        WithLock(() =>
+        {
+            foreach (IPlayerSlot s in _slotsAccessor())
+                ClearSlotCore(s);
+            _onChanged?.Invoke();
+        });
     }
 
     /// <inheritdoc />
     public void CopyFrom(IReadOnlyList<IPlayerSlot> source)
     {
-        IPlayerSlot[] slots = _slotsAccessor();
-        for (int i = 0; i < slots.Length; i++)
+        WithLock(() =>
         {
-            if (i < source.Count)
-                OverwriteSlotSilent(i, source[i]);
-            else
-                ClearSlotCore(slots[i]);
-        }
-        _onChanged?.Invoke();
+            IPlayerSlot[] slots = _slotsAccessor();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (i < source.Count)
+                    OverwriteSlotSilentCore(slots, i, source[i]);
+                else
+                    ClearSlotCore(slots[i]);
+            }
+            _onChanged?.Invoke();
+        });
+    }
+
+    private void WithLock(Action action)
+    {
+        if (_syncRoot != null)
+            lock (_syncRoot)
+                action();
+        else
+            action();
     }
 
     private static void ClearSlotCore(IPlayerSlot s)

@@ -3,6 +3,7 @@ using ClientAvalonia.Domain.Multiplayer.CnCNet;
 using ClientAvalonia.CnCNet.Tunnels;
 using ClientAvalonia.CnCNet.Waf;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -15,21 +16,40 @@ using ClientAvalonia.GlobalState;
 
 namespace ClientAvalonia.CnCNet;
 
-/// <summary>CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.</summary>
+/// <summary>
+/// CnCNet session: IRC connect, channel join, tunnel list, player/game lobby state.
+///
+/// 锁纪律（并发治理方案 §2，2026-09-02 落地）：
+/// <list type="bullet">
+/// <item><b>_sync</b>：连接对象生命周期（_connection 创建/销毁）与隧道刷新标志。不保护下列集合。</item>
+/// <item><b>ConcurrentDictionary</b>：_games / _gamesByBroadcast / _channelUsers /
+/// _joinedBroadcastChannels / _followedGameIds / _gameBroadcastRejectHintsShown /
+/// _joinPermanentlyDenied / _privateThreads——IRC 读线程、Timer、ThreadPool 与 UI
+/// 并发读写；复合操作用 GetOrAdd/TryAdd，禁止退回普通 Dictionary。</item>
+/// <item><b>PM 线程内锁</b>：CnCNetPrivateMessageThread 自持 _sync（消息/未读计数）。</item>
+/// <item><b>volatile 标量</b>：LastPrivateMessagePartner / ViewingPrivateMessagePeer /
+/// LobbyState.ConnectionStatus——引用赋值原子，仅保可见性。</item>
+/// <item><b>有界 ConcurrentQueue</b>：LobbyState 聊天与连接日志（入队后裁剪）。</item>
+/// <item><b>房间面</b>：CnCNetGameRoomSession._sync 统一保护槽位（经 GameSessionBase
+/// .SlotSyncRoot → LobbyPlayerSlotSink）、_players、_chatLines 与房间标量。</item>
+/// </list>
+/// </summary>
 public sealed class CnCNetSession : IDisposable
 {
     public static CnCNetSession Instance { get; } = new();
 
     private readonly object _sync = new();
-    private readonly Dictionary<string, CnCNetHostedGameSummary> _games = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Dictionary<string, CnCNetHostedGameSummary>> _gamesByBroadcast = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _joinedBroadcastChannels = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _followedGameIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _gameBroadcastRejectHintsShown = new(StringComparer.Ordinal);
+    // 并发治理方案 §4 阶段 3：IRC 读线程 / Timer / ThreadPool 与 UI 并发读写，
+    // 全部容器走 ConcurrentDictionary（复合操作用 GetOrAdd，不引入新锁域）。
+    private readonly ConcurrentDictionary<string, CnCNetHostedGameSummary> _games = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, CnCNetHostedGameSummary>> _gamesByBroadcast = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _channelUsers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _joinedBroadcastChannels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _followedGameIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _gameBroadcastRejectHintsShown = new(StringComparer.Ordinal);
     /// <summary>Channels that returned permanent JOIN denial (e.g. IRC 474 +b). Do not auto-retry.</summary>
-    private readonly HashSet<string> _joinPermanentlyDenied = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, CnCNetPrivateMessageThread> _privateThreads =
+    private readonly ConcurrentDictionary<string, byte> _joinPermanentlyDenied = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CnCNetPrivateMessageThread> _privateThreads =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _settingsSavedSubscribed;
 
@@ -274,7 +294,7 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         bool changed = false;
-        foreach (Dictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
+        foreach (ConcurrentDictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
         {
             foreach (CnCNetHostedGameSummary game in bucket.Values.ToList())
             {
@@ -285,9 +305,9 @@ public sealed class CnCNetSession : IDisposable
                 if (tunnelOk)
                     continue;
 
-                if (bucket.Remove(game.ChannelName))
+                if (bucket.TryRemove(game.ChannelName, out _))
                     changed = true;
-                _games.Remove(game.ChannelName);
+                _games.TryRemove(game.ChannelName, out _);
             }
         }
 
@@ -547,7 +567,7 @@ public sealed class CnCNetSession : IDisposable
             return;
 
         string broadcast = NormalizeIrcChannel(game.GameBroadcastChannel!);
-        if (_joinedBroadcastChannels.Contains(broadcast))
+        if (_joinedBroadcastChannels.ContainsKey(broadcast))
             return;
 
         if (IsJoinPermanentlyDenied(broadcast))
@@ -593,9 +613,9 @@ public sealed class CnCNetSession : IDisposable
     private void ConfirmBroadcastChannelJoined(string channel)
     {
         string normalized = NormalizeIrcChannel(channel);
-        if (_joinedBroadcastChannels.Add(normalized))
+        if (_joinedBroadcastChannels.TryAdd(normalized, 0))
         {
-            _joinPermanentlyDenied.Remove(normalized);
+            _joinPermanentlyDenied.TryRemove(normalized, out _);
             // Prefer R13 until the first peer GAME locks this listing channel.
             _broadcastDialect.EnterChannel(normalized);
             LogActivity($"Joined game broadcast channel {normalized}.", notifyUi: false);
@@ -605,7 +625,7 @@ public sealed class CnCNetSession : IDisposable
     private void DropBroadcastChannelMembership(string channel)
     {
         string normalized = NormalizeIrcChannel(channel);
-        if (_joinedBroadcastChannels.Remove(normalized))
+        if (_joinedBroadcastChannels.TryRemove(normalized, out _))
         {
             _broadcastDialect.LeaveChannel(normalized);
             LogActivity($"Left game broadcast channel {normalized}.", notifyUi: false);
@@ -635,7 +655,7 @@ public sealed class CnCNetSession : IDisposable
                     _connection.PartChannel(_currentGame.GameBroadcastChannel!);
             }
 
-            foreach (string broadcast in _joinedBroadcastChannels.ToList())
+            foreach (string broadcast in _joinedBroadcastChannels.Keys.ToList())
                 _connection.PartChannel(broadcast);
 
             _joinedBroadcastChannels.Clear();
@@ -897,14 +917,27 @@ public sealed class CnCNetSession : IDisposable
 
     public int UnreadPrivateMessageCount => _privateThreads.Values.Sum(t => t.UnreadCount);
 
-    public string? LastPrivateMessagePartner { get; private set; }
+    // 并发治理方案 §4 阶段 3：IRC 读线程写 ↔ UI 读，volatile 保证可见性
+    // （引用赋值原子，无复合读写）。
+    public volatile string? VolatileLastPrivateMessagePartner;
+
+    public string? LastPrivateMessagePartner
+    {
+        get => VolatileLastPrivateMessagePartner;
+        private set => VolatileLastPrivateMessagePartner = value;
+    }
+
+    private volatile string? _viewingPrivateMessagePeer;
 
     /// <summary>
     /// Peer currently focused in the PM overlay. Incoming messages from this nick do not
     /// increment unread and do not raise status-bar popups.
     /// </summary>
-    public string? ViewingPrivateMessagePeer { get; private set; }
-
+    public string? ViewingPrivateMessagePeer
+    {
+        get => _viewingPrivateMessagePeer;
+        private set => _viewingPrivateMessagePeer = value;
+    }
     /// <summary>
     /// Raised after a private message is stored (UI may show a brief status toast).
     /// Args: peer nick, preview text (already sanitized for display).
@@ -933,8 +966,7 @@ public sealed class CnCNetSession : IDisposable
         if (string.IsNullOrWhiteSpace(nick))
             return;
 
-        if (!_privateThreads.ContainsKey(nick))
-            _privateThreads[nick] = new CnCNetPrivateMessageThread(nick);
+        _privateThreads.GetOrAdd(nick, n => new CnCNetPrivateMessageThread(n));
 
         LastPrivateMessagePartner = nick;
         _privateThreads[nick].MarkRead();
@@ -961,11 +993,8 @@ public sealed class CnCNetSession : IDisposable
     private void AppendPrivateMessage(string peerNick, CnCNetChatLine line, bool incrementUnread)
     {
         string nick = StripIrcPrefixes(peerNick);
-        if (!_privateThreads.TryGetValue(nick, out CnCNetPrivateMessageThread? thread))
-        {
-            thread = new CnCNetPrivateMessageThread(nick);
-            _privateThreads[nick] = thread;
-        }
+        CnCNetPrivateMessageThread thread = _privateThreads.GetOrAdd(
+            nick, n => new CnCNetPrivateMessageThread(n));
 
         thread.Append(line, incrementUnread);
     }
@@ -987,7 +1016,7 @@ public sealed class CnCNetSession : IDisposable
         {
             string name = StripIrcPrefixes(nick);
             if (!string.IsNullOrWhiteSpace(name))
-                _channelUsers.Add(name);
+                _channelUsers.TryAdd(name, 0);
         }
     }
 
@@ -1188,7 +1217,7 @@ public sealed class CnCNetSession : IDisposable
         // Transient: 439 (target change too fast), 471 (limit) may recover — still avoid tight loops.
         bool permanent = code is 474 or 473 or 476 or 405;
         if (permanent)
-            _joinPermanentlyDenied.Add(normalized);
+            _joinPermanentlyDenied.TryAdd(normalized, 0);
 
         if (!string.IsNullOrWhiteSpace(channel) && IsKnownBroadcastChannel(channel))
         {
@@ -1269,7 +1298,7 @@ public sealed class CnCNetSession : IDisposable
     }
 
     private bool IsJoinPermanentlyDenied(string normalizedChannel)
-        => _joinPermanentlyDenied.Contains(NormalizeIrcChannel(normalizedChannel));
+        => _joinPermanentlyDenied.ContainsKey(NormalizeIrcChannel(normalizedChannel));
 
     public void Dispose()
     {
@@ -1413,7 +1442,7 @@ public sealed class CnCNetSession : IDisposable
 
         AllowPrivateMessagesFromEnum policy =
             PrivateMessagePolicyOverrideForTests ?? CnCNetPrivateMessagePolicy.FromUserSettings();
-        bool inChannel = _channelUsers.Contains(peer);
+        bool inChannel = _channelUsers.ContainsKey(peer);
         if (!CnCNetPrivateMessagePolicy.ShouldAccept(policy, inChannel))
         {
             LogActivity($"PM from {peer} ignored (AllowPrivateMessagesFrom={policy}).", notifyUi: false);
@@ -1507,14 +1536,14 @@ public sealed class CnCNetSession : IDisposable
         if (_currentGame == null)
             return;
 
-        _channelUsers.Remove(name);
+        _channelUsers.TryRemove(name, out _);
         RefreshLobbyPlayers();
     }
 
     private void ReplaceChannelUserName(string oldName, string newName)
     {
-        if (_channelUsers.Remove(oldName))
-            _channelUsers.Add(newName);
+        if (_channelUsers.TryRemove(oldName, out _))
+            _channelUsers.TryAdd(newName, 0);
     }
 
     private void HandleGameInvite(string sender, string arguments, bool skipWaf = false)
@@ -1566,18 +1595,18 @@ public sealed class CnCNetSession : IDisposable
                 continue;
 
             bool followed = UserINISettings.Instance.IsGameFollowed(game.InternalName.ToUpperInvariant());
-            bool wasFollowed = _followedGameIds.Contains(game.InternalName);
+            bool wasFollowed = _followedGameIds.ContainsKey(game.InternalName);
 
             if (wasFollowed && !followed)
             {
                 _connection.PartChannel(game.GameBroadcastChannel!);
                 DropBroadcastChannelMembership(game.GameBroadcastChannel!);
-                _followedGameIds.Remove(game.InternalName);
+                _followedGameIds.TryRemove(game.InternalName, out _);
             }
             else if (!wasFollowed && followed)
             {
                 JoinGameBroadcastChannel(game);
-                _followedGameIds.Add(game.InternalName);
+                _followedGameIds.TryAdd(game.InternalName, 0);
             }
         }
 
@@ -1601,7 +1630,7 @@ public sealed class CnCNetSession : IDisposable
                 continue;
 
             JoinGameBroadcastChannel(game);
-            _followedGameIds.Add(game.InternalName);
+            _followedGameIds.TryAdd(game.InternalName, 0);
         }
     }
 
@@ -1614,8 +1643,7 @@ public sealed class CnCNetSession : IDisposable
         if (_currentGame == null || !IsChatChannel(channel))
             return;
 
-        if (_channelUsers.Count == 0 && _connection is { IsConnected: true } && _namesRetryCount < 2)
-        {
+        if (_channelUsers.Count == 0 && _connection is { IsConnected: true } && _namesRetryCount < 2)        {
             _namesRetryCount++;
             LogActivity($"NAMES empty for {channel}, retrying ({_namesRetryCount}/2)...");
             _connection.RequestChannelNames(_currentGame!.ChatChannel);
@@ -1812,7 +1840,7 @@ public sealed class CnCNetSession : IDisposable
         {
             string name = StripIrcPrefixes(user);
             if (!string.IsNullOrWhiteSpace(name))
-                _channelUsers.Add(name);
+                _channelUsers.TryAdd(name, 0);
         }
 
         LogActivity($"Channel user list ({channel}): {_channelUsers.Count} users.");
@@ -1860,10 +1888,10 @@ public sealed class CnCNetSession : IDisposable
         if (_currentGame == null || !IsChatChannel(channel))
             return;
 
-        _channelUsers.Add(name);
+        _channelUsers.TryAdd(name, 0);
         if (_connection != null
             && _connection.IsLocalUser(name)
-            && _channelUsers.Count(u => u.Equals(name, StringComparison.OrdinalIgnoreCase)) == 1)
+            && _channelUsers.Keys.Count(u => u.Equals(name, StringComparison.OrdinalIgnoreCase)) == 1)
         {
             LogActivity($"Joined chat channel {channel} as {name}.");
             EnsureGameBroadcastChannelsJoined();
@@ -1898,7 +1926,7 @@ public sealed class CnCNetSession : IDisposable
         if (!IsChatChannel(channel) && !channel.Equals("*", StringComparison.Ordinal))
             return;
 
-        _channelUsers.Remove(name);
+        _channelUsers.TryRemove(name, out _);
         RefreshLobbyPlayers();
     }
 
@@ -1908,7 +1936,7 @@ public sealed class CnCNetSession : IDisposable
             return false;
 
         bool changed = false;
-        foreach (Dictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
+        foreach (ConcurrentDictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
         {
             var toRemove = bucket.Values
                 .Where(g => g.HostName.Equals(hostName, StringComparison.OrdinalIgnoreCase))
@@ -1917,9 +1945,9 @@ public sealed class CnCNetSession : IDisposable
 
             foreach (string key in toRemove)
             {
-                if (bucket.Remove(key))
+                if (bucket.TryRemove(key, out _))
                     changed = true;
-                _games.Remove(key);
+                _games.TryRemove(key, out _);
             }
         }
 
@@ -2086,9 +2114,9 @@ public sealed class CnCNetSession : IDisposable
         game.RiskLevel = waf.Severity;
         game.RiskSummary = waf.Summary;
 
-        if (!_gamesByBroadcast.TryGetValue(normalizedBroadcast, out Dictionary<string, CnCNetHostedGameSummary>? bucket))
+        if (!_gamesByBroadcast.TryGetValue(normalizedBroadcast, out ConcurrentDictionary<string, CnCNetHostedGameSummary>? bucket))
         {
-            bucket = new Dictionary<string, CnCNetHostedGameSummary>(StringComparer.OrdinalIgnoreCase);
+            bucket = new ConcurrentDictionary<string, CnCNetHostedGameSummary>(StringComparer.OrdinalIgnoreCase);
             _gamesByBroadcast[normalizedBroadcast] = bucket;
         }
 
@@ -2128,7 +2156,7 @@ public sealed class CnCNetSession : IDisposable
                     ? "invalid field count"
                     : rejectReason;
 
-        if (!_gameBroadcastRejectHintsShown.Add(bucket))
+        if (!_gameBroadcastRejectHintsShown.TryAdd(bucket, 0))
             return;
 
         string hint = bucket switch
@@ -2149,17 +2177,17 @@ public sealed class CnCNetSession : IDisposable
         LogActivity(hint);
     }
 
-    private void RemoveHostedGame(Dictionary<string, CnCNetHostedGameSummary> bucket, CnCNetHostedGameSummary game)
+    private void RemoveHostedGame(ConcurrentDictionary<string, CnCNetHostedGameSummary> bucket, CnCNetHostedGameSummary game)
     {
-        bucket.Remove(game.ChannelName);
-        _games.Remove(game.ChannelName);
+        bucket.TryRemove(game.ChannelName, out _);
+        _games.TryRemove(game.ChannelName, out _);
 
         foreach (CnCNetHostedGameSummary hostedGame in bucket.Values
                      .Where(g => g.HostName.Equals(game.HostName, StringComparison.OrdinalIgnoreCase))
                      .ToList())
         {
-            bucket.Remove(hostedGame.ChannelName);
-            _games.Remove(hostedGame.ChannelName);
+            bucket.TryRemove(hostedGame.ChannelName, out _);
+            _games.TryRemove(hostedGame.ChannelName, out _);
         }
     }
 
@@ -2188,17 +2216,17 @@ public sealed class CnCNetSession : IDisposable
         DateTime cutoff = DateTime.UtcNow.AddSeconds(-HostedGameLifetimeSeconds);
         bool changed = false;
 
-        foreach (Dictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
+        foreach (ConcurrentDictionary<string, CnCNetHostedGameSummary> bucket in _gamesByBroadcast.Values.ToList())
         {
             foreach (CnCNetHostedGameSummary game in bucket.Values.ToList())
             {
                 if (game.LastRefreshUtc >= cutoff)
                     continue;
 
-                if (bucket.Remove(game.ChannelName))
+                if (bucket.TryRemove(game.ChannelName, out _))
                     changed = true;
 
-                _games.Remove(game.ChannelName);
+                _games.TryRemove(game.ChannelName, out _);
             }
         }
 
@@ -2229,7 +2257,7 @@ public sealed class CnCNetSession : IDisposable
             return [];
 
         string broadcast = NormalizeIrcChannel(_currentGame.GameBroadcastChannel!);
-        if (!_gamesByBroadcast.TryGetValue(broadcast, out Dictionary<string, CnCNetHostedGameSummary>? bucket))
+        if (!_gamesByBroadcast.TryGetValue(broadcast, out ConcurrentDictionary<string, CnCNetHostedGameSummary>? bucket))
             return [];
 
         return bucket.Values
@@ -2378,7 +2406,7 @@ public sealed class CnCNetSession : IDisposable
 
     private void RefreshLobbyPlayers()
     {
-        var players = _channelUsers.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        var players = _channelUsers.Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         LobbyState.SetChannelPlayers(players);
         StateChanged?.Invoke();
     }

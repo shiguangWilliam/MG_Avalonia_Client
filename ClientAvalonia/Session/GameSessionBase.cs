@@ -32,8 +32,15 @@ public abstract class GameSessionBase
 
     protected GameSessionBase()
     {
-        SlotSink = new LobbyPlayerSlotSink(() => CoreSlots, RaiseStateChanged);
+        SlotSink = new LobbyPlayerSlotSink(() => CoreSlots, RaiseStateChanged, SlotSyncRoot);
     }
+
+    /// <summary>
+    /// 槽位写入锁根（并发治理方案 §4 阶段 1）。单线程会话（Skirmish/LAN）返回 null——
+    /// sink 写入零锁开销；多线程会话（CnCNet，IRC 读线程入站写 ↔ UI sink 写）覆写返回
+    /// 自己的 <c>_sync</c>，使两条写路径共享同一把锁。
+    /// </summary>
+    protected virtual object? SlotSyncRoot => null;
 
     /// <summary>
     /// seam 1（abstract）：切换地图时重置槽位。三会话策略不同——
