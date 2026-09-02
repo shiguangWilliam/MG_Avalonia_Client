@@ -109,6 +109,10 @@ internal sealed class GameLaunchController
         return true;
     }
 
+    /// <summary>
+    /// Issue #23: Campaign 与 skirmish 对齐——启动全程走 BeginLaunch（Task.Run 包裹 +
+    /// 完成回投 UI），UI 线程不再被 INI 预处理器等待（WaitForIniPreprocessor 最多 10s）阻塞。
+    /// </summary>
     public bool TryLaunchCampaign(out string message)
     {
         UiNodeViewModel? campaignRoot = null;
@@ -141,21 +145,31 @@ internal sealed class GameLaunchController
         int difficulty = CampaignOverlayController.ResolveCampaignDifficulty(campaignRoot);
         UserINISettings.Instance.Difficulty.Value = difficulty;
 
-        bool launched = _ctx.GameLaunch.TryLaunchCampaign(
+        var request = new CampaignLaunchRequest
+        {
+            Mission = mission,
+            DifficultyIndex = difficulty,
+            OverlayRoot = campaignRoot,
+        };
+
+        message = "Launching game...";
+        _ctx.GameLaunch.BeginLaunch(
             _ctx.Environment,
-            new CampaignLaunchRequest
+            new CampaignLaunchSession(request),
+            (ok, result) => Dispatcher.UIThread.Post(() =>
             {
-                Mission = mission,
-                DifficultyIndex = difficulty,
-                OverlayRoot = campaignRoot,
-            },
-            out message,
-            _ctx.GetOwnerWindow());
+                if (!ok)
+                {
+                    _ctx.ShowStatus($"Launch failed: {result}");
+                    ClientDialogService.ShowError(_ctx.GetOwnerWindow(), "Cannot launch game", result);
+                    return;
+                }
 
-        if (launched)
-            UserINISettings.Instance.SaveSettings();
+                UserINISettings.Instance.SaveSettings();
+                _ctx.ShowStatus(result);
+            }));
 
-        return launched;
+        return true;
     }
 
     public bool TryLaunchCnCNetGame(out string message)
@@ -275,12 +289,12 @@ internal sealed class GameLaunchController
         if (selected == null)
             return;
 
-        bool ok = _ctx.GameLaunch.TryLaunch(
+        // Issue #23: 异步化——保存文件加载也可能等 INI 预处理器，不能阻塞 UI。
+        _ctx.GameLaunch.BeginLaunch(
             _ctx.Environment,
             new SinglePlayerLoadLaunchSession(selected.FileName),
-            out string message,
-            _ctx.GetOwnerWindow());
-        _ctx.ShowStatus(ok ? message : $"Load failed: {message}");
+            (ok, message) => Dispatcher.UIThread.Post(() =>
+                _ctx.ShowStatus(ok ? message : $"Load failed: {message}")));
     }
 
     private bool BeginLanProcessLaunch(LanGameRoomSession room, out string message)
@@ -312,12 +326,23 @@ internal sealed class GameLaunchController
             IsHost = room.IsHost,
         };
 
-        bool ok = _ctx.GameLaunch.TryLaunchLan(
+        // Issue #23: 与 skirmish/campaign 对齐，走 BeginLaunch 避免阻塞 UI。
+        message = "Launching game...";
+        _ctx.GameLaunch.BeginLaunch(
             _ctx.Environment,
-            request,
-            startInfo,
-            out message,
-            _ctx.GetOwnerWindow());
-        return ok;
+            new MultiplayerLaunchSession(request, cncNet: null, roomPlayers: null, gameOptions: null, lan: startInfo),
+            (ok, result) => Dispatcher.UIThread.Post(() =>
+            {
+                if (!ok)
+                {
+                    _ctx.ShowStatus($"Launch failed: {result}");
+                    ClientDialogService.ShowError(_ctx.GetOwnerWindow(), "Cannot launch game", result);
+                    return;
+                }
+
+                _ctx.ShowStatus(result);
+            }));
+
+        return true;
     }
 }

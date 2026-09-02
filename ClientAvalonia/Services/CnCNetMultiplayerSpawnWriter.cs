@@ -198,27 +198,33 @@ public static class CnCNetMultiplayerSpawnWriter
                 spawnIni.SetBooleanValue("IsSpectator", "Multi" + (multiIndex + 1), true);
         }
 
+        // Issue #25: startingWaypoints 统一走 ResolvedHouse.StartingWaypoint——
+        // 联机旁观者拿到 90（观战点）而非 -1（随机出生），与 DX GameLobbyBase 及
+        // skirmish 路径（SkirmishSpawnWriter）语义一致。
         var startingWaypoints = new List<int>(humans.Count);
         for (int i = 0; i < humans.Count; i++)
-            startingWaypoints.Add(humans[i].StartIndex > 0 ? humans[i].StartIndex - 1 : -1);
+            startingWaypoints.Add(houses[i].StartingWaypoint);
 
         SpawnAllianceWriter.WriteAlliances(humans, ais, multiCmbIndexes, startingWaypoints, spawnIni);
 
         for (int multiIndex = 0; multiIndex < multiCmbIndexes.Count; multiIndex++)
         {
             int playerIndex = multiCmbIndexes[multiIndex];
-            int startIndex = humans[playerIndex].StartIndex;
-            if (startIndex > 0)
-                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiIndex + 1), startIndex - 1);
+            int waypoint = houses[playerIndex].StartingWaypoint;
+            if (waypoint >= 0)
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + (multiIndex + 1), waypoint);
         }
 
+        // Issue #25: AI 键与上方 HouseHandicaps/HouseCountries/HouseColors 的
+        // multiCmbIndexes.Count + aiIndex + 1 对齐（原先 humans.Count 偏移在
+        // 人类被旁观者挤出颜色序时会产生错位键）。
         for (int aiIndex = 0; aiIndex < ais.Count; aiIndex++)
         {
-            int startIndex = ais[aiIndex].StartIndex;
-            if (startIndex > 0)
+            int waypoint = houses[humans.Count + aiIndex].StartingWaypoint;
+            if (waypoint >= 0)
             {
-                int multiIndex = humans.Count + aiIndex + 1;
-                spawnIni.SetIntValue("SpawnLocations", "Multi" + multiIndex, startIndex - 1);
+                int multiIndex = multiCmbIndexes.Count + aiIndex + 1;
+                spawnIni.SetIntValue("SpawnLocations", "Multi" + multiIndex, waypoint);
             }
         }
 

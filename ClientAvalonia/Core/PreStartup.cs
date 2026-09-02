@@ -157,8 +157,9 @@ public static class PreStartup
     {
         if (parameters.NoAudio)
         {
-            Logger.Log("Startup parameter: No audio");
-            throw new NotImplementedException("-NOAUDIO is not implemented in ClientAvalonia.");
+            // DX 降级行为：记录后继续启动（ClientAvalonia 音频子系统无独立开关，
+            // 保持不动即等效"禁用失败但不致命"）。崩溃退出比上游更糟。
+            Logger.Log("Startup parameter: No audio supplied; audio subsystem unchanged (-NOAUDIO is not implemented).");
         }
 
         if (parameters.MultipleInstanceMode)
@@ -195,6 +196,17 @@ public static class PreStartup
         {
             Logger.Log("InnerException: " + ex.InnerException.Message);
             Logger.Log("Inner stacktrace: " + ex.InnerException.StackTrace);
+        }
+
+        // DX 启动器靠 BootstrapError 显示错误对话框——不设值时 Release 下
+        // 崩溃对话框消息为空，用户无从上报。此处兜底写全类型+消息。
+        try
+        {
+            Startup.BootstrapError ??= $"{ex.GetType().Name}: {ex.Message}";
+            Startup.BootstrapSucceeded = false;
+        }
+        catch
+        {
         }
 
         try

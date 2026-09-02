@@ -16,9 +16,12 @@ namespace ClientAvalonia.Services;
 /// </summary>
 public sealed class GameLaunchService
 {
-    private Process? _runningProcess;
+    // Issue #24: IsRunning 不再触碰 Process 生命周期——退出回调先 Dispose 再广播，
+    // 而 _runningProcess 置空晚于事件链完成，窗口期查询 HasExited 会 ObjectDisposedException。
+    // 改为自维护布尔：启动成功置 1，退出事件置 0，查询只读标志。
+    private int _isGameRunning;
 
-    public bool IsRunning => _runningProcess is { HasExited: false };
+    public bool IsRunning => Volatile.Read(ref _isGameRunning) != 0;
 
     public event Action<string>? StatusChanged;
     public event Action? GameProcessStarting;
@@ -72,7 +75,7 @@ public sealed class GameLaunchService
 
     private void OnLauncherProcessExited()
     {
-        _runningProcess = null;
+        Volatile.Write(ref _isGameRunning, 0);
         StatusChanged?.Invoke("Game exited.");
         GameProcessExited?.Invoke();
     }
@@ -118,7 +121,7 @@ public sealed class GameLaunchService
             GameLaunchDiagnostics.LogAfterPreparation(launchMode, prepMs > 0 ? prepMs : prepSw.ElapsedMilliseconds);
 
             GameProcessLauncher.AttachExitHandler(process);
-            _runningProcess = process;
+            Volatile.Write(ref _isGameRunning, 1);
 
             totalSw.Stop();
             GameLaunchDiagnostics.LogProcessStarted(launchMode, totalSw.ElapsedMilliseconds);
