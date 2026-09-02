@@ -19,7 +19,6 @@ public class DxCampaignGlobeHost : Panel
 {
     private readonly TacticalGlobeView _globe = new();
     private UiNodeViewModel? _listVm;
-    private bool _suppressSelectionSync;
 
     public static readonly StyledProperty<UiNodeViewModel?> OverlayRootProperty =
         AvaloniaProperty.Register<DxCampaignGlobeHost, UiNodeViewModel?>(nameof(OverlayRoot));
@@ -153,31 +152,26 @@ public class DxCampaignGlobeHost : Panel
         if (_listVm == null)
             return;
 
-        _suppressSelectionSync = true;
-        try
+        // Issue #32: the old _suppressSelectionSync flag was written here but never
+        // read — dead code, removed. Setting SelectedIndex re-fires the property
+        // change with the same node index, so the sync is naturally idempotent.
+        int listIndex = -1;
+        int counter = -1;
+        foreach (CatalogListItemViewModel item in _listVm.CatalogListItems)
         {
-            int listIndex = -1;
-            int counter = -1;
-            foreach (CatalogListItemViewModel item in _listVm.CatalogListItems)
+            if (item.IsHeader)
+                continue;
+
+            counter++;
+            if (counter == nodeIndex)
             {
-                if (item.IsHeader)
-                    continue;
-
-                counter++;
-                if (counter == nodeIndex)
-                {
-                    listIndex = _listVm.CatalogListItems.IndexOf(item);
-                    break;
-                }
+                listIndex = _listVm.CatalogListItems.IndexOf(item);
+                break;
             }
+        }
 
-            if (listIndex >= 0)
-                _listVm.SelectedIndex = listIndex;
-        }
-        finally
-        {
-            _suppressSelectionSync = false;
-        }
+        if (listIndex >= 0)
+            _listVm.SelectedIndex = listIndex;
     }
 
     /// <summary>Stable (lat, lon) from mission label hash — deterministic across sessions.</summary>

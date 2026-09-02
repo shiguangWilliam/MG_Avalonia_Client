@@ -59,6 +59,15 @@ public static class SolarSystemDirector
 
     public static double AnchorRevealOpacity { get; private set; } = 1.0;
 
+    /// <summary>
+    /// Issue #34: true while director-driven animation (exit outer-restore fade,
+    /// orbit inertia) still needs render frames. Lets the backdrop stop its
+    /// 33ms clock when both this and the scene pose blend are idle.
+    /// </summary>
+    public static bool HasContinuousAnimation => _exitRestoreActive
+        || Math.Abs(_orbitInertiaYaw) > 0.02
+        || Math.Abs(_orbitInertiaPitch) > 0.02;
+
     public static event Action? FrameAdvanced;
 
     /// <summary>Always the Kepler Earth spin — interaction never overrides it.</summary>
@@ -102,6 +111,7 @@ public static class SolarSystemDirector
         {
             _backdrop.Gl.Scene.NavigateTo(SolarSystemScene.PanelKindForWindow(windowName));
             _backdrop.RenderOnce();
+            _backdrop.EnsureClockRunning();
         }
     }
 
@@ -121,6 +131,7 @@ public static class SolarSystemDirector
         _backdrop.Gl.Scene.BeginEarthFocus();
         BeginCampaignReveal();
         _backdrop.RenderOnce();
+        _backdrop.EnsureClockRunning();
         PublishProjectionFrame(0.0);
     }
 
@@ -151,6 +162,7 @@ public static class SolarSystemDirector
         _exitRestoreActive = true;
         OuterSystemOpacity = 0.0;
         _backdrop.RenderOnce();
+        _backdrop.EnsureClockRunning();
         PublishProjectionFrame(0.0);
     }
 
@@ -176,6 +188,7 @@ public static class SolarSystemDirector
     public static void NudgeCameraOrbit(double deltaYawDeg, double deltaPitchDeg)
     {
         _backdrop?.Gl.Scene.NudgeSurfaceOrbit(deltaYawDeg, deltaPitchDeg);
+        _backdrop?.EnsureClockRunning();
     }
 
     /// <summary>Pointer-release inertia for camera orbit.</summary>
@@ -186,11 +199,12 @@ public static class SolarSystemDirector
     }
 
     /// <summary>Select a mission: camera focuses then co-rotates with Earth.</summary>
-    public static void FocusMission(double latitudeDegrees, double longitudeDegrees)
+    public static bool FocusMission(double latitudeDegrees, double longitudeDegrees)
     {
         _orbitInertiaYaw = 0;
         _orbitInertiaPitch = 0;
-        _backdrop?.Gl.Scene.FocusMission(latitudeDegrees, longitudeDegrees);
+        _backdrop?.EnsureClockRunning();
+        return _backdrop?.Gl.Scene.FocusMission(latitudeDegrees, longitudeDegrees) ?? false;
     }
 
     public static void ClearMissionLock() => _backdrop?.Gl.Scene.ClearMissionLock();

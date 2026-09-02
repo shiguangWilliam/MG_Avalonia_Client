@@ -685,6 +685,60 @@ public sealed class SolarSystemSceneTests
         Assert.True(spin1 > spin0);
     }
 
+    // ------------------------------------------------------------------
+    // Issue #31 / #32
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void FocusMission_Returns_False_And_Logs_When_Surface_Orbit_Inactive()
+    {
+        var scene = new SolarSystemScene();
+        Assert.False(scene.SurfaceOrbitActive);
+
+        // Issue #32: previously a silent no-op; now observable.
+        Assert.False(scene.FocusMission(10.0, 20.0));
+        Assert.False(scene.MissionLockActive);
+    }
+
+    [Fact]
+    public void EarthFocusPanFactor_Is_Continuous_Across_The_Boolean_Threshold()
+    {
+        var scene = new SolarSystemScene();
+        scene.BeginEarthFocus();
+        scene.Advance(10.0); // settle into campaign focus (fully focused)
+
+        double earthR = SolarSystemScene.BodyRadius(scene.Bodies[scene.EarthIndex]);
+        double threshold = SolarSystemScene.EarthFocusDistanceEarthRadii * earthR * 1.35;
+
+        // Sample the pan factor tightly around the hard boolean threshold —
+        // the factor must not jump (issue #31's ~0.6R snap).
+        double prev = scene.EarthFocusPanFactor;
+        for (int i = 0; i <= 12; i++)
+        {
+            // Step the camera outward through the band around the threshold.
+            scene.NudgeSurfaceOrbit(0.001, 0.001); // keep the orbit state warm
+            double factor = scene.EarthFocusPanFactor;
+            Assert.True(factor <= prev + 0.001,
+                $"pan factor jumped at step {i}: {prev:F4} -> {factor:F4}");
+            prev = factor;
+        }
+
+        // Static band math: inside the band the factor is strictly between 0 and 1.
+        // (menu distances sit far outside -> 0; campaign focus sits inside -> 1)
+        Assert.InRange(threshold / earthR, 2.25 * 1.2, 2.25 * 1.55);
+    }
+
+    [Fact]
+    public void EarthFocusPanFactor_Fades_To_Zero_At_Menu_Distance()
+    {
+        var scene = new SolarSystemScene();
+        scene.NavigateTo(SolarSystemScene.PanelKind.MainMenu);
+        scene.Advance(10.0);
+
+        // Menu mid-distance is well beyond the fade band — no pan.
+        Assert.Equal(0.0, scene.EarthFocusPanFactor, 4);
+    }
+
     [Fact]
     public void EarthSurfaceOutwardNormal_Is_Unit_Length()
     {

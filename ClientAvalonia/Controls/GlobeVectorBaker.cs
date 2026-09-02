@@ -29,10 +29,21 @@ internal static class GlobeVectorBaker
 
     private static byte[]? _cached;
 
+    // Issue #29: 并发 ??= 会让两线程同时进入 Bake，且 _rings/_ringVertexCounts/
+    // _lines/_lineVertexCounts 四组静态几何字段整体写入无一致性保证（读到新旧混合
+    // → 索引越界/陆地错填）。锁内单次烘焙 + 锁内读取，渲染线程只读结果。
+    // 锁序约定：GlobeTextureBaker.Bake（持自身锁）会进入本方法——Texture 锁永远
+    // 在 Vector 锁外层，单向依赖无死锁。
+    private static readonly object BakeGate = new();
+
     /// <summary>Bakes and caches; safe to call from a background thread.</summary>
     public static bool TryGetPixels(out byte[] pixels, out int width, out int height)
     {
-        pixels = _cached ??= Bake();
+        lock (BakeGate)
+        {
+            pixels = _cached ??= Bake();
+        }
+
         width = Width;
         height = Height;
         return pixels.Length == Width * Height * 4;

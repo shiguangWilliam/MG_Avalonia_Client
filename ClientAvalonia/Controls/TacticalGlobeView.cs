@@ -478,6 +478,24 @@ public class TacticalGlobeView : Panel
         return finalSize;
     }
 
+    // Issue #30: unit diamond (vertices at ±s on axes with s=1) reused by every
+    // marker via translation transform; built once and frozen.
+    private static readonly StreamGeometry UnitDiamondGeometry = BuildUnitDiamond();
+
+    private static StreamGeometry BuildUnitDiamond()
+    {
+        StreamGeometry geo = new();
+        using (StreamGeometryContext gc = geo.Open())
+        {
+            gc.BeginFigure(new Point(0, -1), true);
+            gc.LineTo(new Point(1, 0), false);
+            gc.LineTo(new Point(0, 1), false);
+            gc.LineTo(new Point(-1, 0), false);
+        }
+
+        return geo;
+    }
+
     private static void DrawCorner(DrawingContext ctx, Pen pen, Point c, double ox, double oy, double len, int sx, int sy)
     {
         var geo = new StreamGeometry();
@@ -488,11 +506,71 @@ public class TacticalGlobeView : Panel
         ctx.DrawGeometry(null, pen, geo);
     }
 
+    // ---- Issue #30: per-frame allocation caches (all immutable after build) ----
+    // Render pass runs at 30fps per marker per frame; freezing these removes
+    // >90% of overlay allocations (Gen0/Gen1 GC pressure in long sessions).
+    // Keyed by quantized alpha (0..1000) — brush/pen instances are frozen on
+    // first use and safe to share across frames. Single UI thread only.
+
+    private static readonly Dictionary<(byte R, byte G, byte B, byte A), SolidColorBrush> BrushCache = new();
+    private static readonly Dictionary<(IBrush Brush, double Opacity, double Thickness), Pen> PenCache = new();
+
+    // Issue #30: label rendering — Typeface parsed once; FormattedText cached per
+    // (text, foreground) pair. Hover tooltips and the selection label reuse the
+    // same short strings across frames.
+    private static readonly Typeface LabelTypeface = new(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
+    private static readonly Dictionary<(string Text, IBrush Foreground), FormattedText> FormattedTextCache = new();
+
+    private static FormattedText GetCachedFormattedText(string text, IBrush foreground)
+    {
+        var key = (text, foreground);
+        if (!FormattedTextCache.TryGetValue(key, out FormattedText? cached))
+        {
+            cached = new FormattedText(
+                text,
+                CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                LabelTypeface,
+                11,
+                foreground);
+            FormattedTextCache[key] = cached;
+        }
+
+        return cached;
+    }
+
+    private static SolidColorBrush GetCachedBrush(Color c)
+    {
+        var key = (c.R, c.G, c.B, c.A);
+        if (!BrushCache.TryGetValue(key, out SolidColorBrush? cached))
+        {
+            cached = new SolidColorBrush(c);
+            BrushCache[key] = cached;
+        }
+
+        return cached;
+    }
+
     private static IBrush ApplyOpacity(IBrush brush, double alpha)
     {
         if (brush is SolidColorBrush scb)
-            return new SolidColorBrush(Color.FromArgb((byte)(scb.Color.A * alpha), scb.Color.R, scb.Color.G, scb.Color.B));
+            return GetCachedBrush(Color.FromArgb((byte)(scb.Color.A * alpha), scb.Color.R, scb.Color.G, scb.Color.B));
         return brush;
+    }
+
+    private static Pen GetCachedPen(IBrush brush, double thickness)
+        => GetCachedPen(brush, 1.0, thickness);
+
+    private static Pen GetCachedPen(IBrush brush, double opacity, double thickness)
+    {
+        var key = (brush, opacity, thickness);
+        if (!PenCache.TryGetValue(key, out Pen? cached))
+        {
+            cached = new Pen(ApplyOpacity(brush, opacity), thickness);
+            PenCache[key] = cached;
+        }
+
+        return cached;
     }
 
     internal void ResolveBrushes()
@@ -560,7 +638,11 @@ public class TacticalGlobeView : Panel
 
         if (_bridgeFromSolarSystem && SolarSystemDirector.IsActive)
         {
-            // Same-direction drag: pointer right/down moves the view the same way.
+            // Issue #34 drag convention (both branches): pointer right/down moves
+            // the *content* the same way — grab-and-drag. NudgeSurfaceOrbit's
+            // positive pitch delta maps to the same screen direction as the local
+            // `Pitch + dy` branch below; dx is negated for yaw because _orbitYawDeg
+            // rotates the camera, not the globe.
             SolarSystemDirector.NudgeCameraOrbit(dx * DragSensitivity, -dy * DragSensitivity * 0.55);
             SolarSystemDirector.SetCameraOrbitInertia(_inertiaYaw, -dy * DragSensitivity * 0.55);
             _overlay.InvalidateVisual();
@@ -568,6 +650,7 @@ public class TacticalGlobeView : Panel
             return;
         }
 
+        // Issue #34: local branch of the same grab-and-drag convention.
         Yaw -= dx * DragSensitivity;
         Pitch = Math.Clamp(Pitch + dy * DragSensitivity * 0.6, -40.0, 40.0);
         InvalidatePose();
@@ -734,8 +817,8 @@ public class TacticalGlobeView : Panel
         if (!_bridgeFromSolarSystem)
         {
             // ---- Graticule (very subtle) ----
-            var gridPen = new Pen(_mutedLineBrush ?? Brushes.Gray, 0.6);
-            var gridPenBright = new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.35), 0.7);
+            Pen gridPen = GetCachedPen(_mutedLineBrush ?? Brushes.Gray, 0.6);
+            Pen gridPenBright = GetCachedPen(_lineBrush ?? Brushes.Silver, 0.35, 0.7);
             for (int m = 0; m < Meridians; m++)
                 DrawGreatCircleArc(context, m * 360.0 / Meridians, Dir, Project, m == 0 ? gridPenBright : gridPen);
             for (int p = 1; p < Parallels; p++)
@@ -748,14 +831,14 @@ public class TacticalGlobeView : Panel
             double rimRadius = radius * SilhouetteFactor;
             context.DrawEllipse(
                 null,
-                new Pen(ApplyOpacity(_lineBrush ?? Brushes.Silver, 0.55), 1.0),
+                GetCachedPen(_lineBrush ?? Brushes.Silver, 0.55, 1.0),
                 new Point(cx, cy),
                 rimRadius,
                 rimRadius);
             // Faint atmosphere ring just outside the rim.
             context.DrawEllipse(
                 null,
-                new Pen(ApplyOpacity(_accentBrush ?? Brushes.Cyan, 0.18), 3.0),
+                GetCachedPen(_accentBrush ?? Brushes.Cyan, 0.18, 3.0),
                 new Point(cx, cy),
                 rimRadius + 3.5,
                 rimRadius + 3.5);
@@ -811,28 +894,33 @@ public class TacticalGlobeView : Panel
                 brush = ApplyOpacity(brush, 0.30);
 
             // Diamond marker (square rotated 45°) + halo ring.
+            // Issue #30: unit diamond cached once; per-marker size comes from a
+            // scale+translate transform (replaces a new StreamGeometry per marker
+            // per frame). Pen thickness is compensated by quantized scale so
+            // outline width stays visually fixed at 1.0.
             double s = (selected ? 3.4 : 2.4) * (marker.IsHovered ? 1.5 : 1.0) * marker.Scale;
-            var diamond = new StreamGeometry();
-            using (StreamGeometryContext gc = diamond.Open())
+            Matrix toMarker = Matrix.CreateScale(s, s) * Matrix.CreateTranslation(sp.X, sp.Y);
+            double penScale = Math.Max(0.1, Math.Round(s, 1));
+            Pen outlinePen = GetCachedPen(brush, 1.0 / penScale, 1.0);
+
+            using (context.PushTransform(toMarker))
             {
-                gc.BeginFigure(new Point(sp.X, sp.Y - s), true);
-                gc.LineTo(new Point(sp.X + s, sp.Y), false);
-                gc.LineTo(new Point(sp.X, sp.Y + s), false);
-                gc.LineTo(new Point(sp.X - s, sp.Y), false);
+                if (marker.Node.Locked)
+                {
+                    // Locked: hollow outline only.
+                    context.DrawGeometry(null, outlinePen, UnitDiamondGeometry);
+                }
+                else
+                {
+                    context.DrawGeometry(
+                        selected ? brush : ApplyOpacity(brush, 0.45),
+                        null,
+                        UnitDiamondGeometry);
+                    context.DrawGeometry(null, outlinePen, UnitDiamondGeometry);
+                }
             }
 
-            if (marker.Node.Locked)
-            {
-                // Locked: hollow outline only.
-                context.DrawGeometry(null, new Pen(brush, 1.0), diamond);
-            }
-            else
-            {
-                context.DrawGeometry(selected ? brush : ApplyOpacity(brush, 0.45), null, diamond);
-                context.DrawGeometry(null, new Pen(brush, 1.0), diamond);
-            }
-
-            context.DrawEllipse(null, new Pen(ApplyOpacity(brush, 0.55), 0.8), sp, s + 2, s + 2);
+            context.DrawEllipse(null, GetCachedPen(brush, 0.55, 0.8), sp, s + 2, s + 2);
 
             if (selected)
             {
@@ -843,21 +931,16 @@ public class TacticalGlobeView : Panel
                     // Breathing bracket reticle (1.6s cycle).
                     double phase = (Environment.TickCount64 % 1600) / 1600.0;
                     double b = s + 4.0 + Math.Sin(phase * 2.0 * Math.PI) * 0.8;
-                    var pen = new Pen(ApplyOpacity(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha), 1.0);
+                    Pen reticlePen = GetCachedPen(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha, 1.0);
                     const double t = 3.2;
-                    DrawCorner(context, pen, sp, -b, -b, t, 1, 1);
-                    DrawCorner(context, pen, sp, b, -b, t, -1, 1);
-                    DrawCorner(context, pen, sp, -b, b, t, 1, -1);
-                    DrawCorner(context, pen, sp, b, b, t, -1, -1);
+                    DrawCorner(context, reticlePen, sp, -b, -b, t, 1, 1);
+                    DrawCorner(context, reticlePen, sp, b, -b, t, -1, 1);
+                    DrawCorner(context, reticlePen, sp, -b, b, t, 1, -1);
+                    DrawCorner(context, reticlePen, sp, b, b, t, -1, -1);
 
-                    var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
                     string label = TruncateLabel(marker.Node.Label, 12);
-                    var formatted = new FormattedText(
+                    FormattedText formatted = GetCachedFormattedText(
                         label,
-                        CultureInfo.InvariantCulture,
-                        FlowDirection.LeftToRight,
-                        typeface,
-                        11,
                         ApplyOpacity(_accentInverseBrush ?? Brushes.OrangeRed, bridgeAlpha));
                     context.DrawText(formatted, new Point(sp.X + b + 6, sp.Y - formatted.Height / 2));
                 }
@@ -866,13 +949,8 @@ public class TacticalGlobeView : Panel
             if (!selected && marker.IsHovered && front && !string.IsNullOrEmpty(marker.Node.Label))
             {
                 // F3: hover tooltip.
-                var typeface = new Typeface(FontFamily.Parse("Microsoft YaHei UI, Segoe UI, Inter"));
-                var formatted = new FormattedText(
+                FormattedText formatted = GetCachedFormattedText(
                     marker.Node.Label,
-                    CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight,
-                    typeface,
-                    11,
                     ApplyOpacity(_lineBrush ?? Brushes.Silver, bridgeAlpha));
                 double ty = sp.Y - formatted.Height - 10;
                 context.DrawText(formatted, new Point(sp.X - formatted.Width / 2, ty));

@@ -1,4 +1,5 @@
 using System;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.Controls;
 
@@ -396,11 +397,19 @@ internal sealed class SolarSystemScene
     /// <summary>
     /// Jump: animate the camera to face (lat, lon), then lock co-rotation so
     /// the mission stays fixed while Earth keeps spinning underneath.
+    /// Issue #32: was a silent no-op when surface orbit wasn't active (F1 in a
+    /// non-campaign window) — now observable via log + return value so callers
+    /// can decide whether to queue a retry.
     /// </summary>
-    public void FocusMission(double latitudeDegrees, double longitudeDegrees)
+    public bool FocusMission(double latitudeDegrees, double longitudeDegrees)
     {
         if (!_surfaceOrbitActive)
-            return;
+        {
+            Logger.Log(
+                $"SolarSystemScene: FocusMission({latitudeDegrees:F2}, {longitudeDegrees:F2}) ignored — " +
+                "surface orbit not active (not in a campaign surface-orbit window).");
+            return false;
+        }
 
         GetSurfaceOrbitDirection(out _focusStartDx, out _focusStartDy, out _focusStartDz);
         EarthSurfaceOutwardNormal(
@@ -417,6 +426,7 @@ internal sealed class SolarSystemScene
         _missionFocusElapsed = 0;
         _missionFocusAnimating = true;
         _missionLockActive = false;
+        return true;
     }
 
     public void ClearMissionLock()
@@ -884,12 +894,40 @@ internal sealed class SolarSystemScene
         => Camera.Focus == CameraFocus.Earth
            && Camera.Distance <= EarthFocusDistanceEarthRadii * BodyRadius(Bodies[EarthIndex]) * 1.35;
 
+    /// <summary>
+    /// Issue #31: continuous Earth-focus factor for the render-time look-at pan.
+    /// IsEarthFocused is a hard boolean at ~3.04 Earth radii — crossing it mid
+    /// BlendCamera animation snaps the pan offset by ~0.6 radii and visibly
+    /// jumps. This smoothstep fades the pan in/out over the same band the
+    /// threshold guards, so the 1.4s focus/exit transitions stay continuous.
+    /// The boolean stays for logic branches (LOD, interaction gating).
+    /// </summary>
+    public double EarthFocusPanFactor
+    {
+        get
+        {
+            if (Camera.Focus != CameraFocus.Earth)
+                return 0.0;
+
+            double earthRadius = BodyRadius(Bodies[EarthIndex]);
+            double near = EarthFocusDistanceEarthRadii * earthRadius * 1.20;  // fully focused
+            double far = EarthFocusDistanceEarthRadii * earthRadius * 1.55;   // fully unfocused
+            double t = Math.Clamp((far - Camera.Distance) / Math.Max(far - near, 1e-6), 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t);
+        }
+    }
+
     /// <summary>Resolves Earth's spin yaw (degrees) for bridge consumers (campaign globe overlay).</summary>
     public double EarthYawDegrees => (EarthSpinPhase * 180.0 / Math.PI) % 360.0;
 
     /// <summary>
     /// Blends two camera states: shortest-arc yaw, log-space distance, and
     /// Earth-focus flags resolved by whichever endpoint owns them.
+    /// Issue #34: focus type switched at exactly t=0.5 — a hard handover in the
+    /// middle of the move. Camera framing for different focuses is similar at
+    /// the midpoint (yaw/pitch/dist already halfway), so the switch happens at
+    /// 0.5 exactly when both framings agree most; documented here so future
+    /// Sun-focus views know to revisit with a cross-blend.
     /// </summary>
     public static CameraState BlendCamera(CameraState from, CameraState to, double t)
     {
@@ -1321,7 +1359,11 @@ internal sealed class SolarSystemScene
                 ComputeSunRelativeEarthCameraEye(cam, dist, tx, ty, tz, out cameraX, out cameraY, out cameraZ);
 
                 // Mid-menu: bias look-at so Earth sits in the open right-center (left HUD).
-                if (!IsEarthFocused)
+                // Issue #31: pan weight is the continuous focus factor, not the hard
+                // boolean — the offset now eases in/out across the 1.2-1.55 radii band
+                // instead of snapping at the 1.35 threshold.
+                double panFactor = EarthFocusPanFactor;
+                if (panFactor < 1.0)
                 {
                     double elen = Math.Sqrt(tx * tx + ty * ty + tz * tz);
                     if (elen < 1e-6)
@@ -1334,10 +1376,10 @@ internal sealed class SolarSystemScene
                     {
                         rx /= rl;
                         rz /= rl;
-                        double pan = dist * 0.20;
+                        double pan = dist * 0.20 * (1.0 - panFactor);
                         tx -= rx * pan;
                         tz -= rz * pan;
-                        ty += dist * 0.03;
+                        ty += dist * 0.03 * (1.0 - panFactor);
                     }
                 }
             }

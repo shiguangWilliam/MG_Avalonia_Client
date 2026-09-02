@@ -813,11 +813,16 @@ void main()
         }
 
         // ---- Sun last as secondary light anchor (faded with outer system) ----
+        // Issue #34: sun no longer disables DEPTH_TEST. The depth-off draw let
+        // the additive corona smear over Earth's limb whenever the camera faced
+        // the sun behind Earth. Sun draws last with depth writes off: correct
+        // occlusion against everything already in the depth buffer, no depth
+        // pollution for anything drawn after.
         if (outerOpacity > 0.02f)
         {
-            _disable?.Invoke(GL_DEPTH_TEST);
+            _depthMask?.Invoke(false);
             DrawSun(gl, view, outerOpacity * sunGain);
-            gl.Enable(GL_DEPTH_TEST);
+            _depthMask?.Invoke(true);
         }
 
         _hasRendered = true;

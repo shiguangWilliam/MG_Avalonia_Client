@@ -194,7 +194,13 @@ void main()
         {
             _yawDeg = value.Yaw;
             _pitchDeg = value.Pitch;
-            RequestNextFrameRendering();
+
+            // Issue #34: the overlay keeps pushing its pose every render pass,
+            // even while bridged to the solar-system backdrop with this control
+            // hidden (IsVisible=false). Skip the render request when invisible —
+            // invisible GL controls never draw, so the request was pure churn.
+            if (IsVisible)
+                RequestNextFrameRendering();
         }
     }
 

@@ -22,9 +22,21 @@ internal static class GlobeTextureBaker
     private static int _width;
     private static int _height;
 
-    public static void WarmUp() => _ = Pixels;
+    // Issue #29: WarmUp（后台线程）与 OnOpenGlInit（渲染线程）可并发首触 ??= ——
+    // 引用赋值原子不撕裂，但 Bake 会重复执行，且 _width/_height 与 _rgba 的
+    // 组合写入无 happens-before 保证。统一在锁内单次烘焙。
+    private static readonly object BakeGate = new();
 
-    private static byte[] Pixels => _rgba ??= Bake();
+    public static void WarmUp() => _ = GetPixelsBaked();
+
+    private static byte[] GetPixelsBaked()
+    {
+        lock (BakeGate)
+        {
+            _rgba ??= Bake();
+            return _rgba;
+        }
+    }
 
     /// <summary>RGBA8 pixels ready for glTexImage2D; always non-empty.</summary>
     public static bool TryGetPixels(out byte[] pixels, out int width, out int height)

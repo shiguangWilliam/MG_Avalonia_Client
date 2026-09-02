@@ -84,13 +84,30 @@ public class SolarSystemBackdropView : Panel
         {
             // Keep the camera blend alive (navigation still needs frames) but
             // freeze orbital motion: advance pose time only.
-            if (_gl.Scene.IsPoseAnimating)
+            bool sceneBusy = _gl.Scene.IsPoseAnimating
+                || SolarSystemDirector.HasContinuousAnimation;
+            if (sceneBusy)
                 _gl.Tick(dt);
             SolarSystemDirector.OnBackdropTick(dt);
+
+            // Issue #34: with animations off and nothing animating, stop the
+            // 33ms timer entirely — idle backdrops no longer burn 30fps.
+            if (!sceneBusy)
+                _timer?.Stop();
             return;
         }
 
         _gl.Tick(dt);
         SolarSystemDirector.OnBackdropTick(dt);
+    }
+
+    /// <summary>
+    /// Issue #34: re-arm the render clock after an idle stop. Called when user
+    /// interaction (drag inertia, navigation, campaign reveal) needs frames.
+    /// </summary>
+    internal void EnsureClockRunning()
+    {
+        _lastTicks = _clock.ElapsedTicks;
+        _timer?.Start();
     }
 }
