@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using ClientCore;
 using Rampastring.Tools;
 using ClientAvalonia.GlobalState;
@@ -23,6 +24,14 @@ public static class WafUserListStore
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
     };
+
+    /// <summary>
+    /// Issue #36/#37: multiple WAF instances (and their async persist workers)
+    /// write the same on-disk files. An interleaved WriteAllText used to lose a
+    /// save silently — serialize writes process-wide and retry transient IO
+    /// errors (antivirus / indexer locks).
+    /// </summary>
+    private static readonly object SaveGate = new();
 
     public static IReadOnlyList<WafBlockEntry> LoadEntries()
     {
@@ -101,7 +110,7 @@ public static class WafUserListStore
                     .ToList(),
             };
 
-            File.WriteAllText(path, JsonSerializer.Serialize(doc, JsonOptions));
+            string json = JsonSerializer.Serialize(doc, JsonOptions);
 
             // Keep a Key= mirror for older tools / hand editing.
             string iniPath = ResolvePath(LegacyIniFileName);
@@ -111,11 +120,48 @@ public static class WafUserListStore
                 "; Mirror of WafBlockList.json — prefer editing the JSON or Settings → Security.",
             };
             lines.AddRange(doc.Entries.Select(e => "Key=" + e.Key));
-            File.WriteAllLines(iniPath, lines);
+
+            lock (SaveGate)
+            {
+                WriteWithRetry(path, json);
+                WriteLinesWithRetry(iniPath, lines);
+            }
         }
         catch (Exception ex)
         {
             Logger.Log($"WafUserListStore.SaveEntries failed: {ex.Message}");
+        }
+    }
+
+    private static void WriteWithRetry(string path, string contents)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.WriteAllText(path, contents);
+                return;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(20 * (attempt + 1));
+            }
+        }
+    }
+
+    private static void WriteLinesWithRetry(string path, List<string> lines)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.WriteAllLines(path, lines);
+                return;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(20 * (attempt + 1));
+            }
         }
     }
 

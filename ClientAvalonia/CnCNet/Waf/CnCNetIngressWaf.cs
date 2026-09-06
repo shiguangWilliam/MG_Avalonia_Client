@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using Rampastring.Tools;
@@ -407,6 +408,31 @@ public sealed class CnCNetIngressWaf : ICnCNetIngressWaf
                 Logger.Log($"CnCNet WAF: async persist failed: {ex.Message}");
             }
         }, this);
+    }
+
+    /// <summary>
+    /// Test hook (Issue #36): blocks until the async persist worker has flushed
+    /// the latest version to disk. Replaces fixed Thread.Sleep waits that raced
+    /// the retrying writer under load.
+    /// </summary>
+    internal bool WaitForPersistToSettle(int timeoutMs = 5000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (Volatile.Read(ref _persistQueued) == 0)
+            {
+                int seen = Volatile.Read(ref _persistVersion);
+                Thread.Sleep(10);
+                if (Volatile.Read(ref _persistQueued) == 0
+                    && Volatile.Read(ref _persistVersion) == seen)
+                    return true;
+            }
+
+            Thread.Sleep(10);
+        }
+
+        return false;
     }
 
     private WafDecision Finish(WafIngressEvent e, WafDecision decision, bool raiseAlert = true)

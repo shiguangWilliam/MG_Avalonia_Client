@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ClientAvalonia.CnCNet.Waf;
 using ClientAvalonia.Tests.Fixture;
+using ClientCore;
 using FluentAssertions;
 using Xunit;
 
@@ -30,6 +31,12 @@ public sealed class WafSessionIntegrationMatrixTests : IDisposable
     public void Dispose()
     {
         WafRulePackLoader.InvalidateCache();
+        // Restore static bindings for the next class in this serial collection —
+        // leaving ProgramConstants/EnvironmentServices pointing at the disposed
+        // temp root leaks workspace state into later tests (Issue #36).
+        ClientConfiguration.ResetInstance();
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Reset();
+        ProgramConstants.ClearHostedGameRoot();
         _root.Dispose();
     }
 
@@ -164,13 +171,13 @@ public sealed class WafSessionIntegrationMatrixTests : IDisposable
         string nick = "PersistNick" + i;
         var waf = new CnCNetIngressWaf(() => new WafSettings(), persistUserList: true);
         waf.ClearBlocklist();
-        WaitPersist();
+        WaitPersist(waf);
 
         var evt = WafAttackFixtures.LobbyPromoChat(nick, "你妈死了");
         WafDecision warn = waf.Evaluate(evt);
         warn.Severity.Should().Be(WafSeverity.Warn);
         waf.BlockFromAlert(evt, warn, "int-" + i);
-        WaitPersist();
+        WaitPersist(waf);
 
         string json = Path.Combine(_root.GameRoot, "Client", "WafBlockList.json");
         File.Exists(json).Should().BeTrue(because: "BlockFromAlert with persistUserList should write disk");
@@ -329,7 +336,7 @@ public sealed class WafSessionIntegrationMatrixTests : IDisposable
 
         var waf = new CnCNetIngressWaf(() => new WafSettings(), persistUserList: true);
         waf.SetStrategyMode("content.url", WafStrategyMode.Off);
-        WaitPersist(); // strategy save is sync on SetStrategyMode when persist=true
+        WaitPersist(waf); // strategy save is sync on SetStrategyMode when persist=true
 
         var again = new WafStrategyPrefs();
         again.Load();
@@ -347,8 +354,8 @@ public sealed class WafSessionIntegrationMatrixTests : IDisposable
             d.Severity.Should().Be(WafSeverity.Allow);
     }
 
-    private static void WaitPersist()
-        => Thread.Sleep(120);
+    private static void WaitPersist(CnCNetIngressWaf waf)
+        => waf.WaitForPersistToSettle().Should().BeTrue("async persist worker must settle");
 
     private static WafCompiledRulePack HangFarmPack()
         => WafRulePackLoader.CompileFromJson(

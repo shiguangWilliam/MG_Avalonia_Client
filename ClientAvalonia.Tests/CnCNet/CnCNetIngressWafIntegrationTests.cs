@@ -27,8 +27,11 @@ public sealed class CnCNetIngressWafIntegrationTests : IDisposable
 
     public void Dispose() => _root.Dispose();
 
+    // Protocol fingerprints / tunnels are off in the shipped default pack —
+    // these parser→engine integration scenarios run with the explicit pack
+    // (Issue #37), keeping default content classes for listing-text scoring.
     private static CnCNetIngressWaf CreateWaf()
-        => new(() => new WafSettings(), persistUserList: false);
+        => new(() => new WafSettings(), persistUserList: false, rules: WafTestPacks.HangFarmWithDefaultContent());
 
     private static List<CnCNetTunnel> TunnelsIncludingHostBot()
         => SampleGameMessages.SampleTunnels(WafAttackFixtures.HostBotTunnelHost, WafAttackFixtures.HostBotTunnelPort);

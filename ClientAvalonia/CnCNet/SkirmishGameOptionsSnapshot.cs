@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Rendering;
 using ClientCore;
@@ -85,7 +88,13 @@ public static class SkirmishGameOptionsSnapshot
     /// <summary>
     /// Control ids forced by the game mode (<c>&lt;Mode&gt;ForcedOptions</c> in MPMaps.ini).
     /// Those overrides always win over saved user choices (DX LoadSettings parity).
+    /// Issue #4: results are cached per (game mode, MPMaps.ini LastWriteTimeUtc) —
+    /// the file is tens of KB and its forced set only changes when the mode or
+    /// the file content changes; re-parsing it on every lobby entry (and logging
+    /// one Info line per key) was pure churn.
     /// </summary>
+    private static readonly ConcurrentDictionary<(string Mode, DateTime Mtime), HashSet<string>> ForcedCache = new();
+
     private static HashSet<string> ResolveForcedControls(GameModeEntry? gameMode)
     {
         var forced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -100,23 +109,32 @@ public static class SkirmishGameOptionsSnapshot
             if (!File.Exists(mpMapsPath))
                 return forced;
 
+            DateTime mtime = File.GetLastWriteTimeUtc(mpMapsPath);
+            var cacheKey = (gameMode.Name, mtime);
+            if (ForcedCache.TryGetValue(cacheKey, out HashSet<string>? cached))
+                return cached;
+
             var ini = new IniFile(mpMapsPath);
-            if (!ini.SectionExists(gameMode.Name))
-                return forced;
+            if (ini.SectionExists(gameMode.Name))
+            {
+                string sectionName = ini.GetStringValue(gameMode.Name, "ForcedOptions", string.Empty);
+                if (string.IsNullOrWhiteSpace(sectionName))
+                    sectionName = gameMode.Name + "ForcedOptions";
 
-            string sectionName = ini.GetStringValue(gameMode.Name, "ForcedOptions", string.Empty);
-            if (string.IsNullOrWhiteSpace(sectionName))
-                sectionName = gameMode.Name + "ForcedOptions";
+                List<string>? keys = ini.GetSectionKeys(sectionName);
+                if (keys != null)
+                {
+                    foreach (string key in keys)
+                        forced.Add(key);
+                }
+            }
 
-            List<string>? keys = ini.GetSectionKeys(sectionName);
-            if (keys == null)
-                return forced;
+            // Issue #4: one aggregate line per (mode, file) resolution, not one
+            // line per key — a busy lobby visit used to emit N Info lines.
+            if (forced.Count > 0)
+                Logger.Log($"SkirmishGameOptionsSnapshot: {forced.Count} controls forced by game mode {gameMode.Name} — saved values ignored.");
 
-            foreach (string key in keys)
-                forced.Add(key);
-
-            foreach (string key in forced)
-                Logger.Log($"SkirmishGameOptionsSnapshot: '{key}' forced by game mode {gameMode.Name} — saved value ignored.");
+            ForcedCache[cacheKey] = forced;
         }
         catch (Exception ex)
         {

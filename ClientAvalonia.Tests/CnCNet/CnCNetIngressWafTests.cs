@@ -52,7 +52,9 @@ public sealed class CnCNetIngressWafTests
     [Fact]
     public void Known_HostBot_Tunnel_Scores_Warn()
     {
-        var waf = CreateWaf();
+        // Protocol fingerprints + tunnels are off in the shipped default pack;
+        // engine capability is verified with an explicit pack.
+        var waf = new CnCNetIngressWaf(() => new WafSettings(), persistUserList: false, rules: WafTestPacks.HangFarm());
         WafDecision d = waf.Evaluate(new WafIngressEvent
         {
             Kind = WafIngressKind.GameBroadcast,
@@ -145,7 +147,9 @@ public sealed class CnCNetIngressWafTests
     [Fact]
     public void R8_And_FakePlayers_Accumulate_Score()
     {
-        var waf = CreateWaf();
+        // R8/field-count/fake-player fingerprints are off in the shipped default
+        // pack (stock rooms false-positived); verify with the explicit pack.
+        var waf = new CnCNetIngressWaf(() => new WafSettings(), persistUserList: false, rules: WafTestPacks.HangFarm());
         WafDecision d = waf.Evaluate(new WafIngressEvent
         {
             Kind = WafIngressKind.GameBroadcast,
@@ -228,7 +232,29 @@ public sealed class CnCNetIngressWafTests
     public void Heuristic_Drop_Is_Clamped_To_Warn_By_Default()
     {
         // High sensitivity + huge score still should not Drop unless AllowHeuristicDrop.
-        var waf = CreateWaf(new WafSettings { Sensitivity = 2, AllowHeuristicDrop = false, AutoHideHighRisk = false });
+        // Protocol fingerprints are off in the shipped default pack; use the
+        // explicit pack to reach a >100 score through tunnel+R8+listing content.
+        var waf = new CnCNetIngressWaf(
+            () => new WafSettings { Sensitivity = 2, AllowHeuristicDrop = false, AutoHideHighRisk = false },
+            persistUserList: false,
+            rules: WafRulePackLoader.CompileFromJson(
+                """
+                {
+                  "version": 2,
+                  "description": "clamp-test",
+                  "hostBotTunnels": [ "175.178.174.40:50000" ],
+                  "protocol": [
+                    { "id": "proto.game.r8", "score": 40, "reason": "R8" },
+                    { "id": "proto.game.field_count", "score": 50, "reason": "fields" },
+                    { "id": "proto.tunnel.blacklist", "score": 80, "reason": "tunnel" },
+                    { "id": "proto.game.fake_players", "score": 35, "reason": "fake" }
+                  ],
+                  "contentClasses": [
+                    { "id": "content.promo", "score": 25, "reason": "promo", "keywords": [ "代练", "加群" ] }
+                  ]
+                }
+                """,
+                "clamp"));
         WafDecision d = waf.Evaluate(new WafIngressEvent
         {
             Kind = WafIngressKind.GameBroadcast,

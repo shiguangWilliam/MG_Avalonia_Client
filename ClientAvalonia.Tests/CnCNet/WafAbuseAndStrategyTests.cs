@@ -9,8 +9,12 @@ namespace ClientAvalonia.Tests.CnCNet;
 
 public sealed class WafAbuseAndStrategyTests
 {
-    private static CnCNetIngressWaf CreateWaf(WafStrategyPrefs? prefs = null)
-        => new(() => new WafSettings(), persistUserList: false, strategyPrefs: prefs ?? new WafStrategyPrefs());
+    private static CnCNetIngressWaf CreateWaf(WafStrategyPrefs? prefs = null, WafCompiledRulePack? rules = null)
+        => new(
+            () => new WafSettings(),
+            persistUserList: false,
+            rules: rules ?? WafTestPacks.HangFarmWithDefaultContent(),
+            strategyPrefs: prefs ?? new WafStrategyPrefs());
 
     [Theory]
     [InlineData("你妈死了")]

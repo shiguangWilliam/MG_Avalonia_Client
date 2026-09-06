@@ -115,9 +115,11 @@ public sealed class WafFilterContentMatrixTests
         Add("flt.listing.abuse", "listing", "你妈死了房", WafSeverity.Warn, "content.abuse");
         Add("flt.listing.clean", "listing", "Casual FFA", WafSeverity.Allow, "");
 
-        // Sensitivity: same text, expect Warn at default sensitivity
+        // Sensitivity: same text, expect Warn at every sensitivity level.
+        // Text must hit promo+url (score >= 50) so even sens0 (warn=30) trips;
+        // a bare URL scores 25 and is intentionally below the sens0 threshold.
         for (int s = 0; s <= 2; s++)
-            Add($"flt.sens.url_{s}", $"sens{s}", "http://x.vip/y", WafSeverity.Warn, "content.url");
+            Add($"flt.sens.url_{s}", $"sens{s}", "代练加群 http://x.vip/y", WafSeverity.Warn, "content.url");
 
         // Strategy Drop expectations (special surface tag)
         Add("flt.drop.strategy_abuse", "drop-abuse", "你妈死了", WafSeverity.Drop, "content.abuse");
@@ -185,12 +187,14 @@ public sealed class WafFilterContentMatrixTests
         }
 
         WafCompiledRulePack? rules = null;
-        if (c.Pack == "hangfarm" || c.Surface.StartsWith("proto-", StringComparison.Ordinal))
+        if (c.Surface == "proto-r8-default")
         {
-            if (c.Surface == "proto-r8-default")
-                rules = WafRulePackLoader.Default;
-            else if (c.Pack == "hangfarm" || c.Surface.StartsWith("proto-", StringComparison.Ordinal))
-                rules = HangFarmPack();
+            // The shipped default pack has no protocol rules — R8 must pass.
+            rules = WafRulePackLoader.Default;
+        }
+        else if (c.Pack == "hangfarm" || c.Surface.StartsWith("proto-", StringComparison.Ordinal))
+        {
+            rules = HangFarmPack();
         }
 
         return new CnCNetIngressWaf(() => settings, persistUserList: false, rules: rules, strategyPrefs: prefs);
@@ -235,9 +239,12 @@ public sealed class WafFilterContentMatrixTests
                 });
             case "proto-r8":
             case "proto-r8-default":
+                // Neutral room text: this case asserts the PROTOCOL layer only
+                // (default pack has no R8 rule). Promo-flavored room names would
+                // legitimately warn via content rules and mask the assertion.
                 return waf.Evaluate(WafAttackFixtures.HostBotBroadcast(
                     "Bot",
-                    WafAttackFixtures.HostBotGame(revision: "R8", fieldCount: 9)));
+                    WafAttackFixtures.HostBotGame(revision: "R8", fieldCount: 9, roomName: "Bot Room")));
             case "proto-tunnel":
                 return waf.Evaluate(WafAttackFixtures.HostBotBroadcast(
                     "Bot",

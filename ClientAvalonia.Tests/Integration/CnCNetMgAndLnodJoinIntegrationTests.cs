@@ -24,6 +24,11 @@ public sealed class CnCNetMgAndLnodJoinIntegrationTests : IDisposable
     public void Dispose()
     {
         ClientConfiguration.ResetInstance();
+        // Restore service-locator bindings left by earlier tests in this
+        // collection — a stale factory pointing at another (disposed) temp
+        // root makes subsequent classes resolve the wrong workspace (Issue #36).
+        ClientAvalonia.GlobalState.Environment.EnvironmentServices.Reset();
+        ProgramConstants.ClearHostedGameRoot();
         _root.Dispose();
     }
 

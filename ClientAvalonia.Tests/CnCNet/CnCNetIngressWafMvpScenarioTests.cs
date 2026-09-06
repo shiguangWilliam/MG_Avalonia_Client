@@ -12,8 +12,12 @@ namespace ClientAvalonia.Tests.CnCNet;
 /// </summary>
 public sealed class CnCNetIngressWafMvpScenarioTests
 {
-    private static CnCNetIngressWaf CreateWaf(WafSettings? settings = null)
-        => new(() => settings ?? new WafSettings(), persistUserList: false);
+    // Protocol fingerprints / tunnels are off in the shipped default pack —
+    // engine scenarios exercise them via an explicit pack (Issue #37). The
+    // combined pack keeps the default content classes so promo/abuse cases
+    // still evaluate real keyword data.
+    private static CnCNetIngressWaf CreateWaf(WafSettings? settings = null, WafCompiledRulePack? rules = null)
+        => new(() => settings ?? new WafSettings(), persistUserList: false, rules: rules ?? WafTestPacks.HangFarmWithDefaultContent());
 
     [Fact]
     public void P0_HostBot_Tunnel_R8_FakePlayers_Warns_And_Suggests_Block_Keys()

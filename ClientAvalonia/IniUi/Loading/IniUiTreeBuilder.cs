@@ -6,6 +6,7 @@ using ClientAvalonia.IniUi.Ast;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Schema;
 using ClientAvalonia.Services;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.IniUi.Loading;
 
@@ -50,16 +51,57 @@ public sealed class IniUiTreeBuilder
         ParseChildControlsFromSection(ini, rootSection, root, windowSectionName, tree);
 
         // R4/R6 alignment: apply attributes to declared children, then adopt any remaining
-        // standalone control sections, then re-apply attributes so newly adopted panels get
-        // their $CC children built (recurses within ParseChildControlsFromSection).
-        // Order is important: adoption can introduce panels whose own [$CC] declarations
-        // reference sections that appear earlier in the INI.
+        // standalone control sections, then expand $CC references to a fixed point.
+        //
+        // Issue #17: the previous Attach→Adopt→Attach triple was order-sensitive — an
+        // adopted panel's [$CC] reference only resolved if its target section appeared
+        // earlier in the INI. Now adoption runs once and $CC expansion iterates until
+        // no new nodes appear (bounded), so section order in the file no longer matters.
         AttachDeclaredSections(ini, root, windowSectionName, tree);
         AdoptOrphanControlSections(ini, root, windowSectionName, ast.OverlaySectionNames, tree);
-        AttachDeclaredSections(ini, root, windowSectionName, tree);
+        ExpandChildDeclarationsToFixedPoint(ini, root, windowSectionName, tree);
         ParsePanelExtraControls(ini, tree, windowSectionName);
 
+        // Issue #16: surface collected per-node diagnostics — window stays usable,
+        // modders get exact section/definition/reason lines in client.log.
+        if (tree.Diagnostics.Count > 0)
+        {
+            Logger.Log(
+                $"IniUiTreeBuilder: {tree.Diagnostics.Count} control definition(s) skipped in '{windowSectionName}' ({ast.SourcePath}):");
+            foreach (string diagnostic in tree.Diagnostics)
+                Logger.Log($"  - {diagnostic}");
+        }
+
         return tree;
+    }
+
+    /// <summary>
+    /// Issue #17: iteratively expands $CC declarations on every known node until a
+    /// fixed point. Each round sees panels adopted in previous rounds, so a $CC
+    /// reference resolves regardless of where its section sits in the INI file.
+    /// The iteration bound guards against pathological self-referencing cycles.
+    /// </summary>
+    private void ExpandChildDeclarationsToFixedPoint(IniDocument ini, UiNode root, string windowName, UiNodeTree tree)
+    {
+        const int maxRounds = 16;
+        for (int round = 0; round < maxRounds; round++)
+        {
+            int nodesBefore = CountNodes(root);
+            AttachDeclaredSections(ini, root, windowName, tree);
+            if (CountNodes(root) == nodesBefore)
+                return;
+        }
+
+        tree.Diagnostics.Add(
+            $"$CC expansion hit the {maxRounds}-round fixed-point bound — check for cyclic child references.");
+    }
+
+    private static int CountNodes(UiNode node)
+    {
+        int count = 1;
+        foreach (UiNode child in node.Children)
+            count += CountNodes(child);
+        return count;
     }
 
     private static void ApplyMainMenuDefaults(UiNode root, string windowSectionName)
@@ -106,7 +148,10 @@ public sealed class IniUiTreeBuilder
                 if (kvp.Key.StartsWith(';') || kvp.Key.StartsWith('#'))
                     continue;
 
-                UiNode child = AddChildFromDefinition(panel, kvp.Value, windowName, tree);
+                UiNode? child = TryAddChildFromDefinition(panel, kvp.Value, windowName, tree, section.SectionName);
+                if (child == null)
+                    continue;
+
                 IniSection? childSection = ini.GetSection(child.Id);
                 if (childSection != null)
                 {
@@ -303,7 +348,7 @@ public sealed class IniUiTreeBuilder
             if (sectionName == "$ExtraControls" && !kvp.Key.StartsWith("$CC", StringComparison.Ordinal))
                 continue;
 
-            AddChildFromDefinition(parent, kvp.Value, windowName, tree);
+            TryAddChildFromDefinition(parent, kvp.Value, windowName, tree, sectionName);
         }
     }
 
@@ -319,7 +364,9 @@ public sealed class IniUiTreeBuilder
             if (!kvp.Key.StartsWith("$CC", StringComparison.Ordinal))
                 continue;
 
-            UiNode child = AddChildFromDefinition(parent, kvp.Value, windowName, tree);
+            UiNode? child = TryAddChildFromDefinition(parent, kvp.Value, windowName, tree, section.SectionName);
+            if (child == null)
+                continue;
 
             IniSection? childSection = ini.GetSection(child.Id);
             if (childSection != null)
@@ -330,11 +377,20 @@ public sealed class IniUiTreeBuilder
         }
     }
 
-    private UiNode AddChildFromDefinition(UiNode parent, string definition, string windowName, UiNodeTree tree)
+    /// <summary>
+    /// Issue #16: malformed definitions no longer throw (which killed the whole
+    /// window). Returns null after recording a diagnostic; the caller skips the
+    /// child and keeps building the rest of the tree.
+    /// </summary>
+    private UiNode? TryAddChildFromDefinition(UiNode parent, string definition, string windowName, UiNodeTree tree, string sourceSection)
     {
         string[] parts = definition.Split(':');
-        if (parts.Length != 2)
-            throw new InvalidOperationException($"Invalid child control definition: {definition}");
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+        {
+            tree.Diagnostics.Add(
+                $"[{sourceSection}] invalid child control definition '{definition}' — expected '<id>:<type>', child skipped.");
+            return null;
+        }
 
         string childName = parts[0].Trim();
         string typeName = parts[1].Trim();
@@ -356,12 +412,26 @@ public sealed class IniUiTreeBuilder
         if (sibling != null)
             return sibling;
 
-        ControlTypeDefinition typeDef = _registry.Resolve(typeName);
+        ControlTypeDefinition typeDef;
+        try
+        {
+            typeDef = _registry.Resolve(typeName);
+        }
+        catch (Exception ex)
+        {
+            tree.Diagnostics.Add(
+                $"[{sourceSection}] unknown control type '{typeName}' for '{childName}' ({ex.Message}) — child skipped.");
+            return null;
+        }
+
         var child = CreateNode(childName, typeDef.IniTypeName, windowName, typeDef.TemplateKey);
         child.Parent = parent;
         parent.Children.Add(child);
         return child;
     }
+
+    private UiNode AddChildFromDefinition(UiNode parent, string definition, string windowName, UiNodeTree tree)
+        => TryAddChildFromDefinition(parent, definition, windowName, tree, "$CC") ?? throw new InvalidOperationException($"Invalid child control definition: {definition}");
 
     /// <summary>
     /// SpawnIni / MapCode / CustomIni game-option controls (DX GameLobbyCheckBox/DropDown).

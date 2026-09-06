@@ -43,7 +43,23 @@ public sealed class WafRulePackLoaderTests : IDisposable
             "content.self_harm",
             "content.child_safety",
         });
+
+        // Issue #37: protocol fingerprints and the host-bot tunnel list are
+        // intentionally absent from the shipped default (stock rooms
+        // false-positived; operators re-enable via Client/WafRules.json).
+        // Assert that intent instead of the old tunnel entry.
+        pack.HostBotTunnels.Should().BeEmpty();
+        pack.Protocol.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void HangFarm_Protocol_Rules_Work_Via_Override_Pack()
+    {
+        // The documented re-enable path: an override pack restores protocol
+        // fingerprints and tunnels on top of the same engine.
+        WafCompiledRulePack pack = WafTestPacks.HangFarm();
         pack.HostBotTunnels.Should().Contain("175.178.174.40:50000");
+        pack.Protocol.Should().ContainKey("proto.game.r8");
     }
 
     [Fact]

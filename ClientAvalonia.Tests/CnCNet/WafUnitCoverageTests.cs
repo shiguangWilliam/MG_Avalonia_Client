@@ -83,7 +83,12 @@ public sealed class WafUnitCoverageTests : IDisposable
     [Fact]
     public void ListStrategies_Includes_Content_And_Protocol()
     {
-        var waf = new CnCNetIngressWaf(() => new WafSettings(), persistUserList: false);
+        // Issue #37: protocol rules are absent from the shipped default pack —
+        // the strategy list needs an explicit pack to include proto.* rows.
+        var waf = new CnCNetIngressWaf(
+            () => new WafSettings(),
+            persistUserList: false,
+            rules: WafTestPacks.HangFarmWithDefaultContent());
         IReadOnlyList<WafStrategyRow> rows = waf.ListStrategies();
         rows.Should().Contain(r => r.Id == "content.abuse" && r.Kind == "content");
         rows.Should().Contain(r => r.Id.StartsWith("proto.", StringComparison.OrdinalIgnoreCase));

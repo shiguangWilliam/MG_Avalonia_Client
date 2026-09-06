@@ -117,7 +117,9 @@ public sealed class WafCapabilityMatrixTests
                 var waf = new CnCNetIngressWaf(
                     () => new WafSettings { Sensitivity = s },
                     persistUserList: false);
-                waf.Evaluate(WafAttackFixtures.LobbyPromoChat("U", "visit http://example.com/x"))
+                // promo+url >= 50 pts so every sensitivity level (even sens0,
+                // warn=30) warns; a bare URL scores 25 and sits below sens0.
+                waf.Evaluate(WafAttackFixtures.LobbyPromoChat("U", "代练加群 visit http://example.com/x"))
                     .Severity.Should().Be(WafSeverity.Warn);
             }));
         }

@@ -12,6 +12,8 @@ using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
 using ClientAvalonia.Session;
+using ClientAvalonia.Tests.Fixture;
+using ClientCore;
 using FluentAssertions;
 using Xunit;
 
@@ -21,8 +23,20 @@ namespace ClientAvalonia.Tests.IniUi;
 /// Unit tests for the Action / Executor infrastructure (auto-refresh-design.md v2).
 /// </summary>
 [Collection("EnvironmentServicesSerial")]
-public sealed class ActionExecutorTests
+public sealed class ActionExecutorTests : IDisposable
 {
+    private readonly ClientAvalonia.Tests.Fixture.TempGameRoot _root = new();
+
+    public void Dispose()
+    {
+        // Restore statics for the next class in this serial collection — the
+        // catalog reload inside NewContext touches ClientConfiguration, which
+        // reads ClientDefinitions.ini from ProgramConstants.GamePath.
+        ClientConfiguration.ResetInstance();
+        ProgramConstants.ClearHostedGameRoot();
+        _root.Dispose();
+    }
+
     [Fact]
     public void Execute_Invokes_All_Refresh_Steps()
     {
@@ -151,7 +165,7 @@ public sealed class ActionExecutorTests
         MaxPlayers = maxPlayers,
     };
 
-    private static LobbyActionContext NewContext(string windowName = "SkirmishLobby")
+    private LobbyActionContext NewContext(string windowName = "SkirmishLobby")
     {
         EnvironmentServices.Reset();
         EnvironmentServices.Register<IMultiplayerColorCatalog>(
@@ -159,6 +173,11 @@ public sealed class ActionExecutorTests
         EnvironmentServices.Register<IGameEnvironment>(
             () => new MockGameEnvironment { PlayerNameValue = "TestPlayer" });
 
+        // Bind this class's temp root so ClientConfiguration (GameOptions.ini
+        // [General] Sides=) resolves against a real throwaway tree instead of
+        // leaking a previous class's root.
+        _root.BindToProgramConstants();
+        ClientConfiguration.ResetInstance();
         LobbyCatalogService.Instance.Reload(includeSpectator: false);
 
         return new LobbyActionContext
