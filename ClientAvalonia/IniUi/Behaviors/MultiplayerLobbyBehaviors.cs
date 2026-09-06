@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.GlobalState;
 using ClientAvalonia.GlobalState.Environment;
@@ -13,7 +14,7 @@ public static class MultiplayerLobbyBehaviors
     public static void Register(BehaviorRegistry registry, IUiNavigationHost host, string windowName)
     {
         bool isLan = windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase);
-        string gameLobbyWindow = isLan ? "LANGameLobby" : "CnCNetGameLobby";
+        string gameLobbyWindow = isLan ? WindowKind.LanGameLobby : WindowKind.CnCNetGameLobby;
 
         registry.Register("btnNewGame", _ =>
         {
@@ -50,7 +51,7 @@ public static class MultiplayerLobbyBehaviors
 
             if (!windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase))
             {
-                host.ShowStatus($"Creating game → {gameLobbyWindow}");
+                host.ShowStatus($"Creating game 鈫?{gameLobbyWindow}");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }
@@ -58,14 +59,14 @@ public static class MultiplayerLobbyBehaviors
             ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
             if (cncnet.IsGameRoomJoinPending)
             {
-                host.ShowStatus("Joining game room — please wait...");
+                host.ShowStatus("Joining game room —?please wait...");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }
 
             if (cncnet.ActiveGameRoom != null)
             {
-                host.ShowStatus("Already in a game room — open the in-game lobby or leave first.");
+                host.ShowStatus("Already in a game room —?open the in-game lobby or leave first.");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }
@@ -106,7 +107,7 @@ public static class MultiplayerLobbyBehaviors
             ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
             if (cncnet.IsGameRoomJoinPending)
             {
-                host.ShowStatus("Joining game room — please wait...");
+                host.ShowStatus("Joining game room —?please wait...");
                 host.NavigateTo(gameLobbyWindow);
                 return;
             }

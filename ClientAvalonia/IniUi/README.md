@@ -115,3 +115,22 @@ dotnet run --project ClientAvalonia -- --validate-resources
 # 校验设置绑定（OptionsWindow）
 dotnet run --project ClientAvalonia -- --validate-bindings Resources/OptionsWindow.ini OptionsWindow
 ```
+
+## 代码驱动区域边界声明（Issue #22）
+
+以下 UI 区域**由 C# 代码生成而非纯 INI 定制**，这是有意取舍而非疏漏。INI 只能覆盖其中
+标注的"可调项"：
+
+| 区域 | 驱动代码 | 为什么代码驱动 | INI 可调项 |
+|---|---|---|---|
+| 玩家槽位行（ddPlayerSide/Color/Team/Start N） | `LobbyPlayerBindingApplier` | 行数随 `LobbyPlayerSlot.MaxSlots` 与地图容量动态变化，下拉项来自运行时目录（阵营/颜色/AI 名），INI 静态声明无法表达 | `PlayerOptionLocationX/Y`、`PlayerOptionVerticalMargin`、各列宽（`PlayerNameWidth` 等，见 `ReadLayout`） |
+| Options 安全页控件 | `OptionsSecurityControlsBootstrap` | WAF/通知开关是客户端内部功能面，与 mod 数据无关 | 无（低频管理页） |
+| 顶部栏与私信面板 | `ChannelLobbyLayout` + `CnCNetGameLobbyUiHelper` | CnCNet 协议 UI，控件集合随功能开关变化 | 面板几何常量 |
+| Tactical 模板白名单 | `DxNodeTemplateSelector` | Tactical 皮肤按控件 ID 精确映射玻璃拟态模板，白名单是主题内部契约 | 换主题即整组切换 |
+| Options 页脚按钮 | `OptionsWindowLayout` / `OptionsFooterChrome` | MG OptionsWindow.ini 未声明页脚；DX 在 C# 创建 | `FooterSaveLeft`、`FooterCancelLeft`、`FooterBottomOffset`、`FooterButtonWidth/Height`、`FooterZIndex`（Issue #5） |
+| Campaign 阵营 tab 文案 | `CampaignSideTabCatalog`（Issue #22） | tab 集合派生自 `GameOptions.ini` 的 `Sides=`，与遭遇战下拉同源 | 改 `Sides=` 即生效 |
+
+窗口外壳移除（`WindowTreePostProcessor`）支持显式声明：节点 `IsShell=true/false` 优先于
+像素启发式；窗口 section 可用 `ShellMaxWidthLobby` / `ShellMaxWidthWindow` 覆盖启发式
+阈值（Issue #18）。每次启发式移除都会记录到 `client.log`。
+

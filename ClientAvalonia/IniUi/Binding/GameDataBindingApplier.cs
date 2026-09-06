@@ -201,9 +201,9 @@ public static class GameDataBindingApplier
                 state.SelectedGameIndex = -1;
             }
 
-            if (!lbGames.Node.Props.ContainsKey("ChannelLobbyGamesWired"))
+            if (!LobbyUiState.GetChannelLobbyGamesWired(lbGames))
             {
-                lbGames.Node.Props["ChannelLobbyGamesWired"] = true;
+                LobbyUiState.MarkChannelLobbyGamesWired(lbGames);
                 lbGames.SelectionChanged += () =>
                 {
                     int idx = lbGames.SelectedIndex;
@@ -237,9 +237,9 @@ public static class GameDataBindingApplier
             int channelIndex = Math.Clamp(state.SelectedChannelIndex, 0, Math.Max(0, channelNames.Count - 1));
             ddChannel.SelectedIndex = channelIndex;
 
-            if (!ddChannel.Node.Props.ContainsKey("ChannelLobbyWired"))
+            if (!LobbyUiState.GetChannelLobbyWired(ddChannel))
             {
-                ddChannel.Node.Props["ChannelLobbyWired"] = true;
+                LobbyUiState.MarkChannelLobbyWired(ddChannel);
                 ddChannel.SelectionChanged += () =>
                 {
                     ICnCNetSession cncnet = EnvironmentServices.Resolve<ICnCNetSession>();
@@ -528,6 +528,15 @@ public static class GameDataBindingApplier
         ApplySideTabLabel(root, "GDI", "同盟国联军", "Client:Main:SideAllied");
         ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Client:Main:SideSoviet");
         ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Client:Main:SideAckville");
+        // Issue #22: sides beyond the classic trio (e.g. a mod's 4th side) get
+        // their tab labels from CampaignSideTabCatalog — same GameOptions.ini
+        // Sides= list the skirmish dropdown uses.
+        foreach (CampaignSideTabCatalog.CampaignSideTab tab in CampaignSideTabCatalog.GetTabs())
+        {
+            if (tab.ControlId is "GDI" or "Nod" or "ThirdSide")
+                continue; // already applied above with curated fallbacks
+            ApplySideTabLabel(root, tab.ControlId, tab.DisplayNameFallback, tab.L10NKey);
+        }
     }
 
     private static void SetFontSizeIfMissing(UiNodeViewModel vm, double size)
@@ -651,10 +660,20 @@ public static class GameDataBindingApplier
 
     private static void ApplyCampaignSideTabState(UiNodeViewModel root, CampaignSideFilter activeFilter)
     {
-        ApplySideTabSelected(root, "GDI", activeFilter == CampaignSideFilter.Allied);
-        ApplySideTabSelected(root, "Nod", activeFilter == CampaignSideFilter.Soviet);
-        ApplySideTabSelected(root, "ThirdSide", activeFilter == CampaignSideFilter.Ackville);
-        ApplySideTabSelected(root, "FourthSide", false);
+        // Issue #22: tab ids resolved through CampaignSideTabCatalog so a mod's
+        // extra sides get selected-state sync too.
+        int index = 0;
+        foreach (CampaignSideTabCatalog.CampaignSideTab tab in CampaignSideTabCatalog.GetTabs())
+        {
+            bool selected = Enum.TryParse(tab.SideName, ignoreCase: true, out CampaignSideFilter filter)
+                && filter == activeFilter;
+            ApplySideTabSelected(root, tab.ControlId, selected);
+            index++;
+        }
+
+        // FourthSide has no CampaignSideFilter value yet — keep it unselected.
+        UiNodeViewModel? fourth = FindVm(root, "FourthSide");
+        fourth?.SetTabSelected(false);
     }
 
     private static void ApplySideTabSelected(UiNodeViewModel root, string controlId, bool selected)

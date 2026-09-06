@@ -14,6 +14,12 @@ public sealed class UiNode
     /// <summary>Internal Avalonia template key from ControlRegistry.</summary>
     public required string TemplateKey { get; set; }
 
+    /// <summary>
+    /// Render-property bag for INI-driven visuals (geometry, textures, text…).
+    /// Issue #21 contract: binding/lifecycle flags (one-shot wiring markers)
+    /// must NOT live here — use <see cref="Binding.LobbyUiState"/> instead —
+    /// so Props stays a pure, INI-mirroring bag safe to dump/serialize.
+    /// </summary>
     public Dictionary<string, object> Props { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Original INI strings including unrecognized keys for dynamic/business consumers.</summary>

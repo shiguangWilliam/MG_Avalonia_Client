@@ -122,16 +122,18 @@ public static class GameProcessLauncher
                 int code = proc.ExitCode;
                 Logger.Log($"GameProcessLauncher: exit code {code} (0x{code & 0xFFFFFFFF:X8}).");
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Log($"GameProcessLauncher: reading exit code failed: {ex.Message}");
             }
 
             try
             {
                 proc.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Log($"GameProcessLauncher: disposing process handle failed: {ex.Message}");
             }
         }
 

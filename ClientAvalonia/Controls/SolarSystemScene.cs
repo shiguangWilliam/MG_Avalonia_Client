@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using System;
 using Rampastring.Tools;
 
@@ -885,7 +886,7 @@ internal sealed class SolarSystemScene
     {
         _ when Services.FloatingOverlayLayout.IsCampaignWindow(windowName) => PanelKind.Campaign,
         "CnCNetLobby" or "LANLobby" => PanelKind.Lobby,
-        "CnCNetGameLobby" or "LANGameLobby" or "SkirmishLobby" or "SkirmishBattle" => PanelKind.GameLobby,
+        WindowKind.CnCNetGameLobby or WindowKind.LanGameLobby or WindowKind.SkirmishLobby or "SkirmishBattle" => PanelKind.GameLobby,
         _ => PanelKind.MainMenu,
     };
 

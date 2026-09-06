@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
 using ClientAvalonia.Services;
@@ -10,6 +11,9 @@ namespace ClientAvalonia.IniUi.Loading;
 /// INI-independent footer labels/layout for OptionsWindow.
 /// Layout mirrors DX OptionsWindow: Save bottom-left, Cancel bottom-right.
 /// Classic chrome uses ThemeMG <c>button.png</c> (MG has no 92pxbtn.png).
+/// Geometry lives in <see cref="OverlayLayoutConstants"/> (Issue #5) and is
+/// INI-overridable via window keys (FooterSaveLeft / FooterCancelRightOffset /
+/// FooterBottomOffset / FooterButtonWidth / FooterButtonHeight / FooterZIndex).
 /// </summary>
 internal static class OptionsFooterChrome
 {
@@ -17,8 +21,8 @@ internal static class OptionsFooterChrome
     public const string CancelFallback = "取消";
 
     /// <summary>Classic button atlas present under ThemeMG (not 92pxbtn.png).</summary>
-    public const string IdleTexture = "button.png";
-    public const string HoverTexture = "button_c.png";
+    public const string IdleTexture = OverlayLayoutConstants.MgButtonIdleTexture;
+    public const string HoverTexture = OverlayLayoutConstants.MgButtonHoverTexture;
 
     public static string ResolveSaveText()
         => NonEmpty("保存".L10N("Client:Main:ButtonSave"), SaveFallback);
@@ -41,18 +45,27 @@ internal static class OptionsFooterChrome
         UiNodeViewModel? save = FindDirectChild(root, "btnSave") ?? Find(root, "btnSave");
         UiNodeViewModel? cancel = FindDirectChild(root, "btnCancel") ?? Find(root, "btnCancel");
 
+        // INI overrides on the window root (Issue #5); absent keys keep the
+        // DX-mirror defaults.
+        UiNode? win = root.Node;
+        int saveLeft = OverlayLayoutOverrides.ReadInt(win, "FooterSaveLeft", OverlayLayoutConstants.FooterSaveLeft);
+        int cancelLeft = OverlayLayoutOverrides.ReadInt(
+            win, "FooterCancelLeft",
+            OptionsOverlayConstants.Width - OverlayLayoutConstants.FooterCancelRightOffset);
+        int bottom = OverlayLayoutOverrides.ReadInt(win, "FooterBottomOffset", OverlayLayoutConstants.FooterBottomOffset);
+
         // Save = bottom-LEFT; Cancel = bottom-RIGHT (panel corner).
         PositionFooterButton(
             save,
             ResolveSaveText(),
-            canvasLeft: 12.0,
-            canvasTop: OptionsOverlayConstants.Height - 40);
+            canvasLeft: saveLeft,
+            canvasTop: OptionsOverlayConstants.Height - bottom);
 
         PositionFooterButton(
             cancel,
             ResolveCancelText(),
-            canvasLeft: OptionsOverlayConstants.Width - 104,
-            canvasTop: OptionsOverlayConstants.Height - 40);
+            canvasLeft: cancelLeft,
+            canvasTop: OptionsOverlayConstants.Height - bottom);
     }
 
     private static void PositionFooterButton(
@@ -64,14 +77,18 @@ internal static class OptionsFooterChrome
         if (button == null)
             return;
 
+        UiNode? win = button.Node.Parent;
+        double width = OverlayLayoutOverrides.ReadInt(win, "FooterButtonWidth", (int)OverlayLayoutConstants.FooterButtonWidth);
+        double height = OverlayLayoutOverrides.ReadInt(win, "FooterButtonHeight", (int)OverlayLayoutConstants.FooterButtonHeight);
+
         button.Node.Props["Text"] = text;
         button.SetDisplayText(text);
         button.IsVisible = true;
-        button.Node.Props["Width"] = 92.0;
-        button.Node.Props["Height"] = 32.0;
+        button.Node.Props["Width"] = width;
+        button.Node.Props["Height"] = height;
         button.Node.Props["CanvasLeft"] = canvasLeft;
         button.Node.Props["CanvasTop"] = canvasTop;
-        button.Node.Props["ZIndex"] = 1000;
+        button.Node.Props["ZIndex"] = OverlayLayoutConstants.FooterZIndex;
         button.Node.Props["IdleTexture"] = IdleTexture;
         button.Node.Props["HoverTexture"] = HoverTexture;
         button.RefreshLayout();
@@ -85,12 +102,12 @@ internal static class OptionsFooterChrome
         node.Props["Text"] = text;
         node.Props["IsVisible"] = true;
         if (node.GetIntProp("Width") <= 0)
-            node.Props["Width"] = 92.0;
+            node.Props["Width"] = OverlayLayoutConstants.FooterButtonWidth;
         if (node.GetIntProp("Height") <= 0)
-            node.Props["Height"] = 32.0;
+            node.Props["Height"] = OverlayLayoutConstants.FooterButtonHeight;
         node.Props["IdleTexture"] = IdleTexture;
         node.Props["HoverTexture"] = HoverTexture;
-        node.Props["ZIndex"] = 1000;
+        node.Props["ZIndex"] = OverlayLayoutConstants.FooterZIndex;
     }
 
     private static string NonEmpty(string candidate, string fallback)

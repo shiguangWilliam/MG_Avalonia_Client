@@ -128,8 +128,11 @@ public sealed class Startup
         {
             updaterFolder.Delete(true);
         }
-        catch
+        catch (Exception ex)
         {
+            // Issue #27: environment problems (locked files, ACLs) must be visible
+            // in client.log instead of silently swallowed.
+            Logger.Log($"Deleting the temporary updater directory failed: {ex.Message}");
         }
     }
 
@@ -147,8 +150,9 @@ public sealed class Startup
         {
             savedGamesFolder.Create();
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log($"Creating the Saved Games directory failed: {ex.Message}");
         }
     }
 
@@ -164,8 +168,9 @@ public sealed class Startup
             {
                 SafePath.DeleteFileIfExists(ProgramConstants.GamePath, $"{component.LocalPath}_u");
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Log($"Removing partial download '{component.LocalPath}_u' failed: {ex.Message}");
             }
         }
     }

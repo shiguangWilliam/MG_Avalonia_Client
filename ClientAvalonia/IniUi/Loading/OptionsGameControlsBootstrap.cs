@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.IniUi.Models;
 using ClientCore.Extensions;
 using ClientAvalonia.GlobalState;
@@ -74,7 +75,7 @@ internal static class OptionsGameControlsBootstrap
                 Id = id,
                 ControlType = "XNALabel",
                 TemplateKey = "DxLabel",
-                WindowName = "OptionsWindow",
+                WindowName = WindowKind.OptionsWindow,
                 Parent = panel,
             };
             panel.Children.Add(node);
@@ -100,7 +101,7 @@ internal static class OptionsGameControlsBootstrap
                 Id = id,
                 ControlType = "XNATextBox",
                 TemplateKey = "DxTextBox",
-                WindowName = "OptionsWindow",
+                WindowName = WindowKind.OptionsWindow,
                 Parent = panel,
             };
             panel.Children.Add(node);

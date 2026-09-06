@@ -1,7 +1,8 @@
 // ClientEnvironment: game-root discovery, theme resolution, and asset/INI search paths.
 // The search path order in GetAssetSearchPaths / ResolveNamedIni is aligned with DX's
-// AppState.Environment.ResourcesPath. Read ClientAvalonia/IniUi/README.md §ResourceResolver
-// before changing path order — map previews and side icons rely on GameRoot being a root.
+// AppState.Environment.ResourcesPath. Read ClientAvalonia/IniUi/README.md 搂ResourceResolver
+// before changing path order —?map previews and side icons rely on GameRoot being a root.
+using ClientAvalonia.IniUi;
 using ClientAvalonia.Core;
 using ClientAvalonia.GlobalState;
 using ClientAvalonia.IniUi.Layout;
@@ -86,8 +87,8 @@ public sealed class ClientEnvironment
 
         if (width <= 0 || height <= 0)
         {
-            string? mainMenuIni = ResolveWindowIniPath(gameRoot, themeFolder, "MainMenu");
-            if (mainMenuIni != null && ReadWindowSize(mainMenuIni, "MainMenu") is { } menuSize)
+            string? mainMenuIni = ResolveWindowIniPath(gameRoot, themeFolder, WindowKind.MainMenu);
+            if (mainMenuIni != null && ReadWindowSize(mainMenuIni, WindowKind.MainMenu) is { } menuSize)
             {
                 width = menuSize.Width;
                 height = menuSize.Height;
@@ -197,8 +198,8 @@ public sealed class ClientEnvironment
 
         if (width <= 0 || height <= 0)
         {
-            string? mainMenuIni = ResolveWindowIniPath(gameRoot, themeFolder, "MainMenu");
-            if (mainMenuIni != null && ReadWindowSize(mainMenuIni, "MainMenu") is { } menuSize)
+            string? mainMenuIni = ResolveWindowIniPath(gameRoot, themeFolder, WindowKind.MainMenu);
+            if (mainMenuIni != null && ReadWindowSize(mainMenuIni, WindowKind.MainMenu) is { } menuSize)
             {
                 width = menuSize.Width;
                 height = menuSize.Height;
@@ -244,13 +245,13 @@ public sealed class ClientEnvironment
         yield return Path.Combine(ResourcesDirectory, "DTA");
         yield return Path.Combine(ResourcesDirectory, "DTA", "Default Theme");
         // GameRoot must remain in the search roots: map previews, side icons and other game-relative
-        // assets are addressed as paths like "Maps/Fan-made/xxx.png" or "Previews/foo.png" — i.e.
+        // assets are addressed as paths like "Maps/Fan-made/xxx.png" or "Previews/foo.png" —?i.e.
         // relative to the game root, NOT to Resources/. Removing this root silently breaks
         // GameAssetResolver.ResolveMapPreviewRelativePath on every mod (MG/LNOD/QEC alike).
         yield return GameRoot;
     }
 
-    /// <summary>Window INI resolution: theme MainMenu.ini → Resources/MainMenu.ini → DTA fallback.</summary>
+    /// <summary>Window INI resolution: theme MainMenu.ini 鈫?Resources/MainMenu.ini 鈫?DTA fallback.</summary>
     public string? ResolveWindowIni(string windowName)
         => ResolveWindowIniPath(GameRoot, ThemeFolderPath, windowName);
 
@@ -301,8 +302,8 @@ public sealed class ClientEnvironment
         string? iniPath = ResolveWindowIni(windowName);
         if (iniPath == null && IsGameLobbyWindowName(windowName))
         {
-            iniPath = ResolveWindowIni("MultiplayerGameLobby")
-                ?? ResolveWindowIni("SkirmishLobby");
+            iniPath = ResolveWindowIni(WindowKind.MultiplayerGameLobby)
+                ?? ResolveWindowIni(WindowKind.SkirmishLobby);
         }
 
         // Last-resort fallback: if neither a dedicated window INI nor a lobby INI exists,
@@ -352,21 +353,21 @@ public sealed class ClientEnvironment
     }
 
     /// <summary>
-    /// DX-shaped IniNameOverride → Name aliases. Keep navigation / behaviors on the logical name;
+    /// DX-shaped IniNameOverride 鈫?Name aliases. Keep navigation / behaviors on the logical name;
     /// only the load target section is remapped.
     /// </summary>
     private static readonly (string LogicalName, string SectionName)[] WindowSectionAliases =
     [
-        ("CnCNetGameLobby", "MultiplayerGameLobby"),
-        ("LANGameLobby", "MultiplayerGameLobby"),
+        (WindowKind.CnCNetGameLobby, WindowKind.MultiplayerGameLobby),
+        (WindowKind.LanGameLobby, WindowKind.MultiplayerGameLobby),
         ("CnCNetGameLoadingLobby", "GameLoadingLobby"),
         ("LANGameLoadingLobby", "GameLoadingLobby"),
     ];
 
     private static bool IsGameLobbyWindowName(string windowName)
-        => windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase)
+        => windowName.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals(WindowKind.LanGameLobby, StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals(WindowKind.MultiplayerGameLobby, StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("CnCNetGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("GameLoadingLobby", StringComparison.OrdinalIgnoreCase);
@@ -423,7 +424,7 @@ public sealed class ClientEnvironment
         => FindGameRoot(startDirectory, registryCandidates: null);
 
     /// <summary>
-    /// Walk CWD / exe only — no registry first-hit. Used by the workspace picker local probe.
+    /// Walk CWD / exe only —?no registry first-hit. Used by the workspace picker local probe.
     /// </summary>
     public static string? TryFindGameRootWithoutRegistry(string? startDirectory = null)
     {

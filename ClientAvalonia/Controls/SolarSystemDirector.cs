@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using System;
 using Avalonia;
 using ClientAvalonia.Services;
@@ -241,7 +242,7 @@ public static class SolarSystemDirector
 
         OuterSystemOpacity = 1.0;
         _exitRestoreActive = false;
-        string window = _pendingExitWindow ?? "MainMenu";
+        string window = _pendingExitWindow ?? WindowKind.MainMenu;
         _pendingExitWindow = null;
         _backdrop.Gl.Scene.EndEarthFocus(SolarSystemScene.PanelKindForWindow(window));
     }

@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using System;
 using System.IO;
 using Avalonia;
@@ -53,11 +54,11 @@ internal static class Program
         ClientEnvironment env = ClientEnvironment.Discover();
         string iniPath = args.Length > 1
             ? args[1]
-            : env.ResolveWindowIni("MainMenu")
+            : env.ResolveWindowIni(WindowKind.MainMenu)
               ?? throw new FileNotFoundException("MainMenu.ini not found for active theme.");
 
-        var engine = LayoutEngine.CreateForWindow(env, iniPath, "MainMenu");
-        UiNodeTree tree = engine.LoadWindow(iniPath, "MainMenu");
+        var engine = LayoutEngine.CreateForWindow(env, iniPath, WindowKind.MainMenu);
+        UiNodeTree tree = engine.LoadWindow(iniPath, WindowKind.MainMenu);
         int nodes = tree.AllNodes().Count();
         UiNode? btnSkirmish = tree.FindNode("btnSkirmish");
         ResourceResolver resources = engine.Resources;
@@ -81,7 +82,7 @@ internal static class Program
         ClientEnvironment env = ClientEnvironment.Discover();
         string iniPath = args.Length > 1
             ? args[1]
-            : env.ResolveWindowIni("MainMenu")
+            : env.ResolveWindowIni(WindowKind.MainMenu)
               ?? throw new FileNotFoundException("MainMenu.ini not found for active theme.");
 
         string windowSection = args.Length > 2
@@ -125,7 +126,7 @@ internal static class Program
         ClientStartupService.Run();
         if (!ClientStartupService.BootstrapSucceeded)
         {
-            Console.Error.WriteLine($"FAIL: bootstrap — {ClientStartupService.BootstrapError}");
+            Console.Error.WriteLine($"FAIL: bootstrap —?{ClientStartupService.BootstrapError}");
             Environment.Exit(1);
         }
 
@@ -136,7 +137,7 @@ internal static class Program
             $"gameRoot={ClientEnvironment.Discover().GameRoot}");
         if (catalog.Maps.Count == 0)
         {
-            Console.Error.WriteLine("FAIL: map catalog is empty — check MPMapsPath, MapFileExtension, and map files.");
+            Console.Error.WriteLine("FAIL: map catalog is empty —?check MPMapsPath, MapFileExtension, and map files.");
             Environment.Exit(1);
         }
         if (catalog.GameModes.Count > 0)
@@ -155,12 +156,12 @@ internal static class Program
         ClientEnvironment env = ClientEnvironment.Discover();
         string iniPath = args.Length > 1
             ? args[1]
-            : env.ResolveWindowIni("OptionsWindow")
+            : env.ResolveWindowIni(WindowKind.OptionsWindow)
               ?? throw new FileNotFoundException("OptionsWindow.ini not found for active theme.");
 
         string windowSection = args.Length > 2
             ? args[2]
-            : "OptionsWindow";
+            : WindowKind.OptionsWindow;
 
         var engine = LayoutEngine.CreateForWindow(env, iniPath, windowSection);
         UiNodeTree tree = engine.LoadWindow(iniPath, windowSection);

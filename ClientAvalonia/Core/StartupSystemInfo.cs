@@ -30,8 +30,10 @@ internal static class StartupSystemInfo
             if (parts.Count > 0)
                 cpu = string.Join(' ', parts);
         }
-        catch
+        catch (Exception ex)
         {
+            // WMI can be unavailable (home editions, locked-down boxes).
+            Logger.Log($"StartupSystemInfo: CPU probe failed: {ex.Message}");
         }
 
         try
@@ -51,8 +53,9 @@ internal static class StartupSystemInfo
             if (parts.Count > 0)
                 videoController = string.Join(' ', parts);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log($"StartupSystemInfo: video controller probe failed: {ex.Message}");
         }
 
         try
@@ -65,8 +68,9 @@ internal static class StartupSystemInfo
             if (total != 0)
                 memory = "Total physical memory: " + (total >= 1073741824 ? total / 1073741824 + "GB" : total / 1048576 + "MB");
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log($"StartupSystemInfo: memory probe failed: {ex.Message}");
         }
 
         Logger.Log($"Hardware info: {cpu} | {videoController} | {memory}");

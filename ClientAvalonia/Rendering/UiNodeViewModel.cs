@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -686,7 +687,7 @@ public sealed class UiNodeViewModel : INotifyPropertyChanged
     private void ApplyTacticalTextures()
     {
         bool isButton = IsButtonLike();
-        bool isMainMenuRoot = string.Equals(Node.WindowName, "MainMenu", StringComparison.OrdinalIgnoreCase)
+        bool isMainMenuRoot = string.Equals(Node.WindowName, WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase)
             && Node.Parent is null;
         bool isWindowRoot = !isMainMenuRoot
             && (Node.Props.ContainsKey("DrawMode") || Node.Props.ContainsKey("BackgroundTexture"));

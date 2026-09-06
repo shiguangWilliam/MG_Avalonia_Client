@@ -77,8 +77,10 @@ public static class CnCNetOnlineIdentity
                 else
                     str = existing.ToString() ?? str;
             }
-            catch
+            catch (Exception ex)
             {
+                // Registry access can be blocked by policy — fall through to a fresh ident.
+                Logger.Log($"CnCNetOnlineIdentity: reading registry Ident failed: {ex.Message}");
             }
 
             PersistIdent(str);

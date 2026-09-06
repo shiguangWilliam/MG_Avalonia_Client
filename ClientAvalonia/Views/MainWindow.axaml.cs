@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using System;
 using System.Threading.Tasks;
 using Avalonia;
@@ -60,7 +61,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public bool IsOptionsOverlayOpen
         => IsFloatingOverlayOpen
-           && _ctx.FloatingOverlayWindow?.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase) == true;
+           && _ctx.FloatingOverlayWindow?.Equals(WindowKind.OptionsWindow, StringComparison.OrdinalIgnoreCase) == true;
 
     public bool IsGameCreationOverlayOpen
         => IsFloatingOverlayOpen
@@ -196,7 +197,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        NavigateTo("MainMenu");
+        NavigateTo(WindowKind.MainMenu);
         TryAutomaticCnCNetLogin();
     }
 
@@ -325,7 +326,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void CloseGameCreationOverlay() => _overlay.CloseGameCreationOverlay();
 
-    public void OpenOptionsOverlay() => OpenFloatingOverlay("OptionsWindow");
+    public void OpenOptionsOverlay() => OpenFloatingOverlay(WindowKind.OptionsWindow);
 
     public void CloseOptionsOverlay() => CloseFloatingOverlay();
 
@@ -344,7 +345,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+        if (CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
             _ctx.CnCNet.LeaveGameRoom();
 
         if (_navStack.Count > 0)
@@ -353,14 +354,14 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
         }
 
-        NavigateTo("MainMenu", fromBack: true);
+        NavigateTo(WindowKind.MainMenu, fromBack: true);
     }
 
     public void LogoutToMainMenu()
     {
         CloseFloatingOverlaySilently();
 
-        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+        if (CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase)
             || CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
             || _ctx.CnCNet.ActiveGameRoom != null
             || _ctx.CnCNet.Connection is { IsConnected: true })
@@ -369,7 +370,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         }
 
         _navStack.Clear();
-        NavigateTo("MainMenu", fromBack: true);
+        NavigateTo(WindowKind.MainMenu, fromBack: true);
         ShowStatus("Logged out.");
     }
 
@@ -553,7 +554,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             if (_reopenOptionsAfterStyleSwitch)
             {
                 _reopenOptionsAfterStyleSwitch = false;
-                OpenFloatingOverlay("OptionsWindow");
+                OpenFloatingOverlay(WindowKind.OptionsWindow);
             }
         }
 
@@ -623,19 +624,19 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     public void RefreshMainMenuState()
     {
-        if (!CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase) || _ctx.ActiveRoot == null)
+        if (!CurrentWindow.Equals(WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase) || _ctx.ActiveRoot == null)
             return;
 
         _ctx.BindingSession.State.RefreshMainMenuState();
         _ctx.BindingSession.State.SetUpdateStatusText(_updateService.UpdateStatusText);
-        StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, "MainMenu");
+        StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, WindowKind.MainMenu);
     }
 
     private void OnUpdateStatusChanged()
     {
         _ctx.BindingSession.State.SetUpdateStatusText(_updateService.UpdateStatusText);
-        if (_ctx.ActiveRoot != null && CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
-            StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, "MainMenu");
+        if (_ctx.ActiveRoot != null && CurrentWindow.Equals(WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase))
+            StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, WindowKind.MainMenu);
     }
 
     public void RefreshLobbyMapList() => _lobbyMaps.RefreshLobbyMapList();
@@ -671,7 +672,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         UiNodeViewModel? btnLaunch = MainWindowContext.FindVm(root, "btnLaunchGame");
         UiNodeViewModel? chkAutoReady = MainWindowContext.FindVm(root, "chkAutoReady");
 
-        if (CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+        if (CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
         {
             ResourceResolver resources = _ctx.GetMainResources();
             ICnCNetSession session = _ctx.CnCNet;
@@ -878,9 +879,9 @@ public partial class MainWindow : Window, IUiNavigationHost
 
     private bool ShouldShowTopBar()
         => CurrentWindow.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
-           || CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+           || CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase)
            || CurrentWindow.Equals("LANLobby", StringComparison.OrdinalIgnoreCase)
-           || CurrentWindow.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase);
+           || CurrentWindow.Equals(WindowKind.LanGameLobby, StringComparison.OrdinalIgnoreCase);
 
     private void OnPrivateMessageArrived(string peer, string preview)
     {
@@ -974,7 +975,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     {
         if (e.Key == Key.F2 && !IsFloatingOverlayOpen)
         {
-            NavigateTo("MainMenu");
+            NavigateTo(WindowKind.MainMenu);
             e.Handled = true;
             return;
         }
@@ -995,7 +996,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
         if (e.Key == Key.F12 && !IsFloatingOverlayOpen)
         {
-            OpenFloatingOverlay("OptionsWindow");
+            OpenFloatingOverlay(WindowKind.OptionsWindow);
             e.Handled = true;
             return;
         }
@@ -1019,7 +1020,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                 return;
             }
 
-            if (CurrentWindow != "MainMenu")
+            if (CurrentWindow != WindowKind.MainMenu)
                 NavigateBack();
 
             return;

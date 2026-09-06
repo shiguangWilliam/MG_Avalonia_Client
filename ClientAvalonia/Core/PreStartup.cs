@@ -205,8 +205,9 @@ public static class PreStartup
             Startup.BootstrapError ??= $"{ex.GetType().Name}: {ex.Message}";
             Startup.BootstrapSucceeded = false;
         }
-        catch
+        catch (Exception bootstrapEx)
         {
+            Logger.Log($"PreStartup: writing BootstrapError failed: {bootstrapEx.Message}");
         }
 
         try
@@ -225,8 +226,9 @@ public static class PreStartup
                 Logger.Log("Crash log copied to: " + crashPath);
             }
         }
-        catch
+        catch (Exception copyEx)
         {
+            Logger.Log($"PreStartup: crash log copy failed: {copyEx.Message}");
         }
     }
 }

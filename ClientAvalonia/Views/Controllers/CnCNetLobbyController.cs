@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Binding;
@@ -70,7 +71,7 @@ internal sealed class CnCNetLobbyController
     public void RefreshCnCNetGameListing()
     {
         if (_ctx.ActiveRoot != null
-            && _ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            && _ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
         {
             UpdateCnCNetGameBroadcastListing(_ctx.ActiveRoot);
         }
@@ -82,14 +83,14 @@ internal sealed class CnCNetLobbyController
 
         if (session.IsGameRoomJoinPending)
         {
-            _ctx.ShowStatus("Joining game room — please wait...");
+            _ctx.ShowStatus("Joining game room —?please wait...");
             return;
         }
 
         if (session.ActiveGameRoom != null)
         {
             _ctx.ShowStatus("Already in a game room.");
-            _ctx.NavigateTo("CnCNetGameLobby");
+            _ctx.NavigateTo(WindowKind.CnCNetGameLobby);
             return;
         }
 
@@ -136,7 +137,7 @@ internal sealed class CnCNetLobbyController
         ICnCNetGameSession? session = _ctx.CnCNet.ActiveGameRoom;
         if (session == null)
         {
-            Rampastring.Tools.Logger.Log("EnterCnCNetGameLobbyConnecting: ActiveGameRoom null — skipping slot setup.");
+            Rampastring.Tools.Logger.Log("EnterCnCNetGameLobbyConnecting: ActiveGameRoom null —?skipping slot setup.");
             return;
         }
 
@@ -152,8 +153,8 @@ internal sealed class CnCNetLobbyController
         if (room.IsHost)
             session.InitHostSlots(localNick);
 
-        if (!_ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
-            _ctx.NavigateTo("CnCNetGameLobby");
+        if (!_ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
+            _ctx.NavigateTo(WindowKind.CnCNetGameLobby);
         else if (_ctx.ActiveRoot != null)
             ApplyCnCNetGameLobbyConnectingState(_ctx.ActiveRoot, room);
     }
@@ -190,13 +191,13 @@ internal sealed class CnCNetLobbyController
         OnPrivateMessagingRefreshRequested?.Invoke();
 
         if (_ctx.ActiveRoot != null
-            && _ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            && _ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
         {
             OnGameRoomUiRefreshRequested?.Invoke(_ctx.ActiveRoot);
         }
 
-        if (_ctx.CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase) && _ctx.ActiveRoot != null)
-            StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, "MainMenu");
+        if (_ctx.CurrentWindow.Equals(WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase) && _ctx.ActiveRoot != null)
+            StateBindingApplier.Apply(_ctx.ActiveRoot, _ctx.BindingSession.State, WindowKind.MainMenu);
 
         _ctx.UpdateTopBar();
     }

@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
@@ -68,12 +69,12 @@ public class DxNodeTemplateSelector : IDataTemplate
             }
 
             // Options / other windows keep INI TemplateKey (footer Cancel stays DxButton).
-            return vm.Id.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+            return vm.Id.Equals(WindowKind.CampaignSelector, StringComparison.OrdinalIgnoreCase)
                 ? "DxCampaignTacticalRoot"
                 : vm.TemplateKey;
         }
 
-        // Classic: campaign chrome only inside CampaignSelector — never hijack Options btnCancel.
+        // Classic: campaign chrome only inside CampaignSelector —?never hijack Options btnCancel.
         if (IsCampaign(vm))
         {
             return vm.Id.ToLowerInvariant() switch
@@ -91,13 +92,13 @@ public class DxNodeTemplateSelector : IDataTemplate
             };
         }
 
-        return vm.Id.Equals("CampaignSelector", StringComparison.OrdinalIgnoreCase)
+        return vm.Id.Equals(WindowKind.CampaignSelector, StringComparison.OrdinalIgnoreCase)
             ? "DxCampaignRoot"
             : vm.TemplateKey;
     }
 
     private static bool IsMainMenu(UiNodeViewModel vm)
-        => string.Equals(vm.Node.WindowName, "MainMenu", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(vm.Node.WindowName, WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Campaign chrome is keyed by control id (btnCancel/btnLaunch). Gate by window so

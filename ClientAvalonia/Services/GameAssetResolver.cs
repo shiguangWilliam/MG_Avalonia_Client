@@ -197,9 +197,10 @@ public static class GameAssetResolver
         }
 
         // MG ThemeMG provides button.png / button_c.png instead of 92pxbtn.png.
-        Bitmap? mgIdle = resources.LoadBitmap("button.png");
+        // Texture names centralized in IniUi.Layout.OverlayLayoutConstants (Issue #5).
+        Bitmap? mgIdle = resources.LoadBitmap(IniUi.Layout.OverlayLayoutConstants.MgButtonIdleTexture);
         if (mgIdle != null)
-            vm.SetButtonTextures(mgIdle, resources.LoadBitmap("button_c.png"));
+            vm.SetButtonTextures(mgIdle, resources.LoadBitmap(IniUi.Layout.OverlayLayoutConstants.MgButtonHoverTexture));
     }
 
     public static void ApplyCampaignSideIcons(UiNodeViewModel root, ResourceResolver resources)

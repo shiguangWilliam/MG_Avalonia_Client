@@ -1,4 +1,5 @@
 using ClientAvalonia.Domain;
+using ClientAvalonia.Services;
 using ClientCore;
 
 namespace ClientAvalonia.IniUi.Behaviors;
@@ -33,9 +34,13 @@ public static class CampaignOverlayBehaviors
                 host.ShowStatus($"Campaign launch failed: {message}");
         });
 
-        RegisterSideFilter(registry, host, "GDI", CampaignSideFilter.Allied);
-        RegisterSideFilter(registry, host, "Nod", CampaignSideFilter.Soviet);
-        RegisterSideFilter(registry, host, "ThirdSide", CampaignSideFilter.Ackville);
+        // Issue #22: side tabs come from CampaignSideTabCatalog (GameOptions.ini
+        // Sides=) instead of the hard-coded GDI/Nod/ThirdSide trio.
+        foreach (CampaignSideTabCatalog.CampaignSideTab tab in CampaignSideTabCatalog.GetTabs())
+        {
+            if (Enum.TryParse(tab.SideName, ignoreCase: true, out CampaignSideFilter filter))
+                RegisterSideFilter(registry, host, tab.ControlId, filter);
+        }
 
         registry.RegisterAfter("trbDifficultySelector", vm =>
         {

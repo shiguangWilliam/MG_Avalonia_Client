@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.Core;
 using ClientAvalonia.IniUi.Ast;
 using ClientAvalonia.IniUi.Loading;
@@ -6,7 +7,7 @@ using ClientAvalonia.IniUi.Schema;
 
 namespace ClientAvalonia.IniUi.Layout;
 
-/// <summary>INI → AST → UiNode tree → precomputed layout (M2: single pass at load).</summary>
+/// <summary>INI 鈫?AST 鈫?UiNode tree 鈫?precomputed layout (M2: single pass at load).</summary>
 public sealed class LayoutEngine
 {
     private readonly IniUiTreeBuilder _treeBuilder;
@@ -68,7 +69,7 @@ public sealed class LayoutEngine
         WindowTreePostProcessor.Apply(tree, windowSectionName, _context, ast.OverlaySectionNames);
         ApplyLayout(tree);
 
-        if (windowSectionName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+        if (windowSectionName.Equals(WindowKind.OptionsWindow, StringComparison.OrdinalIgnoreCase))
             OptionsWindowLayout.FinalizeLayout(tree);
 
         if (windowSectionName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
@@ -77,7 +78,7 @@ public sealed class LayoutEngine
         if (IsChannelLobbyWindow(windowSectionName))
             ChannelLobbyLayout.Apply(tree, _context, windowSectionName);
 
-        if (windowSectionName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase))
+        if (windowSectionName.Equals(WindowKind.MultiplayerGameLobby, StringComparison.OrdinalIgnoreCase))
             MultiplayerGameLobbyLayout.Apply(tree);
 
         if (windowSectionName.Contains("Lobby", StringComparison.OrdinalIgnoreCase))

@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using Avalonia.Controls;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
@@ -19,7 +20,7 @@ namespace ClientAvalonia.Views.Controllers;
 
 /// <summary>
 /// Shared dependency + mutable UI-state container for MainWindow controllers.
-/// Does not hold Avalonia PART_* controls — shell callbacks operate those.
+/// Does not hold Avalonia PART_* controls —?shell callbacks operate those.
 /// </summary>
 internal sealed class MainWindowContext
 {
@@ -54,7 +55,7 @@ internal sealed class MainWindowContext
     public SkirmishSession SkirmishSession { get; }
     public ICnCNetSession CnCNet { get; }
 
-    public string CurrentWindow { get; set; } = "MainMenu";
+    public string CurrentWindow { get; set; } = WindowKind.MainMenu;
     public UiNodeViewModel? ActiveRoot { get; set; }
     public UiNodeViewModel? OverlayRoot { get; set; }
     public string? FloatingOverlayWindow { get; set; }
@@ -113,11 +114,11 @@ internal sealed class MainWindowContext
         => ResolveActiveGameSession()?.PlayerSlots ?? SkirmishSession.PlayerSlots;
 
     public static bool IsLanGameLobbyWindow(string windowName)
-        => windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
+        => windowName.Equals(WindowKind.LanGameLobby, StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANGameLoadingLobby", StringComparison.OrdinalIgnoreCase);
 
     public bool IsCnCNetGameRoomChatEligible()
-        => CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
+        => CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase)
            && CnCNet.GameRoom is { IsLocalJoined: true };
 
     public bool IsCnCNetLobbyActive()
@@ -126,17 +127,17 @@ internal sealed class MainWindowContext
            || (ActiveRoot != null && FindVm(ActiveRoot, "ddCurrentChannel") != null);
 
     public static bool IsGameLobbyWindow(string windowName)
-        => windowName.Equals("SkirmishLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("LANGameLobby", StringComparison.OrdinalIgnoreCase)
-           || windowName.Equals("MultiplayerGameLobby", StringComparison.OrdinalIgnoreCase);
+        => windowName.Equals(WindowKind.SkirmishLobby, StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals(WindowKind.LanGameLobby, StringComparison.OrdinalIgnoreCase)
+           || windowName.Equals(WindowKind.MultiplayerGameLobby, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsChannelLobbyWindow(string windowName)
         => windowName.Equals("CnCNetLobby", StringComparison.OrdinalIgnoreCase)
            || windowName.Equals("LANLobby", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsSkirmishWindow(string windowName)
-        => windowName.Equals("SkirmishLobby", StringComparison.OrdinalIgnoreCase);
+        => windowName.Equals(WindowKind.SkirmishLobby, StringComparison.OrdinalIgnoreCase);
 
     public static UiNodeViewModel? FindVm(UiNodeViewModel root, string id)
     {

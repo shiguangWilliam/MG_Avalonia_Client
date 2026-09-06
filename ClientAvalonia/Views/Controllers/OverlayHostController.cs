@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -52,8 +53,8 @@ internal sealed class OverlayHostController
         if (IsOpen)
             return;
 
-        if (!windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase)
-            && !_ctx.CurrentWindow.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
+        if (!windowName.Equals(WindowKind.OptionsWindow, StringComparison.OrdinalIgnoreCase)
+            && !_ctx.CurrentWindow.Equals(WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase))
         {
             _ctx.ShowStatus($"{windowName} overlay is only available from MainMenu");
             return;
@@ -146,7 +147,7 @@ internal sealed class OverlayHostController
             // through; other overlays keep the default dimming.
             ApplyOverlayScrim(windowName);
 
-            if (windowName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+            if (windowName.Equals(WindowKind.OptionsWindow, StringComparison.OrdinalIgnoreCase))
             {
                 DisplayOptionsApplier.Apply(_ctx.OverlayRoot);
                 AudioOptionsApplier.Apply(_ctx.OverlayRoot);
@@ -161,7 +162,7 @@ internal sealed class OverlayHostController
             if (FloatingOverlayLayout.IsCampaignWindow(windowName))
                 _ctx.ApplyCampaignOverlay(_ctx.OverlayRoot, CampaignSideFilter.All);
 
-            _ctx.ShowStatus($"{windowName} overlay: {width}×{height}");
+            _ctx.ShowStatus($"{windowName} overlay: {width}脳{height}");
         }
         catch (Exception ex)
         {
@@ -224,7 +225,7 @@ internal sealed class OverlayHostController
 
         (Control root, GameCreationOverlayContext context, Size preferredSize) = GameCreationOverlayBuilder.Build(tunnels);
         _ctx.GameCreationOverlay = context;
-        GameCreationOverlayBehaviors.Wire(context, (IUiNavigationHost)_ctx.GetOwnerWindow(), "CnCNetGameLobby");
+        GameCreationOverlayBehaviors.Wire(context, (IUiNavigationHost)_ctx.GetOwnerWindow(), WindowKind.CnCNetGameLobby);
 
         string fallbackNote = string.IsNullOrWhiteSpace(iniFailure) ? "programmatic UI" : $"programmatic UI ({iniFailure})";
         ShowGameCreationOverlay(root, preferredSize.Width, preferredSize.Height, fallbackNote);

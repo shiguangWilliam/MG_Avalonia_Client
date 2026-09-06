@@ -1174,8 +1174,10 @@ void main()
             foreach (int p in new[] { _bodyProgram, _sunProgram, _earthProgram, _ringProgram, _lineProgram, _starProgram })
                 if (p != 0) gl.DeleteProgram(p);
         }
-        catch
+        catch (Exception ex)
         {
+            // GL context may already be torn down during shutdown — best-effort delete.
+            Logger.Log($"SolarSystemGlControl: GL resource cleanup failed: {ex.Message}");
         }
         finally
         {

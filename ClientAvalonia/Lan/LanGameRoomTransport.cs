@@ -271,6 +271,7 @@ public sealed class LanGameRoomTransport : IDisposable
         }
         catch (OperationCanceledException)
         {
+            // Normal shutdown path for the receive loop.
         }
         catch (Exception ex)
         {

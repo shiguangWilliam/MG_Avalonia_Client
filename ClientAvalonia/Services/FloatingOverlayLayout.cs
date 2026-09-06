@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.IniUi.Loading;
 
 namespace ClientAvalonia.Services;
@@ -10,12 +11,12 @@ public static class FloatingOverlayLayout
     /// target by default; the floating-overlay path remains reachable as a mod
     /// fallback via <c>$LeftClickAction=OpenFloatingOverlay</c>.
     /// </summary>
-    public const string CampaignWindowName = "CampaignSelector";
+    public const string CampaignWindowName = WindowKind.CampaignSelector;
 
     private static readonly Dictionary<string, (int Width, int Height)> FallbackSizes =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["OptionsWindow"] = (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height),
+            [WindowKind.OptionsWindow] = (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height),
             ["GameCreationWindow"] = (520, 580),
         };
 
@@ -31,7 +32,7 @@ public static class FloatingOverlayLayout
     {
         // Options chrome (tabs + footer Save/Cancel) is laid out against fixed constants.
         // Preferring a smaller INI Height clips/hides the Cancel button.
-        if (windowSectionName.Equals("OptionsWindow", StringComparison.OrdinalIgnoreCase))
+        if (windowSectionName.Equals(WindowKind.OptionsWindow, StringComparison.OrdinalIgnoreCase))
             return (OptionsOverlayConstants.Width, OptionsOverlayConstants.Height);
 
         if (ClientEnvironment.ReadWindowSize(iniPath, windowSectionName) is { } fromIni)

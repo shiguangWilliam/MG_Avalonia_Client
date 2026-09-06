@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using ClientCore;
+using Rampastring.Tools;
 
 namespace ClientAvalonia.Themes;
 
@@ -47,12 +49,17 @@ public static class DxThemeManager
         }
 
         _userAccent = accent;
-        Apply(NormalizeStyle(style), animate: false);
+        Apply(NormalizeStyle(style));
     }
 
-    /// <summary>Swaps the last merged dictionary (the theme layer) and refreshes derived brushes.
-    /// When <paramref name="animate"/> is set, callers wrap this with the transition scrim.</summary>
-    public static void Apply(string style, bool animate = true)
+    /// <summary>
+    /// Swaps the theme dictionary (the theme layer) and refreshes derived brushes.
+    /// Issue #33: the theme layer is located by content (it carries the
+    /// <c>DxAccentPrimaryBrush</c> marker key) instead of assuming it is the last
+    /// merged dictionary — future app-level resource packs can no longer silently
+    /// break style switching.
+    /// </summary>
+    public static void Apply(string style)
     {
         var app = Application.Current;
         if (app?.Resources is null)
@@ -64,19 +71,46 @@ public static class DxThemeManager
             new Uri(BaseUri + (style == StyleTactical ? "DxTheme-Tactical.axaml" : "DxOfficialTheme.axaml")));
 
         var merged = app.Resources.MergedDictionaries;
-        if (merged.Count == 0)
+        int themeIndex = FindThemeLayerIndex(merged);
+        if (themeIndex < 0)
         {
-            merged.Add(dictionary);
+            if (merged.Count == 0)
+            {
+                merged.Add(dictionary);
+            }
+            else
+            {
+                Logger.Log("DxThemeManager: no theme layer marker found — appending as a new merged dictionary. " +
+                           "If style switching misbehaves, check App.axaml merged-dictionary order.");
+                merged.Add(dictionary);
+            }
         }
         else
         {
-            // The theme layer is always the last dictionary; replacing it refreshes
-            // DynamicResource lookups across the whole visual tree.
-            merged[^1] = dictionary;
+            // Replacing the theme layer refreshes DynamicResource lookups across
+            // the whole visual tree.
+            merged[themeIndex] = dictionary;
         }
 
         _currentStyle = style;
         ApplyAccentOverrides(app.Resources);
+    }
+
+    /// <summary>
+    /// Both shipped theme dictionaries declare <c>DxAccentPrimaryBrush</c>, which
+    /// no other app-level dictionary carries — a content marker instead of a
+    /// positional assumption (<c>merged[^1]</c>).
+    /// </summary>
+    private static int FindThemeLayerIndex(IList<IResourceProvider> merged)
+    {
+        for (int i = 0; i < merged.Count; i++)
+        {
+            if (merged[i] is IResourceDictionary dict
+                && dict.TryGetResource("DxAccentPrimaryBrush", null, out _))
+                return i;
+        }
+
+        return -1;
     }
 
     /// <summary>

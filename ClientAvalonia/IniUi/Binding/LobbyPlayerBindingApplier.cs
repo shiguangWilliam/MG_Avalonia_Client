@@ -3,6 +3,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ClientAvalonia.Domain;
 using ClientAvalonia.IniUi.Behaviors;
+using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Loading;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
@@ -92,7 +93,7 @@ public static class LobbyPlayerBindingApplier
         IReadOnlyList<string> teamNames = catalogs.TeamNames;
         FlagReentrancyShield shield = PanelShields.GetValue(panel, static _ => new FlagReentrancyShield());
 
-        if (panel.Node.Props.ContainsKey("LobbyPlayerSlotsBuilt"))
+        if (LobbyUiState.GetPlayerSlotsBuilt(panel))
         {
             RelayoutPlayerColumns(root, panel, resources, behaviors);
             SyncUiFromState(panel, slots, mode, allowHost, aiNames, shield);
@@ -103,13 +104,10 @@ public static class LobbyPlayerBindingApplier
         var sideItems = BuildSideItems(sideEntries, resources);
         var teamItems = BuildTeamItems(teamNames);
         var colorItems = BuildColorItems(resources);
-        // Combo index 0 = "-" (unset / random assignment by the engine from free
-        // waypoints); k = start k. DX ships only 1..8 with the unset state kept
-        // out-of-band (StartingLocation=0 shown as empty); MG exposes it as an
-        // explicit "-" entry so users can return to random after picking a spot.
-        var startItems = new[] { "-" }
-            .Concat(Enumerable.Range(1, LobbyPlayerSlot.MaxSlots).Select(i => i.ToString()))
-            .ToArray();
+        // Issue #6: combo semantics (0 = "-", k = start k) centralized in
+        // StartLocationCombo — items, mapping and validity now have a single
+        // source of truth locked by unit tests.
+        string[] startItems = StartLocationCombo.Items(LobbyPlayerSlot.MaxSlots);
 
         UiNodeViewModel? firstName = null;
         UiNodeViewModel? firstSide = null;
@@ -178,7 +176,7 @@ public static class LobbyPlayerBindingApplier
 
         EnsureColumnCaptions(root, panel, layout, firstName, firstSide, firstColor, firstTeam, firstStart, resources, behaviors);
 
-        panel.Node.Props["LobbyPlayerSlotsBuilt"] = true;
+        LobbyUiState.MarkPlayerSlotsBuilt(panel);
         SyncUiFromState(panel, slots, mode, allowHost, aiNames, shield);
     }
 
@@ -475,9 +473,11 @@ public static class LobbyPlayerBindingApplier
         int side = ResolveComboValue(ddSide, current.SideIndex);
         int color = ResolveComboValue(ddColor, current.ColorIndex);
         int team = ResolveComboValue(ddTeam, current.TeamIndex);
-        // Combo layout: 0 = "-" (random), k = start k. An invalid dropdown (rebuild
-        // transient) falls back to the session value; "-" is a VALID pick → StartIndex 0.
-        int start = HasValidSelection(ddStart) ? ddStart.SelectedIndex : current.StartIndex;
+        // Start uses StartLocationCombo semantics (identity mapping, invalid →
+        // keep session value) — deliberately different from side/color/team.
+        int start = StartLocationCombo.HasValidSelection(ddStart)
+            ? StartLocationCombo.ToStartIndex(ddStart.SelectedIndex, LobbyPlayerSlot.MaxSlots)
+            : current.StartIndex;
 
         if (rowKind == LobbyPlayerRowKind.Human)
         {
@@ -768,7 +768,7 @@ public static class LobbyPlayerBindingApplier
                 if (ddStart != null)
                 {
                     ddStart.IsVisible = showOptions;
-                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled, StartIndexToCombo(state.StartIndex));
+                    ApplyOptionDropdown(ddStart, showOptions, optionsEnabled, StartLocationCombo.ToSelectedIndex(state.StartIndex, LobbyPlayerSlot.MaxSlots));
                 }
             }
         }
@@ -792,22 +792,6 @@ public static class LobbyPlayerBindingApplier
             ? ResolveSelectedIndex(dropdown, selectedIndex)
             : -1);
     }
-
-    /// <summary>
-    /// Slot.StartIndex (0 = "-"/random, 1-9 = spawn) → combo SelectedIndex
-    /// (0 = "-", k = start k). Every valid state maps to a visible entry now.
-    /// </summary>
-    private static int StartIndexToCombo(int startIndex)
-        => startIndex >= 0 && startIndex <= 9 ? startIndex : -1;
-
-    /// <summary>
-    /// True when the dropdown currently holds a real selection (>= 0, in range).
-    /// ddStart's -1 ("unset / random") is a valid state handled by the caller.
-    /// </summary>
-    private static bool HasValidSelection(UiNodeViewModel? dropdown)
-        => dropdown != null
-           && dropdown.SelectedIndex >= 0
-           && dropdown.SelectedIndex < dropdown.ComboItems.Count;
 
     /// <summary>Maps slot index to combo index; -1 clears selection (XNA unused slots).</summary>
     private static int ResolveSelectedIndex(UiNodeViewModel dropdown, int index)
@@ -909,7 +893,7 @@ public static class LobbyPlayerBindingApplier
             return layout;
 
         // Reserve a few px below the last row (mirrors the INI's own bottom breathing room).
-        int available = (int)panel.Height - layout.LocationY - 4;
+        int available = (int)panel.Height - layout.LocationY - OverlayLayoutConstants.PanelBottomBreathing;
         int rows = LobbyPlayerSlot.MaxSlots;
         int requiredPitch = DropDownHeight + layout.VerticalMargin;
         int needed = requiredPitch * (rows - 1) + DropDownHeight;
@@ -917,8 +901,8 @@ public static class LobbyPlayerBindingApplier
         if (needed <= available)
             return layout;
 
-        int maxPitch = Math.Max(DropDownHeight + 3, (available - DropDownHeight) / (rows - 1));
-        int fittedMargin = Math.Max(3, maxPitch - DropDownHeight);
+        int maxPitch = Math.Max(DropDownHeight + OverlayLayoutConstants.RowGapFloor, (available - DropDownHeight) / (rows - 1));
+        int fittedMargin = Math.Max(OverlayLayoutConstants.RowGapFloor, maxPitch - DropDownHeight);
         if (fittedMargin >= layout.VerticalMargin)
             return layout;
 

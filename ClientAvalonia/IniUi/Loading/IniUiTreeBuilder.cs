@@ -1,7 +1,8 @@
 // IniUiTreeBuilder: converts an IniDocument into a UiNodeTree, replicating DX's
 // implicit control-creation rules (R2-R8). Read ClientAvalonia/IniUi/README.md
-// before changing ShouldSkipOrphanSection / InferControlType / TryInferKnownControlType —
+// before changing ShouldSkipOrphanSection / InferControlType / TryInferKnownControlType —?
 // filters here directly affect MG/LNOD/QEC compatibility (ThreeModCompatibilityTests).
+using ClientAvalonia.IniUi;
 using ClientAvalonia.IniUi.Ast;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.IniUi.Schema;
@@ -10,7 +11,7 @@ using Rampastring.Tools;
 
 namespace ClientAvalonia.IniUi.Loading;
 
-/// <summary>AST → UiNode tree with dynamic $CC / orphan section adoption.</summary>
+/// <summary>AST 鈫?UiNode tree with dynamic $CC / orphan section adoption.</summary>
 public sealed class IniUiTreeBuilder
 {
     private readonly ControlRegistry _registry;
@@ -25,9 +26,9 @@ public sealed class IniUiTreeBuilder
     public UiNodeTree Build(IniFileAst ast, string windowSectionName)
     {
         // Control-driven model (aligned with ClientGUI/XNAWindow.cs + INItializableWindow.cs):
-        //   1. Try [windowSectionName]          — modern INI convention.
-        //   2. Try [GenericWindow]              — XNAWindow.GetINIAttributes() generic fallback.
-        //   3. Synthesize an empty root section — control-section driven INIs (legacy QEC/YS)
+        //   1. Try [windowSectionName]          —?modern INI convention.
+        //   2. Try [GenericWindow]              —?XNAWindow.GetINIAttributes() generic fallback.
+        //   3. Synthesize an empty root section —?control-section driven INIs (legacy QEC/YS)
         //      where the file only has [INISystem]/BasedOn + child control sections.
         IniDocument ini = ast.Document;
         IniSection? rootSection = ini.GetSection(windowSectionName)
@@ -53,7 +54,7 @@ public sealed class IniUiTreeBuilder
         // R4/R6 alignment: apply attributes to declared children, then adopt any remaining
         // standalone control sections, then expand $CC references to a fixed point.
         //
-        // Issue #17: the previous Attach→Adopt→Attach triple was order-sensitive — an
+        // Issue #17: the previous Attach鈫扐dopt鈫扐ttach triple was order-sensitive —?an
         // adopted panel's [$CC] reference only resolved if its target section appeared
         // earlier in the INI. Now adoption runs once and $CC expansion iterates until
         // no new nodes appear (bounded), so section order in the file no longer matters.
@@ -62,7 +63,7 @@ public sealed class IniUiTreeBuilder
         ExpandChildDeclarationsToFixedPoint(ini, root, windowSectionName, tree);
         ParsePanelExtraControls(ini, tree, windowSectionName);
 
-        // Issue #16: surface collected per-node diagnostics — window stays usable,
+        // Issue #16: surface collected per-node diagnostics —?window stays usable,
         // modders get exact section/definition/reason lines in client.log.
         if (tree.Diagnostics.Count > 0)
         {
@@ -93,7 +94,7 @@ public sealed class IniUiTreeBuilder
         }
 
         tree.Diagnostics.Add(
-            $"$CC expansion hit the {maxRounds}-round fixed-point bound — check for cyclic child references.");
+            $"$CC expansion hit the {maxRounds}-round fixed-point bound —?check for cyclic child references.");
     }
 
     private static int CountNodes(UiNode node)
@@ -106,7 +107,7 @@ public sealed class IniUiTreeBuilder
 
     private static void ApplyMainMenuDefaults(UiNode root, string windowSectionName)
     {
-        if (!windowSectionName.Equals("MainMenu", StringComparison.OrdinalIgnoreCase))
+        if (!windowSectionName.Equals(WindowKind.MainMenu, StringComparison.OrdinalIgnoreCase))
             return;
 
         if (!root.Props.ContainsKey("Background"))
@@ -188,7 +189,7 @@ public sealed class IniUiTreeBuilder
             _propertyResolver.ApplySectionAttributes(node, section, windowName);
 
             // R4 alignment: a section may declare its own children via $CC keys.
-            // DX INItializableWindow.ReadINIForControl recurses into them — we must too,
+            // DX INItializableWindow.ReadINIForControl recurses into them —?we must too,
             // otherwise panel-internal $CC children (e.g. [GameOptionsPanel] $CC_00=cmbTSFS:...)
             // never get materialized and the whole UI group silently disappears.
             ParseChildControlsFromSection(ini, section, node, windowName, tree);
@@ -217,14 +218,14 @@ public sealed class IniUiTreeBuilder
 
         // R6 alignment: sections that look like ANOTHER window definition (DX XNAWindowBase
         // treats them as separate windows). Match DX's SectionLooksLikeForeignWindow but
-        // require strong signals — a bare panel named "...Window" is NOT a foreign window
+        // require strong signals —?a bare panel named "...Window" is NOT a foreign window
         // unless it also declares window-level attributes (DrawMode/Size/$Width).
         if (SectionLooksLikeForeignWindow(name, windowName, section))
             return true;
 
         // DX XNAWindow / CampaignSelector only styles existing children (or ExtraControls/$CC).
         // It never invents controls from orphan BasedOn sections. Avalonia must adopt orphans
-        // for INI-driven lobbies (QEC SkirmishLobby → MultiplayerGameLobby), but for DX
+        // for INI-driven lobbies (QEC SkirmishLobby 鈫?MultiplayerGameLobby), but for DX
         // code-built overlays like CampaignSelector, BasedOn-only leftovers such as
         // GenericWindow.ini's [chkPersistentMode] must not become real UI.
         if (RestrictOrphansToOverlayFile(windowName)
@@ -232,7 +233,7 @@ public sealed class IniUiTreeBuilder
             && !overlaySections.Contains(name))
             return true;
 
-        // NOTE: Do NOT globally restrict adoption to overlay sections — that breaks QEC
+        // NOTE: Do NOT globally restrict adoption to overlay sections —?that breaks QEC
         // BasedOn chains where btnLaunchGame lives in MultiplayerGameLobby.ini.
         return false;
     }
@@ -258,6 +259,12 @@ public sealed class IniUiTreeBuilder
         if (!looksLikeWindow)
             return false;
 
+        // Issue #18: explicit IsShell=true on the section declares "this IS an
+        // intended shell/panel" —?adopt it; the post-processor's IsShell check
+        // then keeps it alive. IsShell=false strengthens removal.
+        if (section.KeyExists("IsShell"))
+            return !section.GetStringValue("IsShell", string.Empty).Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
+
         return section.KeyExists("DrawMode") || section.KeyExists("$Width") || section.KeyExists("Size");
     }
 
@@ -265,14 +272,14 @@ public sealed class IniUiTreeBuilder
     {
         string id = section.SectionName;
 
-        // 1) Explicit name-based matches first — these are typed subclasses in DX and must
+        // 1) Explicit name-based matches first —?these are typed subclasses in DX and must
         //    take priority over prefix heuristics (e.g. btnLaunchGame is GameLaunchButton,
         //    NOT XNAClientButton).
         string? known = TryInferKnownControlType(id, section);
         if (known != null)
             return known;
 
-        // 2) Game-option signals (SpawnIni / CustomIni / MapCode) — must be checked before
+        // 2) Game-option signals (SpawnIni / CustomIni / MapCode) —?must be checked before
         //    generic prefix matching so cmb/chk get the GameLobby* subtype.
         bool isGameOption = IsGameLobbyOptionSection(section);
 
@@ -388,7 +395,7 @@ public sealed class IniUiTreeBuilder
         if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
         {
             tree.Diagnostics.Add(
-                $"[{sourceSection}] invalid child control definition '{definition}' — expected '<id>:<type>', child skipped.");
+                $"[{sourceSection}] invalid child control definition '{definition}' —?expected '<id>:<type>', child skipped.");
             return null;
         }
 
@@ -420,7 +427,7 @@ public sealed class IniUiTreeBuilder
         catch (Exception ex)
         {
             tree.Diagnostics.Add(
-                $"[{sourceSection}] unknown control type '{typeName}' for '{childName}' ({ex.Message}) — child skipped.");
+                $"[{sourceSection}] unknown control type '{typeName}' for '{childName}' ({ex.Message}) —?child skipped.");
             return null;
         }
 
@@ -446,7 +453,7 @@ public sealed class IniUiTreeBuilder
     {
         string lower = id.ToLowerInvariant();
 
-        // 1) Exact-name matches — typed subclasses in DX (GameLobbyBase.cs code-behind or special
+        // 1) Exact-name matches —?typed subclasses in DX (GameLobbyBase.cs code-behind or special
         //    $CC declarations). These MUST take priority over prefix heuristics because they have
         //    runtime behavior beyond what the prefix suggests (e.g. btnLaunchGame is GameLaunchButton,
         //    NOT XNAClientButton).
@@ -468,7 +475,7 @@ public sealed class IniUiTreeBuilder
                 return "MapPreviewBox";
         }
 
-        // 2) Prefix-with-suffix matches — DX code creates multiple variants per lobby
+        // 2) Prefix-with-suffix matches —?DX code creates multiple variants per lobby
         //    (e.g. ChatListBox lbChatMessages_Host / lbChatMessages_Player). The _Host / _Player
         //    suffix does not change the type. Handle this here, before the generic prefix table,
         //    so that lb* variants resolve to ChatListBox, not XNAPanel.
@@ -482,7 +489,7 @@ public sealed class IniUiTreeBuilder
         if (lower.StartsWith("tbmapsearch", StringComparison.Ordinal) || lower.StartsWith("tbgamesearch", StringComparison.Ordinal))
             return "XNASuggestionTextBox";
 
-        // 3) Generic prefix table — aligned to DX $CC type table conventions. Any control whose
+        // 3) Generic prefix table —?aligned to DX $CC type table conventions. Any control whose
         //    section name starts with one of these prefixes inherits the corresponding type.
         //    This is essential for QEC/YS-style INIs that don't use $CC declarations and rely
         //    entirely on section-name conventions (lblFoo, lbBar, tbQuux, ...).

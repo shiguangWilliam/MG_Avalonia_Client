@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using ClientAvalonia.IniUi.Layout;
 using ClientAvalonia.IniUi.Models;
 using ClientAvalonia.Rendering;
@@ -27,7 +28,7 @@ internal static class OptionsWindowLayout
 
     private static readonly string[] TabTitles =
     [
-        "显示", "音频", "游戏", "CnCNet", "安全", "更新", "组件",
+        "鏄剧ず", "闊抽", "娓告垙", "CnCNet", "瀹夊叏", "鏇存柊", "缁勪欢",
     ];
 
     private static readonly Dictionary<string, string> ControlToPanel = BuildControlToPanelMap();
@@ -199,10 +200,10 @@ internal static class OptionsWindowLayout
         btn.TemplateKey = "DxButton";
         btn.Props["Text"] = text;
         btn.Props["IsVisible"] = true;
-        btn.Props["Width"] = 92.0;
-        btn.Props["Height"] = 32.0;
-        btn.Props["ZIndex"] = 1000;
-        // ThemeMG ships button.png (not 92pxbtn.png) — Classic must bind these
+        btn.Props["Width"] = OverlayLayoutConstants.FooterButtonWidth;
+        btn.Props["Height"] = OverlayLayoutConstants.FooterButtonHeight;
+        btn.Props["ZIndex"] = OverlayLayoutConstants.FooterZIndex;
+        // ThemeMG ships button.png (not 92pxbtn.png) —?Classic must bind these
         // before UiNodeViewModel.LoadImages runs.
         btn.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
         btn.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
@@ -210,34 +211,42 @@ internal static class OptionsWindowLayout
 
     private static void PositionFooterButtons(UiNodeTree tree)
     {
-        // DX OptionsWindow: Save left (12), Cancel right (Width-104) — bottom corners.
-        UiNode? btnSave = tree.Root.Children.FirstOrDefault(c =>
+        // DX OptionsWindow: Save left, Cancel right (Width-104) —?bottom corners.
+        // Geometry constants centralized in OverlayLayoutConstants (Issue #5).
+        UiNode root = tree.Root;
+        int saveLeft = OverlayLayoutOverrides.ReadInt(root, "FooterSaveLeft", OverlayLayoutConstants.FooterSaveLeft);
+        int cancelLeft = OverlayLayoutOverrides.ReadInt(
+            root, "FooterCancelLeft",
+            DialogWidth - OverlayLayoutConstants.FooterCancelRightOffset);
+        double bottom = OverlayLayoutOverrides.ReadInt(root, "FooterBottomOffset", OverlayLayoutConstants.FooterBottomOffset);
+
+        UiNode? btnSave = root.Children.FirstOrDefault(c =>
             c.Id.Equals("btnSave", StringComparison.OrdinalIgnoreCase));
         if (btnSave != null)
         {
-            btnSave.Props["CanvasLeft"] = 12.0;
-            btnSave.Props["CanvasTop"] = (double)(DialogHeight - 40);
+            btnSave.Props["CanvasLeft"] = (double)saveLeft;
+            btnSave.Props["CanvasTop"] = DialogHeight - bottom;
             btnSave.Props["IsVisible"] = true;
             btnSave.Props["Text"] = OptionsFooterChrome.ResolveSaveText();
-            btnSave.Props["Width"] = 92.0;
-            btnSave.Props["Height"] = 32.0;
-            btnSave.Props["ZIndex"] = 1000;
+            btnSave.Props["Width"] = OverlayLayoutConstants.FooterButtonWidth;
+            btnSave.Props["Height"] = OverlayLayoutConstants.FooterButtonHeight;
+            btnSave.Props["ZIndex"] = OverlayLayoutConstants.FooterZIndex;
             btnSave.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
             btnSave.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
         }
 
-        UiNode? btnCancel = tree.Root.Children.FirstOrDefault(c =>
+        UiNode? btnCancel = root.Children.FirstOrDefault(c =>
             c.Id.Equals("btnCancel", StringComparison.OrdinalIgnoreCase));
         if (btnCancel != null)
         {
             // Cancel = panel bottom-RIGHT (not left).
-            btnCancel.Props["CanvasLeft"] = (double)(DialogWidth - 104);
-            btnCancel.Props["CanvasTop"] = (double)(DialogHeight - 40);
+            btnCancel.Props["CanvasLeft"] = (double)cancelLeft;
+            btnCancel.Props["CanvasTop"] = DialogHeight - bottom;
             btnCancel.Props["IsVisible"] = true;
             btnCancel.Props["Text"] = OptionsFooterChrome.ResolveCancelText();
-            btnCancel.Props["Width"] = 92.0;
-            btnCancel.Props["Height"] = 32.0;
-            btnCancel.Props["ZIndex"] = 1000;
+            btnCancel.Props["Width"] = OverlayLayoutConstants.FooterButtonWidth;
+            btnCancel.Props["Height"] = OverlayLayoutConstants.FooterButtonHeight;
+            btnCancel.Props["ZIndex"] = OverlayLayoutConstants.FooterZIndex;
             btnCancel.Props["IdleTexture"] = OptionsFooterChrome.IdleTexture;
             btnCancel.Props["HoverTexture"] = OptionsFooterChrome.HoverTexture;
         }
@@ -405,7 +414,7 @@ internal static class OptionsWindowLayout
             ControlType = controlType,
             TemplateKey = templateKey,
             // So DxNodeTemplateSelector does not treat Options btnCancel as Campaign chrome.
-            WindowName = "OptionsWindow",
+            WindowName = WindowKind.OptionsWindow,
         };
 
     private static object ColorFromArgb(byte a, byte r, byte g, byte b)

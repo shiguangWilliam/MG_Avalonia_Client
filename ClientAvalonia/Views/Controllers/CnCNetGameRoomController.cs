@@ -1,3 +1,4 @@
+using ClientAvalonia.IniUi;
 using Avalonia.Threading;
 using ClientAvalonia.CnCNet;
 using ClientAvalonia.Domain;
@@ -23,7 +24,7 @@ internal sealed class CnCNetGameRoomController
     public void RefreshCnCNetGameRoomPlayers()
     {
         if (_ctx.ActiveRoot != null
-            && _ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+            && _ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
         {
             ApplyCnCNetGameRoomPlayers(_ctx.ActiveRoot);
         }
@@ -33,8 +34,8 @@ internal sealed class CnCNetGameRoomController
     {
         _ctx.LastAppliedGameRoomRevision = -1;
 
-        if (!_ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
-            _ctx.NavigateTo("CnCNetGameLobby");
+        if (!_ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
+            _ctx.NavigateTo(WindowKind.CnCNetGameLobby);
         else if (_ctx.ActiveRoot != null)
         {
             WireCnCNetGameOptionsBridge();
@@ -63,7 +64,7 @@ internal sealed class CnCNetGameRoomController
     public void OnCnCNetGameRoomJoinFailed(string message)
     {
         _ctx.ShowStatus(message);
-        if (_ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+        if (_ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
             _ctx.NavigateTo("CnCNetLobby");
     }
 
@@ -79,9 +80,9 @@ internal sealed class CnCNetGameRoomController
     {
         Logger.Log($"CnCNet GameStarting: gameId={startInfo.UniqueGameId}, tunnel={startInfo.Tunnel.Address}:{startInfo.Tunnel.Port}, localPort={startInfo.LocalPlayerPort}, window={_ctx.CurrentWindow}");
 
-        if (_ctx.ActiveRoot == null || !_ctx.CurrentWindow.Equals("CnCNetGameLobby", StringComparison.OrdinalIgnoreCase))
+        if (_ctx.ActiveRoot == null || !_ctx.CurrentWindow.Equals(WindowKind.CnCNetGameLobby, StringComparison.OrdinalIgnoreCase))
         {
-            Logger.Log("CnCNet GameStarting: aborted — not in CnCNetGameLobby.");
+            Logger.Log("CnCNet GameStarting: aborted —?not in CnCNetGameLobby.");
             return;
         }
 
@@ -143,9 +144,9 @@ internal sealed class CnCNetGameRoomController
     public void WireCnCNetGameOptionsBridge()
     {
         CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_ctx.CnCNet).Service;
-        // 并发治理方案 §4 阶段 5：Provider/ControlCounts 由 IRC 读线程调用（GO 广播），
-        // 而它们枚举 UI 树——必须 marshal 回 UI 线程；Provider 结果走 volatile 快照缓存，
-        // 使 IRC 线程在 UI 忙时也能同步取到最近一次状态而不阻塞过久。
+        // 骞跺彂娌荤悊鏂规 搂4 闃舵 5锛歅rovider/ControlCounts 鐢?IRC 璇荤嚎绋嬭皟鐢紙GO 骞挎挱锛夛紝
+        // 鑰屽畠浠灇涓?UI 鏍戔€斺€斿繀椤?marshal 鍥?UI 绾跨▼锛汸rovider 缁撴灉璧?volatile 蹇収缂撳瓨锛?
+        // 浣?IRC 绾跨▼鍦?UI 蹇欐椂涔熻兘鍚屾鍙栧埌鏈€杩戜竴娆＄姸鎬佽€屼笉闃诲杩囦箙銆?
         session.GameOptionsControlCounts = MarshalToUi(
             () => CnCNetGameOptionsUiBridge.GetControlCounts(_ctx.ActiveRoot));
         session.GameOptionsProvider = MarshalProviderSnapshot;
@@ -175,7 +176,7 @@ internal sealed class CnCNetGameRoomController
         }
 
         // Already on UI thread once: reuse cached snapshot (races cost one stale broadcast,
-        // next option change re-syncs — preferable to re-posting while UI is busy).
+        // next option change re-syncs —?preferable to re-posting while UI is busy).
         _lastProviderSnapshot ??= Dispatcher.UIThread.InvokeAsync(CollectCnCNetGameOptions)
             .GetAwaiter().GetResult();
         return _lastProviderSnapshot;
@@ -341,7 +342,7 @@ internal sealed class CnCNetGameRoomController
 
         if (session == null)
         {
-            Logger.Log("ApplyCnCNetGameRoomPlayersCore: ActiveGameRoom null — skipping.");
+            Logger.Log("ApplyCnCNetGameRoomPlayersCore: ActiveGameRoom null —?skipping.");
             return;
         }
 
@@ -390,8 +391,8 @@ internal sealed class CnCNetGameRoomController
         if (updateStatus)
         {
             _ctx.ShowStatus(room.IsHost
-                ? $"Hosting \"{room.RoomName}\" — waiting for players."
-                : $"Joined \"{room.RoomName}\" — waiting for host.");
+                ? $"Hosting \"{room.RoomName}\" —?waiting for players."
+                : $"Joined \"{room.RoomName}\" —?waiting for host.");
         }
     }
 
