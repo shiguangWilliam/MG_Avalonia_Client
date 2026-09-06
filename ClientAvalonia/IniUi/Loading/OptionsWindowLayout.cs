@@ -26,9 +26,17 @@ internal static class OptionsWindowLayout
         "ComponentsPanel",
     ];
 
-    private static readonly string[] TabTitles =
+    // Issue #20: tab captions are localized via INI:Controls:OptionsWindow:{buttonId}:Text
+    // (Global fallback key exists too). English defaults; zh-CN/ru live in Translation.ini.
+    private static string[] TabTitles =>
     [
-        "鏄剧ず", "闊抽", "娓告垙", "CnCNet", "瀹夊叏", "鏇存柊", "缁勪欢",
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabDisplay", "Display"),
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabAudio", "Audio"),
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabGame", "Game"),
+        "CnCNet",
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabSecurity", "Security"),
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabUpdater", "Updater"),
+        IniUiL10n.Text(WindowKind.OptionsWindow, "btnTabComponents", "Components"),
     ];
 
     private static readonly Dictionary<string, string> ControlToPanel = BuildControlToPanelMap();

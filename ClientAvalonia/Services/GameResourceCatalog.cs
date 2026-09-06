@@ -47,6 +47,7 @@ public sealed class GameResourceCatalog
             if (IsLoaded && Maps.Count > 0)
                 return;
 
+
             GameModes = MapCatalogLoader.LoadGameModes()
                 .Where(m => !m.MultiplayerOnly)
                 .ToList();
@@ -353,5 +354,22 @@ public sealed class GameResourceCatalog
     {
         EnsureLoaded();
         return index >= 0 && index < Missions.Count ? Missions[index] : null;
+    }
+
+    /// <summary>
+    /// Issue #28 test hook: drops cached catalogs so a later EnsureLoaded()
+    /// re-reads from the (test-local) game root. Serial test classes that
+    /// swap ProgramConstants roots must call this in Dispose, otherwise the
+    /// previous root's maps leak into every later test.
+    /// </summary>
+    internal void Reset()
+    {
+        lock (_lock)
+        {
+            IsLoaded = false;
+            GameModes = [];
+            Maps = [];
+            Missions = [];
+        }
     }
 }

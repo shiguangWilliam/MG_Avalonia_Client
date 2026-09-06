@@ -220,11 +220,14 @@ public static class GameDataBindingApplier
 
         string statusText = state.ConnectionStatus;
         if (state.OnlinePlayerCount >= 0 && !statusText.Contains("Connecting", StringComparison.OrdinalIgnoreCase))
-            statusText = $"在线 {state.OnlinePlayerCount} · {statusText}";
+            statusText = string.Format(
+                "Online {0} - {1}".L10N("Client:Main:OnlinePlayers"),
+                state.OnlinePlayerCount,
+                statusText);
 
         UiNodeViewModel? lblChannel = FindVm(root, "lblCurrentChannel");
         if (lblChannel != null)
-            lblChannel.SetDisplayText("当前频道：");
+            lblChannel.SetDisplayText("Current channel:".L10N("Client:Main:CurrentChannel"));
 
         UiNodeViewModel? ddChannel = FindVm(root, "ddCurrentChannel");
         if (ddChannel != null)
@@ -250,7 +253,7 @@ public static class GameDataBindingApplier
             }
         }
 
-        FindVm(root, "lblColor")?.SetDisplayText("聊天文字颜色：");
+        FindVm(root, "lblColor")?.SetDisplayText("Chat text color:".L10N("Client:Main:ChatTextColor"));
 
         WireChatColorDropdown(root, state);
         WireChatMessages(root, state);
@@ -468,7 +471,7 @@ public static class GameDataBindingApplier
                     ? null
                     : (m.Enabled ? enabledBrush : disabledBrush),
                 ToolTip = !m.IsHeader && !m.Enabled
-                    ? "未启用 — 无法开始此战役".L10N("Client:Main:MissionLockedToolTip")
+                    ? "Not enabled - this campaign cannot be started".L10N("Client:Main:MissionLockedToolTip")
                     : null,
                 GlobeLatitude = m.GlobeLatitude,
                 GlobeLongitude = m.GlobeLongitude,
@@ -509,7 +512,7 @@ public static class GameDataBindingApplier
         if (launch != null)
         {
             if (string.IsNullOrWhiteSpace(launch.Text))
-                launch.SetDisplayText("开始".L10N("Client:Main:ButtonLaunch"));
+                launch.SetDisplayText("Launch".L10N("Client:Main:ButtonLaunch"));
             launch.SetForeground(launchFg);
             SetFontSizeIfMissing(launch, 14);
             launch.RefreshLayout();
@@ -519,15 +522,15 @@ public static class GameDataBindingApplier
         if (cancel != null)
         {
             if (string.IsNullOrWhiteSpace(cancel.Text))
-                cancel.SetDisplayText("返回".L10N("Client:Main:ButtonCancel"));
+                cancel.SetDisplayText("Back".L10N("Client:Main:ButtonCancel"));
             cancel.SetForeground(cancelFg);
             SetFontSizeIfMissing(cancel, 14);
             cancel.RefreshLayout();
         }
 
-        ApplySideTabLabel(root, "GDI", "同盟国联军", "Client:Main:SideAllied");
-        ApplySideTabLabel(root, "Nod", "苏维埃联盟", "Client:Main:SideSoviet");
-        ApplySideTabLabel(root, "ThirdSide", "阿克维尔", "Client:Main:SideAckville");
+        ApplySideTabLabel(root, "GDI", "Allies", "Client:Main:SideAllied");
+        ApplySideTabLabel(root, "Nod", "Soviets", "Client:Main:SideSoviet");
+        ApplySideTabLabel(root, "ThirdSide", "Ackville", "Client:Main:SideAckville");
         // Issue #22: sides beyond the classic trio (e.g. a mod's 4th side) get
         // their tab labels from CampaignSideTabCatalog — same GameOptions.ini
         // Sides= list the skirmish dropdown uses.
@@ -642,7 +645,7 @@ public static class GameDataBindingApplier
                 session.LastSelectableCampaignIndex = index;
 
             string? lockedHint = mission != null && !mission.IsHeader && !mission.Enabled
-                ? "该战役尚未开放或未启用，无法开始。".L10N("Client:Main:MissionLockedHint")
+                ? "This campaign is not available or enabled yet.".L10N("Client:Main:MissionLockedHint")
                 : null;
 
             MissionBriefingParsed briefing = MissionBriefingParser.Parse(mission?.Description);
@@ -726,20 +729,21 @@ public static class GameDataBindingApplier
         if (!DxThemeManager.IsTactical)
             return;
 
-        SetButtonLabel(root, "btnNewCampaign", "战役", "Client:Main:ButtonNewCampaign");
-        SetButtonLabel(root, "btnLoadGame", "载入游戏", "Client:Main:ButtonLoadGame");
+        SetButtonLabel(root, "btnNewCampaign", "Campaign", "Client:Main:ButtonNewCampaign");
+        SetButtonLabel(root, "btnLoadGame", "Load Game", "Client:Main:ButtonLoadGame");
         SetButtonLabel(root, "btnCnCNet", "CnCNet", "Client:Main:CnCNetLobby");
-        SetButtonLabel(root, "btnLan", "局域网", "Client:Main:LANGameLobby");
-        SetButtonLabel(root, "btnSkirmish", "遭遇战", "Client:Main:FilterSkirmish");
-        SetButtonLabel(root, "btnOptions", "选项", "Client:Main:OptionsF12");
-        SetButtonLabel(root, "btnExit", "退出", "Client:ClientGClient:ButtonQuitGame");
-        SetButtonLabel(root, "btnStatistics", "统计", "Client:Main:Statistics");
-        SetButtonLabel(root, "btnCredits", "制作人员", "Client:Main:Credits");
-        // Translation.ini maps MapEditor to "地图截屏器" (legacy DX label); keep a
-        // clearer nav label for the Tactical console.
-        SetButtonLabel(root, "btnMapEditor", "地图编辑器", "Client:Main:TacticalMapEditor");
+        SetButtonLabel(root, "btnLan", "LAN", "Client:Main:LANGameLobby");
+        SetButtonLabel(root, "btnSkirmish", "Skirmish", "Client:Main:FilterSkirmish");
+        SetButtonLabel(root, "btnOptions", "Options", "Client:Main:OptionsF12");
+        SetButtonLabel(root, "btnExit", "Exit", "Client:ClientGClient:ButtonQuitGame");
+        SetButtonLabel(root, "btnStatistics", "Statistics", "Client:Main:Statistics");
+        SetButtonLabel(root, "btnCredits", "Credits", "Client:Main:Credits");
+        // Translation.ini maps MapEditor to a legacy DX label; keep a clearer
+        // nav label for the Tactical console via a dedicated key.
+        SetButtonLabel(root, "btnMapEditor", "Map Editor", "Client:Main:TacticalMapEditor");
 
-        // Compact footer chips — strip the longer "统计数据" form.
+        // Compact footer chips — strip the longer localized "statistics" form
+        // (zh-CN Statistics value ends with a shared suffix).
         UiNodeViewModel? stats = FindVm(root, "btnStatistics");
         if (stats != null && stats.Text is { } statsText && statsText.StartsWith("统计", StringComparison.Ordinal))
         {
@@ -769,7 +773,7 @@ public static class GameDataBindingApplier
             if (label.EndsWith("模式", StringComparison.Ordinal))
                 label = label[..^2].Trim();
             if (label.Equals("退出游戏", StringComparison.Ordinal))
-                label = "退出";
+                label = "Exit".L10N("Client:Main:ButtonExit");
         }
 
         btn.SetDisplayText(label);

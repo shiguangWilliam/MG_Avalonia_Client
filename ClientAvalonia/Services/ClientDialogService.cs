@@ -1,6 +1,7 @@
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using ClientCore.Extensions;
 
 namespace ClientAvalonia.Services;
 
@@ -127,7 +128,7 @@ public static class ClientDialogService
         };
 
         bool block = false;
-        var dismiss = new Button { Content = "知道了", MinWidth = 90, IsDefault = true };
+        var dismiss = new Button { Content = "Got it".L10N("Client:Main:ButtonGotIt"), MinWidth = 90, IsDefault = true };
         dismiss.Click += (_, _) => window.Close();
 
         var buttons = new StackPanel
@@ -140,7 +141,7 @@ public static class ClientDialogService
 
         if (offerBlock)
         {
-            var blockBtn = new Button { Content = "加入屏蔽名单", MinWidth = 120 };
+            var blockBtn = new Button { Content = "Add to blocklist".L10N("Client:Main:AddToBlocklist"), MinWidth = 120 };
             blockBtn.Click += (_, _) =>
             {
                 block = true;
@@ -191,13 +192,13 @@ public static class ClientDialogService
         };
 
         bool confirmed = false;
-        var yes = new Button { Content = "确定", MinWidth = 90, IsDefault = true };
+        var yes = new Button { Content = "OK".L10N("Client:Main:ButtonYes"), MinWidth = 90, IsDefault = true };
         yes.Click += (_, _) =>
         {
             confirmed = true;
             window.Close();
         };
-        var no = new Button { Content = "取消", MinWidth = 90, IsCancel = true };
+        var no = new Button { Content = "Cancel".L10N("Client:Main:ButtonCancel"), MinWidth = 90, IsCancel = true };
         no.Click += (_, _) => window.Close();
 
         window.Content = new StackPanel
@@ -242,7 +243,7 @@ public static class ClientDialogService
     {
         var window = new Window
         {
-            Title = "WAF 策略预览与调整",
+            Title = "WAF Strategies".L10N("Client:Main:WafStrategiesTitle"),
             Width = 720,
             Height = 520,
             WindowStartupLocation = owner != null ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
@@ -260,7 +261,12 @@ public static class ClientDialogService
         var modeBox = new ComboBox
         {
             Width = 160,
-            ItemsSource = new[] { "关闭", "Warning", "Drop" },
+            ItemsSource = new[]
+            {
+                "Off".L10N("Client:Main:WafModeOff"),
+                "Warning",
+                "Drop",
+            },
             IsEnabled = false,
         };
 
@@ -273,15 +279,20 @@ public static class ClientDialogService
             int idx = list.SelectedIndex;
             if (idx < 0 || idx >= rows.Count)
             {
-                idText.Text = "策略 ID：—";
-                contentText.Text = "策略内容：—";
+                idText.Text = "Strategy ID: -".L10N("Client:Main:WafStrategyIdNone");
+                contentText.Text = "Strategy content: -".L10N("Client:Main:WafStrategyContentNone");
                 modeBox.IsEnabled = false;
                 return;
             }
 
             ClientAvalonia.CnCNet.Waf.WafStrategyRow row = rows[idx];
-            idText.Text = $"策略 ID：{row.Id}（{row.Kind}）";
-            contentText.Text = $"策略内容：{row.Content}";
+            idText.Text = string.Format(
+                "Strategy ID: {0} ({1})".L10N("Client:Main:WafStrategyIdFmt"),
+                row.Id,
+                row.Kind);
+            contentText.Text = string.Format(
+                "Strategy content: {0}".L10N("Client:Main:WafStrategyContentFmt"),
+                row.Content);
             modeBox.IsEnabled = true;
             syncing = true;
             modeBox.SelectedIndex = row.Mode switch
@@ -328,7 +339,7 @@ public static class ClientDialogService
             syncing = false;
         };
 
-        var close = new Button { Content = "关闭", MinWidth = 90, IsDefault = true };
+        var close = new Button { Content = "Close".L10N("Client:Main:ButtonClose"), MinWidth = 90, IsDefault = true };
         close.Click += (_, _) => window.Close();
 
         window.Content = new StackPanel
@@ -339,7 +350,7 @@ public static class ClientDialogService
             {
                 new TextBlock
                 {
-                    Text = "选择策略后可调整启用状态：关闭（不检测）/ Warning（提示）/ Drop（静默丢弃）。改动即时生效并写入 Client/WafStrategyPrefs.json。",
+                    Text = "Select a strategy to adjust its mode: Off (disabled) / Warning (prompt) / Drop (silent discard). Changes apply immediately and are written to Client/WafStrategyPrefs.json.".L10N("Client:Main:WafStrategiesHint"),
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                     MaxWidth = 680,
                 },
@@ -352,7 +363,11 @@ public static class ClientDialogService
                     Spacing = 10,
                     Children =
                     {
-                        new TextBlock { Text = "启用状态：", VerticalAlignment = VerticalAlignment.Center },
+                        new TextBlock
+                        {
+                            Text = "Mode: ".L10N("Client:Main:WafEnableStatus"),
+                            VerticalAlignment = VerticalAlignment.Center,
+                        },
                         modeBox,
                     },
                 },
@@ -385,7 +400,7 @@ public static class ClientDialogService
     {
         string mode = row.Mode switch
         {
-            ClientAvalonia.CnCNet.Waf.WafStrategyMode.Off => "关闭",
+            ClientAvalonia.CnCNet.Waf.WafStrategyMode.Off => "Off".L10N("Client:Main:WafModeOff"),
             ClientAvalonia.CnCNet.Waf.WafStrategyMode.Drop => "Drop",
             _ => "Warning",
         };

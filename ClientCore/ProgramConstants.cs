@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Reflection;
+using System.Threading;
 using Rampastring.Tools;
 using ClientCore.Extensions;
 
@@ -107,10 +108,26 @@ namespace ClientCore
 
         public static int LOG_LEVEL = 1;
 
-        public static bool IsInGame { get; set; }
+        // Issue #28: process-wide game lifecycle flags. Backing fields are
+        // Interlocked-managed so cross-thread writes (launch worker, IRC
+        // threads, UI) are always visible — a torn/stale read here previously
+        // let the keep-alive or WAF paths act on the previous state.
+        private static int _isInGame;
+
+        public static bool IsInGame
+        {
+            get => Volatile.Read(ref _isInGame) == 1;
+            set => Volatile.Write(ref _isInGame, value ? 1 : 0);
+        }
 
         /// <summary>True while spawn prep / Syringe startup is in progress (before game process is running).</summary>
-        public static bool IsLaunchingGame { get; set; }
+        private static int _isLaunchingGame;
+
+        public static bool IsLaunchingGame
+        {
+            get => Volatile.Read(ref _isLaunchingGame) == 1;
+            set => Volatile.Write(ref _isLaunchingGame, value ? 1 : 0);
+        }
 
         public static string GetResourcePath()
         {

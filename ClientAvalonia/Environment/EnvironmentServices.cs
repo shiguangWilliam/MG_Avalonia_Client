@@ -25,6 +25,21 @@ public static class EnvironmentServices
     }
 
     /// <summary>
+    /// Issue #27b: register a SINGLETON — the instance is materialized once at
+    /// registration time and every <see cref="Resolve{T}"/> returns that same
+    /// instance. Eliminates the resolve-then-catch-fallback dual path: the
+    /// caller decides the fallback ONCE here, not on every resolve.
+    /// </summary>
+    public static void RegisterSingleton<T>(T instance) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        lock (_sync)
+        {
+            _factories[typeof(T)] = () => instance;
+        }
+    }
+
+    /// <summary>
     /// 解析接口 T 的实例。
     /// 未注册则抛 InvalidOperationException（明确提示是否忘记 Register）。
     /// </summary>

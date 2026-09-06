@@ -13,6 +13,7 @@ using ClientAvalonia.Controls;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Domain.Resources;
 using ClientCore;
+using ClientCore.Extensions;
 using ClientCore.Settings;
 using ClientAvalonia.Animation;
 using ClientAvalonia.CnCNet;
@@ -192,7 +193,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             await ClientDialogService.ShowErrorAsync(
                 this,
-                "文件校验失败",
+                "File verification failed".L10N("Client:Main:FileVerifyFailed"),
                 integrityResult.Message).ConfigureAwait(true);
             return;
         }
@@ -418,19 +419,21 @@ public partial class MainWindow : Window, IUiNavigationHost
         string? visualStyleError = null;
         if (IsOptionsOverlayOpen && _ctx.OverlayRoot != null)
         {
-            visualStyleError = TryRun("显示设置", () => DisplayOptionsApplier.Save(_ctx.OverlayRoot));
-            visualStyleError ??= TryRun("音频设置", () => AudioOptionsApplier.Save(_ctx.OverlayRoot));
-            visualStyleError ??= TryRun("更新设置", () => UpdaterOptionsApplier.Save(_ctx.OverlayRoot));
+            visualStyleError = TryRun("Display settings".L10N("Client:Main:StepDisplayOptions"), () => DisplayOptionsApplier.Save(_ctx.OverlayRoot));
+            visualStyleError ??= TryRun("Audio settings".L10N("Client:Main:StepAudioOptions"), () => AudioOptionsApplier.Save(_ctx.OverlayRoot));
+            visualStyleError ??= TryRun("Updater settings".L10N("Client:Main:StepUpdaterOptions"), () => UpdaterOptionsApplier.Save(_ctx.OverlayRoot));
         }
 
         _ctx.Environment = ClientEnvironment.Discover(_ctx.Environment.GameRoot);
 
         if (visualStyleError is not null || DisplayOptionsApplier.LastSaveError is not null)
         {
-            string rendererError = DisplayOptionsApplier.LastSaveError ?? "渲染器配置异常";
+            string rendererError = DisplayOptionsApplier.LastSaveError
+                ?? "Renderer configuration error".L10N("Client:Main:RendererConfigError");
+            string prefix = "Some settings failed to save: ".L10N("Client:Main:PartialSaveFailed");
             ShowStatus(visualStyleError is not null
-                ? $"部分设置保存失败：{visualStyleError}（{rendererError}）"
-                : $"部分设置保存失败：{rendererError}");
+                ? $"{prefix}{visualStyleError} ({rendererError})"
+                : $"{prefix}{rendererError}");
         }
         else
         {
@@ -470,7 +473,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     {
         if (targetStyle == Themes.DxThemeManager.StyleTactical)
         {
-            PART_ThemeLoading.SetStatus("正在装载战术界面模块…");
+            PART_ThemeLoading.SetStatus("Loading tactical UI module...".L10N("Client:Main:LoadingTacticalUI"));
             PART_ThemeLoadingHost.IsVisible = true;
 
             Task.Run(() =>
@@ -539,7 +542,7 @@ public partial class MainWindow : Window, IUiNavigationHost
                 Logger.Log($"VisualStyle revert failed: {revertEx}");
             }
 
-            ShowStatus($"视觉风格切换失败，已回退 Classic：{applyError.Message}");
+            ShowStatus("Visual style switch failed, reverted to Classic: ".L10N("Client:Main:StyleSwitchReverted") + applyError.Message);
         }
         else
         {
@@ -577,7 +580,7 @@ public partial class MainWindow : Window, IUiNavigationHost
         catch (Exception ex)
         {
             Logger.Log($"VisualStyle reload of '{CurrentWindow}' failed: {ex}");
-            ShowStatus($"视觉风格已切换，但当前界面刷新失败：{ex.Message}");
+            ShowStatus("Style switched, but the current window failed to refresh: ".L10N("Client:Main:StyleReloadFailed") + ex.Message);
         }
     }
 
@@ -737,7 +740,9 @@ public partial class MainWindow : Window, IUiNavigationHost
         var lobby = _ctx.CnCNet.LobbyState;
         string status = lobby.ConnectionStatus;
         if (string.IsNullOrWhiteSpace(status))
-            status = _ctx.CnCNet.Connection?.IsConnected == true ? "已连接" : "Offline";
+            status = _ctx.CnCNet.Connection?.IsConnected == true
+                ? "Connected".L10N("Client:Main:StatusConnectedShort")
+                : "Offline";
 
         PART_TopBarHost.Bar.UpdateState(
             status,
@@ -795,7 +800,7 @@ public partial class MainWindow : Window, IUiNavigationHost
     {
         if (_ctx.CnCNet.Connection?.IsConnected != true)
         {
-            ShowStatus("私信需要先连接 CnCNet。");
+            ShowStatus("Private messaging requires a CnCNet connection.".L10N("Client:Main:PmNeedsConnection"));
             return;
         }
 
@@ -858,7 +863,7 @@ public partial class MainWindow : Window, IUiNavigationHost
             },
             peerSelected: nick => _ctx.CnCNet.SetViewingPrivateMessagePeer(nick));
 
-        _overlay.ShowRawHostOverlay(panel, 600, 520, "私信 (F4)");
+        _overlay.ShowRawHostOverlay(panel, 600, 520, "Private Messages (F4)".L10N("Client:Main:PrivateMessagesTitle"));
         _ctx.FloatingOverlayWindow = "PrivateMessagingWindow";
         panel.Refresh(focusNick ?? _ctx.CnCNet.LastPrivateMessagePartner);
         if (!string.IsNullOrWhiteSpace(panel.SelectedNick))
@@ -891,7 +896,10 @@ public partial class MainWindow : Window, IUiNavigationHost
             return;
 
         string clip = preview.Length > 60 ? preview[..60] + "…" : preview;
-        ShowStatus($"私信 · {peer}: {clip}");
+        ShowStatus(string.Format(
+            "PM - {0}: {1}".L10N("Client:Main:PmStatusPreview"),
+            peer,
+            clip));
     }
 
     private async void OnCnCNetWafAlert(ClientAvalonia.CnCNet.Waf.WafAlert alert)
@@ -900,27 +908,32 @@ public partial class MainWindow : Window, IUiNavigationHost
         {
             string surface = alert.Event.Surface switch
             {
-                ClientAvalonia.CnCNet.Waf.WafSurface.PrivateMessage => "私信",
-                ClientAvalonia.CnCNet.Waf.WafSurface.LobbyChat => "大厅聊天",
-                ClientAvalonia.CnCNet.Waf.WafSurface.GameRoomChat => "房间聊天",
-                ClientAvalonia.CnCNet.Waf.WafSurface.ListingText => "房间列表文案",
-                _ => "联机协议",
+                ClientAvalonia.CnCNet.Waf.WafSurface.PrivateMessage
+                    => "Private message".L10N("Client:Main:WafSurfacePrivateMessage"),
+                ClientAvalonia.CnCNet.Waf.WafSurface.LobbyChat
+                    => "Lobby chat".L10N("Client:Main:WafSurfaceLobbyChat"),
+                ClientAvalonia.CnCNet.Waf.WafSurface.GameRoomChat
+                    => "Game room chat".L10N("Client:Main:WafSurfaceGameRoomChat"),
+                ClientAvalonia.CnCNet.Waf.WafSurface.ListingText
+                    => "Game listing text".L10N("Client:Main:WafSurfaceListingText"),
+                _ => "Network protocol".L10N("Client:Main:WafSurfaceProtocol"),
             };
 
             string actor = string.IsNullOrWhiteSpace(alert.Event.SenderNick)
-                ? (alert.Event.Game?.ChannelName ?? "未知来源")
+                ? (alert.Event.Game?.ChannelName ?? "unknown source".L10N("Client:Main:WafUnknownSource"))
                 : alert.Event.SenderNick;
 
             string message =
-                $"来源：{actor}\n" +
-                $"场景：{surface}\n" +
-                $"等级：{alert.Decision.Severity} (score={alert.Decision.Score})\n" +
-                $"原因：{alert.Decision.Summary}";
+                "Source: ".L10N("Client:Main:WafSourceLabel") + actor + "\n" +
+                "Surface: ".L10N("Client:Main:WafSurfaceLabel") + surface + "\n" +
+                "Level: ".L10N("Client:Main:WafLevelLabel") +
+                $"{alert.Decision.Severity} (score={alert.Decision.Score})\n" +
+                "Reason: ".L10N("Client:Main:WafReasonLabel") + alert.Decision.Summary;
 
             bool offerBlock = alert.Decision.SuggestedBlockKeys.Count > 0;
             bool addBlock = await ClientDialogService.ShowWafAlertAsync(
                 this,
-                "CnCNet 入网防护",
+                "CnCNet Ingress Protection".L10N("Client:Main:WafAlertTitle"),
                 message,
                 offerBlock).ConfigureAwait(true);
 
@@ -933,7 +946,7 @@ public partial class MainWindow : Window, IUiNavigationHost
 
             adapter.Service.IngressWaf.BlockFromAlert(alert.Event, alert.Decision, note);
 
-            ShowStatus("已写入 WAF 屏蔽名单（含同型消息体）");
+            ShowStatus("Added to the WAF blocklist (including similar message bodies)".L10N("Client:Main:WafBlocklistSaved"));
             if (IsOptionsOverlayOpen && _ctx.OverlayRoot != null)
                 WafBlocklistApplier.Apply(_ctx.OverlayRoot, adapter.Service.IngressWaf);
         }

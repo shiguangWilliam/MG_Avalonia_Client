@@ -27,8 +27,21 @@ public static class GameProcessLauncher
     public static event Action? GameProcessStarted;
     public static event Action? GameProcessExited;
 
-    public static bool UseQres { get; set; }
-    public static bool SingleCoreAffinity { get; set; }
+    // Issue #28: the OWNERS of this process-level state are GameLaunchService
+    // instances; these statics remain as forwarding shims so existing call
+    // sites (DirectDrawWrapperManager, diagnostics, display options) keep
+    // compiling. Values are written by the renderer manager before launch.
+    public static bool UseQres
+    {
+        get => GameLaunchProcessState.UseQres;
+        set => GameLaunchProcessState.UseQres = value;
+    }
+
+    public static bool SingleCoreAffinity
+    {
+        get => GameLaunchProcessState.SingleCoreAffinity;
+        set => GameLaunchProcessState.SingleCoreAffinity = value;
+    }
 
     public static bool TryStart(
         ClientEnvironment environment,

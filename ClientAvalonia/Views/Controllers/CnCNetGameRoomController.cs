@@ -144,9 +144,9 @@ internal sealed class CnCNetGameRoomController
     public void WireCnCNetGameOptionsBridge()
     {
         CnCNetSessionService session = ((CnCNetSessionServiceAdapter)_ctx.CnCNet).Service;
-        // 骞跺彂娌荤悊鏂规 搂4 闃舵 5锛歅rovider/ControlCounts 鐢?IRC 璇荤嚎绋嬭皟鐢紙GO 骞挎挱锛夛紝
-        // 鑰屽畠浠灇涓?UI 鏍戔€斺€斿繀椤?marshal 鍥?UI 绾跨▼锛汸rovider 缁撴灉璧?volatile 蹇収缂撳瓨锛?
-        // 浣?IRC 绾跨▼鍦?UI 蹇欐椂涔熻兘鍚屾鍙栧埌鏈€杩戜竴娆＄姸鎬佽€屼笉闃诲杩囦箙銆?
+        // Issue #38 stage 5: Provider/ControlCounts are invoked on the IRC reader thread (GO broadcast),
+        // but they enumerate the UI tree -- they MUST be marshalled back to the UI thread; provider results are cached as a volatile snapshot
+        // so the IRC thread can always read the latest state synchronously without blocking for long.
         session.GameOptionsControlCounts = MarshalToUi(
             () => CnCNetGameOptionsUiBridge.GetControlCounts(_ctx.ActiveRoot));
         session.GameOptionsProvider = MarshalProviderSnapshot;

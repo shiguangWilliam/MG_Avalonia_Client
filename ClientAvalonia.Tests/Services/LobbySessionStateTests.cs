@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using ClientAvalonia.Domain;
 using ClientAvalonia.Services;
 using FluentAssertions;
@@ -7,7 +7,7 @@ using Xunit;
 namespace ClientAvalonia.Tests.Services;
 
 /// <summary>
-/// LobbySessionState is pure UI selection state 鈥?favorite-filter index, visible maps/missions,
+/// LobbySessionState is pure UI selection state —favorite-filter index, visible maps/missions,
 /// selection lookup by list index. Tests verify the const + bounds-clamp contract that the
 /// map/mission UI relies on.
 /// </summary>

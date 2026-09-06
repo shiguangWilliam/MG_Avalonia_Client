@@ -156,63 +156,47 @@ internal sealed class MainWindowContext
 
     public static string ResolvePlayerName()
     {
-        try
-        {
-            return EnvironmentServices.Resolve<IGameEnvironment>().PlayerName;
-        }
-        catch (InvalidOperationException)
-        {
-            return AppState.Environment.PlayerName;
-        }
+        // Issue #27b: resolved from the registry every call (registry entries
+        // are pinned singletons after the first decision), so a test Reset()
+        // + re-register is honored — no static Lazy caching across resets.
+        IGameEnvironment? env = EnvironmentServices.TryResolve<IGameEnvironment>();
+        return env?.PlayerName ?? AppState.Environment.PlayerName;
     }
 
     public static IIniActionCatalog? ResolveIniActionCatalogStatic()
-    {
-        try
-        {
-            return EnvironmentServices.Resolve<IIniActionCatalog>();
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-    }
+        => EnvironmentServices.TryResolve<IIniActionCatalog>();
 
     public static IMultiplayerColorCatalog ResolveColorCatalog()
     {
-        try
-        {
-            return EnvironmentServices.Resolve<IMultiplayerColorCatalog>();
-        }
-        catch (InvalidOperationException)
-        {
-            return new MultiplayerColorCatalogAdapter();
-        }
+        // Issue #27b: fallback decided ONCE by pinning a singleton into the
+        // registry; subsequent calls resolve the pinned instance directly.
+        IMultiplayerColorCatalog? resolved = EnvironmentServices.TryResolve<IMultiplayerColorCatalog>();
+        if (resolved != null)
+            return resolved;
+
+        var fallback = new MultiplayerColorCatalogAdapter();
+        EnvironmentServices.RegisterSingleton(fallback);
+        return fallback;
     }
 
     public static ICnCNetSession ResolveCnCNetSession()
     {
-        try
-        {
-            return EnvironmentServices.Resolve<ICnCNetSession>();
-        }
-        catch (InvalidOperationException)
-        {
-            return new CnCNetSessionServiceAdapter();
-        }
+        ICnCNetSession? resolved = EnvironmentServices.TryResolve<ICnCNetSession>();
+        if (resolved != null)
+            return resolved;
+
+        var fallback = new CnCNetSessionServiceAdapter();
+        EnvironmentServices.RegisterSingleton(fallback);
+        return fallback;
     }
 
     public static GameResourceCatalog ResolveGameResourceCatalog()
     {
-        try
-        {
-            var resolved = EnvironmentServices.Resolve<IResourceCatalog>();
-            if (resolved is GameResourceCatalogAdapter adapter)
-                return adapter.InternalCatalog;
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        // Issue #27b: single fallback path — TryResolve (never throws), then
+        // the process-wide singleton. No dual try/catch decision per call.
+        var resolved = EnvironmentServices.TryResolve<IResourceCatalog>();
+        if (resolved is GameResourceCatalogAdapter adapter)
+            return adapter.InternalCatalog;
 
         return GameResourceCatalog.Instance;
     }

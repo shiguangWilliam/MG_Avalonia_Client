@@ -105,6 +105,13 @@ internal sealed class TempGameRoot : IDisposable
             return;
         _disposed = true;
 
+        // Issue #28: EnsureLoaded() may have cached this root's maps/modes in
+        // the process-wide GameResourceCatalog singleton; drop the cache so a
+        // later test with a different root re-reads from disk instead of
+        // observing our deleted tree.
+        try { GameResourceCatalog.Instance.Reset(); }
+        catch { /* best-effort cleanup */ }
+
         try { Directory.Delete(RootPath, recursive: true); }
         catch { /* best-effort cleanup */ }
     }

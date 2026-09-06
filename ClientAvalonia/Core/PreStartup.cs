@@ -122,23 +122,27 @@ public static class PreStartup
     /// <summary>Registers L1 domain interfaces for Resolve&lt;T&gt; injection.</summary>
     private static void RegisterEnvironmentServices()
     {
-        EnvironmentServices.Register<IGameEnvironment>(() => new ProgramConstantsGameEnvironment());
-        EnvironmentServices.Register<IGameConfiguration>(() => new ClientConfigurationAdapter());
-        EnvironmentServices.Register<ICnCNetSession>(() => new CnCNetSessionServiceAdapter());
-        EnvironmentServices.Register<IResourceCatalog>(
-            () => new GameResourceCatalogAdapter(GameResourceCatalog.Instance));
-        EnvironmentServices.Register<IResourceManifest>(() => new NoOpResourceManifest());
-        EnvironmentServices.Register<IUpdater>(() => new UpdaterAdapter());
-        EnvironmentServices.Register<IMultiplayerColorCatalog>(() => new MultiplayerColorCatalogAdapter());
-        EnvironmentServices.Register<ILobbyCatalogService>(() => LobbyCatalogService.Instance);
-        EnvironmentServices.Register<ISkirmishSettingsService>(() => new SkirmishSettingsService());
+        // Issue #27b: startup registers SINGLETONS — instances are materialized
+        // once here and every later Resolve returns the same object. (Previously
+        // each Resolve re-ran the factory; consumers paired it with try/catch
+        // fallbacks, creating two competing construction paths.)
+        EnvironmentServices.RegisterSingleton<IGameEnvironment>(new ProgramConstantsGameEnvironment());
+        EnvironmentServices.RegisterSingleton<IGameConfiguration>(new ClientConfigurationAdapter());
+        EnvironmentServices.RegisterSingleton<ICnCNetSession>(new CnCNetSessionServiceAdapter());
+        EnvironmentServices.RegisterSingleton<IResourceCatalog>(
+            new GameResourceCatalogAdapter(GameResourceCatalog.Instance));
+        EnvironmentServices.RegisterSingleton<IResourceManifest>(new NoOpResourceManifest());
+        EnvironmentServices.RegisterSingleton<IUpdater>(new UpdaterAdapter());
+        EnvironmentServices.RegisterSingleton<IMultiplayerColorCatalog>(new MultiplayerColorCatalogAdapter());
+        EnvironmentServices.RegisterSingleton<ILobbyCatalogService>(LobbyCatalogService.Instance);
+        EnvironmentServices.RegisterSingleton<ISkirmishSettingsService>(new SkirmishSettingsService());
 
         // INI 动作目录：注册内置动作一次（启动期完成），后续窗口导航时由
         // IniBehaviorApplier 派发。Mod 可在 INI 写 $LeftClickAction=ExitApplication
         // 把任意按钮绑到这些动作上。
         var iniCatalog = new IniActionCatalog();
         BuiltinIniActions.RegisterAll(iniCatalog);
-        EnvironmentServices.Register<IIniActionCatalog>(() => iniCatalog);
+        EnvironmentServices.RegisterSingleton<IIniActionCatalog>(iniCatalog);
     }
 
     /// <summary>Backward-compatible entry used by CLI validators.</summary>
